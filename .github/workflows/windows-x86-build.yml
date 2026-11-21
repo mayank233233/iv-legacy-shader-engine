@@ -48,6 +48,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests\check_shader_analyzer.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools\audit_sm3_to_sm2.py --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Compile Shader Model 2.0 shaders
         shell: pwsh
