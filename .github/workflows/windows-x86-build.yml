@@ -42,6 +42,8 @@ jobs:
         run: |
           python tests\check_sources.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests\check_asi_sources.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Compile Shader Model 2.0 shaders
         shell: pwsh
@@ -55,6 +57,23 @@ jobs:
           cmd.exe /d /c build\build_probe.bat
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Build GTA IV x86 telemetry ASI
+        shell: pwsh
+        run: |
+          cmd.exe /d /c build\build_asi.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path build\bin\IVLegacyASI.asi)) { throw 'GTA IV telemetry ASI was not built.' }
+          $asi = Get-Item build\bin\IVLegacyASI.asi
+          if ($asi.Length -lt 4096) { throw "ASI output is unexpectedly small: $($asi.Length) bytes." }
+          $bytes = [System.IO.File]::ReadAllBytes($asi.FullName)
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw 'ASI output does not have a valid PE DOS header.' }
+          if ($bytes.Length -lt 0x40) { throw 'ASI output is truncated.' }
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          if ($peOffset -lt 0x40 -or $peOffset + 6 -gt $bytes.Length) { throw 'ASI PE header offset is invalid.' }
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x14c) { throw ("Expected x86 PE machine 0x14c; found 0x{0:x}" -f $machine) }
+          Write-Host "Verified x86 PE ASI: $($asi.Length) bytes"
+
       - name: Stage build outputs with repository-relative paths
         shell: pwsh
         run: |
@@ -64,8 +83,10 @@ jobs:
           Copy-Item build\out\*.pso artifact\build\out\
           Copy-Item build\out\*.asm artifact\build\out\
           Copy-Item build\bin\D3D9ShaderProbe.exe artifact\build\bin\
+          Copy-Item build\bin\IVLegacyASI.asi artifact\
           Copy-Item build\run_probe.bat artifact\build\
           if (-not (Test-Path artifact\build\bin\D3D9ShaderProbe.exe)) { throw 'Staged x86 probe executable is missing.' }
+          if (-not (Test-Path artifact\IVLegacyASI.asi)) { throw 'Staged GTA IV telemetry ASI is missing.' }
           $bytecode = @(Get-ChildItem artifact\build\out -File | Where-Object { $_.Extension -in @('.vso', '.pso') })
           if ($bytecode.Count -ne 6) { throw "Expected 6 shader bytecode files in staged artifact; found $($bytecode.Count)." }
 
