@@ -1316,6 +1316,7 @@ namespace
         WORD version;
         WORD stage; // 0 = vertex shader, 1 = pixel shader
         DWORD frameIndex;
+        DWORD shaderObject;
         DWORD sequence;
         DWORD startRegister;
         DWORD vectorCount;
@@ -1353,10 +1354,15 @@ namespace
         const DWORD dataByteCount = vectorCount * 4 * sizeof(float);
         ShaderConstantCaptureHeader header = {};
         memcpy(header.magic, "IVCF", 4);
-        header.version = 1;
+        header.version = 2;
         header.stage = pixelStage ? 1 : 0;
         header.frameIndex = static_cast<DWORD>(
             InterlockedCompareExchange(&g_presentFrameIndex, 0, 0));
+        PVOID activeShader = pixelStage
+            ? InterlockedCompareExchangePointer(&g_currentPixelShader, NULL, NULL)
+            : InterlockedCompareExchangePointer(&g_currentVertexShader, NULL, NULL);
+        header.shaderObject = static_cast<DWORD>(
+            reinterpret_cast<ULONG_PTR>(activeShader));
         header.sequence = static_cast<DWORD>(sequence);
         header.startRegister = startRegister;
         header.vectorCount = vectorCount;
@@ -1422,10 +1428,11 @@ namespace
         }
 
         Log(
-            "SHADER_CONSTANT_CAPTURED stage=%s sequence=%ld frame=%lu start=%u vectors=%u bytes=%lu",
+            "SHADER_CONSTANT_CAPTURED stage=%s sequence=%ld frame=%lu shader_object=%p start=%u vectors=%u bytes=%lu",
             pixelStage ? "PS" : "VS",
             sequence,
             static_cast<unsigned long>(header.frameIndex),
+            activeShader,
             startRegister,
             vectorCount,
             static_cast<unsigned long>(dataByteCount));
