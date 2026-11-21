@@ -465,6 +465,36 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceCreateVertexBuffer(
+        IDirect3DDevice9*,
+        UINT,
+        DWORD,
+        DWORD,
+        D3DPOOL,
+        IDirect3DVertexBuffer9** buffer,
+        HANDLE*)
+    {
+        if (!buffer)
+            return D3DERR_INVALIDCALL;
+        *buffer = reinterpret_cast<IDirect3DVertexBuffer9*>(&g_fakeVertexBuffer);
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceCreateIndexBuffer(
+        IDirect3DDevice9*,
+        UINT,
+        DWORD,
+        D3DFORMAT,
+        D3DPOOL,
+        IDirect3DIndexBuffer9** buffer,
+        HANDLE*)
+    {
+        if (!buffer)
+            return D3DERR_INVALIDCALL;
+        *buffer = reinterpret_cast<IDirect3DIndexBuffer9*>(&g_fakeIndexBuffer);
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeDeviceCreateTexture(
         IDirect3DDevice9*,
         UINT,
@@ -613,6 +643,8 @@ namespace
         g_fakeDeviceVTable[100] = reinterpret_cast<void*>(FakeDeviceSetStreamSource);
         g_fakeDeviceVTable[102] = reinterpret_cast<void*>(FakeDeviceSetStreamSourceFreq);
         g_fakeDeviceVTable[104] = reinterpret_cast<void*>(FakeDeviceSetIndices);
+        g_fakeDeviceVTable[26] = reinterpret_cast<void*>(FakeDeviceCreateVertexBuffer);
+        g_fakeDeviceVTable[27] = reinterpret_cast<void*>(FakeDeviceCreateIndexBuffer);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
 
         g_fakeShaderVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
@@ -1007,14 +1039,16 @@ int main()
     const HRESULT createVertexDeclarationHr = device->CreateVertexDeclaration(
         declarationElements, &vertexDeclaration);
     const HRESULT setVertexDeclarationHr = device->SetVertexDeclaration(vertexDeclaration);
+    IDirect3DVertexBuffer9* fakeVertexBuffer = NULL;
+    IDirect3DIndexBuffer9* fakeIndexBuffer = NULL;
+    const HRESULT createVertexBufferHr = device->CreateVertexBuffer(
+        4096, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, &fakeVertexBuffer, NULL);
+    const HRESULT createIndexBufferHr = device->CreateIndexBuffer(
+        1024, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, &fakeIndexBuffer, NULL);
     const HRESULT setStreamSourceHr = device->SetStreamSource(
-        0,
-        reinterpret_cast<IDirect3DVertexBuffer9*>(&g_fakeVertexBuffer),
-        0,
-        20);
+        0, fakeVertexBuffer, 0, 20);
     const HRESULT setStreamSourceFreqHr = device->SetStreamSourceFreq(0, 1);
-    const HRESULT setIndicesHr = device->SetIndices(
-        reinterpret_cast<IDirect3DIndexBuffer9*>(&g_fakeIndexBuffer));
+    const HRESULT setIndicesHr = device->SetIndices(fakeIndexBuffer);
 
     const HRESULT drawPrimitiveHr = device->DrawPrimitive(
         D3DPT_TRIANGLELIST, 0, 1);
@@ -1048,6 +1082,10 @@ int main()
         fakeTexture->Release();
     if (vertexDeclaration)
         vertexDeclaration->Release();
+    if (fakeVertexBuffer)
+        fakeVertexBuffer->Release();
+    if (fakeIndexBuffer)
+        fakeIndexBuffer->Release();
     device->Release();
     d3d->Release();
 
@@ -1110,6 +1148,8 @@ int main()
         return Fail("D3D9 render-state or texture-stage snapshot hooks were not observed");
     if (!HasText("VERTEX_DECL_OBJECT_CREATED") ||
         !HasText("VERTEX_DECL_ELEMENT") ||
+        !HasText("BUFFER_OBJECT_CREATED type=VB") ||
+        !HasText("BUFFER_OBJECT_CREATED type=IB") ||
         !HasText("SET_VERTEX_DECLARATION") ||
         !HasText("SET_FVF") ||
         !HasText("SET_STREAM_SOURCE") ||
@@ -1117,7 +1157,7 @@ int main()
         !HasText("SET_INDICES") ||
         !HasText("vertex_decl=") ||
         !HasText("streams="))
-        return Fail("D3D9 vertex declaration/FVF/stream/index telemetry was not observed");
+        return Fail("D3D9 vertex declaration, buffer, FVF, stream or index telemetry was not observed");
     if (!HasText("SHADER_CONSTANT_CAPTURE_ENABLED") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=VS kind=F") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=PS kind=F") ||
