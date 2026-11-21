@@ -299,6 +299,9 @@ def audit_and_lower_ps3(
             continue
 
         source_register = destination_number
+        if source_register > 9:
+            reasons.append(f"ps_3_0 input v{source_register} exceeds the ten-input-register limit")
+            continue
         usage = declaration & 0xF
         usage_index = (declaration >> 16) & 0xF
 
@@ -371,6 +374,8 @@ def audit_and_lower_ps3(
 
         if opcode == OP_DCL:
             continue
+        if opcode == 0:  # nop has no operands
+            continue
         if opcode == OP_DEF:
             destination = ins.operands[0]
             if reg_type(destination) != REG_CONST or reg_number(destination) > 31:
@@ -392,7 +397,9 @@ def audit_and_lower_ps3(
                 reasons.append(
                     f"texkill at DWORD {ins.offset} requires a temp or texcoord source"
                 )
-            _check_source(source, ins, reasons, input_remap)
+            if _dest_mask(source) != 0xF or _dest_modifier(source) != DEST_MOD_NONE or _dest_shift(source) != 0:
+                reasons.append(f"texkill at DWORD {ins.offset} requires a full, unmodified coordinate operand")
+            _check_source(source, ins, reasons, input_remap, texture_coordinate=True)
             continue
 
         if opcode == OP_TEX:
@@ -424,7 +431,7 @@ def audit_and_lower_ps3(
                 depth = coordinate_depth + 1
             if previous_destination_write:
                 depth = max(depth, 1)
-            if depth > dependent_read_limit:
+            if dependent_read_limit > 0 and depth > dependent_read_limit:
                 reasons.append(
                     f"texture instruction at DWORD {ins.offset} reaches dependent-read order {depth}; "
                     f"configured ps_2_0 limit is {dependent_read_limit}"
@@ -568,6 +575,11 @@ def _check_source(
     swizzle = _source_swizzle(token)
 
     if kind == REG_INPUT:
+        if number > 9:
+            reasons.append(
+                f"{OPCODE_NAMES.get(ins.opcode, 'instruction')} at DWORD {ins.offset} "
+                f"references v{number}; ps_3_0 has v0-v9"
+            )
         if number not in input_remap:
             reasons.append(
                 f"{OPCODE_NAMES.get(ins.opcode, 'instruction')} at DWORD {ins.offset} "
@@ -576,6 +588,11 @@ def _check_source(
         mapped = input_remap.get(number)
         if mapped is not None and mapped[0] == REG_TEXTURE and mapped[1] > 7:
             reasons.append(f"mapped texture input t{mapped[1]} is outside ps_2_0 range")
+        if texture_coordinate and mapped is not None and mapped[0] not in (REG_TEMP, REG_TEXTURE):
+            reasons.append(
+                f"texture coordinate input v{number} maps to a ps_2_0 COLOR register, "
+                "but texture sampling requires t# or r#"
+            )
     elif kind == REG_TEMP:
         if number > 11:
             reasons.append(
@@ -755,16 +772,16 @@ def _self_test() -> None:
     lowered_words = list(struct.unpack("<" + "I" * (len(lowered) // 4), lowered))
     assert lowered_words[0] == PS2_VERSION
     # The first DCL input destination is now a t0 register (type 3).
-    first_dcl_dest = lowered_words[4]
+    first_dcl_dest = lowered_words[3]
     assert reg_type(first_dcl_dest) == REG_TEXTURE and reg_number(first_dcl_dest) == 0
     # The second DCL input destination is now v0 (type 1).
-    second_dcl_dest = lowered_words[7]
+    second_dcl_dest = lowered_words[6]
     assert reg_type(second_dcl_dest) == REG_INPUT and reg_number(second_dcl_dest) == 0
     # The source reference to original v0 is remapped to t0.
-    mov_source = lowered_words[13]
+    mov_source = lowered_words[12]
     assert reg_type(mov_source) == REG_TEXTURE and reg_number(mov_source) == 0
     # The later source reference to original v1 is remapped to v0.
-    add_source = lowered_words[22]
+    add_source = lowered_words[20]
     assert reg_type(add_source) == REG_INPUT and reg_number(add_source) == 0
 
     def build(*items: int) -> bytes:
