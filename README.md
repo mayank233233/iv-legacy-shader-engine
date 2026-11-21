@@ -1,8 +1,8 @@
-# IV Legacy Shader Engine — Prototype 0.5-alpha
+# IV Legacy Shader Engine — Prototype 0.5.1-alpha
 
 **Target:** 32-bit Windows, Direct3D 9, Shader Model `vs_2_0` / `ps_2_0`.
 
-Prototype 0.5-alpha combines the v0.3 standalone D3D9 probe with an experimental Win32/x86 telemetry ASI, shader inventory tools and a conservative offline pixel-shader downlevel audit. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This is still a development foundation, not a playable compatibility fix: it does not inject SM2 replacements into GTA IV, spoof capabilities, or establish that the game can launch on Intel GMA 3100.
+Prototype 0.5.1-alpha combines the v0.3 standalone D3D9 probe with an experimental Win32/x86 telemetry ASI, shader inventory tools and a conservative offline pixel-shader downlevel audit. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This is still a development foundation, not a playable compatibility fix: it does not inject SM2 replacements into GTA IV, spoof capabilities, or establish that the game can launch on Intel GMA 3100.
 
 ## Project contents
 
@@ -21,6 +21,8 @@ Prototype 0.5-alpha combines the v0.3 standalone D3D9 probe with an experimental
 | `build/build_asi.bat` | x86 MSVC ASI/DLL build |
 | `tools/analyze_d3d9_shaders.py` | Offline D3D9 SM2/SM3 token-stream inventory for compiled or captured shaders |
 | `tools/audit_sm3_to_sm2.py` | Conservative offline audit/lowering candidate generator for a restricted `ps_3_0` pixel-shader subset; unsupported shaders are rejected, not guessed |
+| `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls in `IVLegacy.log` |
+| `tools/inspect_gtaiv_executable.py` | Read-only PE32 import/version inspector for the original `GTAIV.exe`; reports normal and delay imports without modifying the file |
 | `build/run_probe.bat` | Launches the probe after checking its six bytecode files |
 | `.github/workflows/windows-x86-build.yml` | Windows x86 compile/build CI; does not run the GPU probe |
 
@@ -34,7 +36,9 @@ All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs
 - Added shader-object creation records that pair the COM shader-object address with its profile, byte count and bytecode hash. This lets diagnostic draw records be correlated with the shader bytecode that created the object.
 - Draw logging is disabled by default. Enable `CaptureDrawTelemetry=1` in `IVLegacy.ini`; `CaptureDrawMaxCalls` defaults to 4096 and is clamped to 1–65536.
 - Added `tools/audit_sm3_to_sm2.py`, a deliberately restrictive offline pixel-shader downlevel audit. It can emit structurally eligible candidates only for a narrow, declared PS3-to-PS2 subset. It does not translate vertex shaders, arbitrary PS3 features, or unknown interfaces.
-- CI now checks the audit tool's synthetic lowering/rejection cases, checks the ASI export, binds fake shader objects, exercises all four draw hooks and inventories captured shader bytecode.
+- Added frame tags to draw records (successful Present count) and `tools/analyze_asi_log.py` to map logged shader-object addresses to profile/hash records, then aggregate draws by shader pair, method, primitive type and frame.
+- Added `tools/inspect_gtaiv_executable.py`, a read-only PE32 inspector for normal/delay imports and Windows file version. It can verify whether a local original `GTAIV.exe` has a direct D3D9 factory import; no game executable is bundled or modified.
+- CI now tests the log correlator, PE import inspector, audit tool, ASI export, fake shader objects, all four draw hooks and captured bytecode inventory.
 
 **The audit tool is not a general SM3 translator.** A passing structural audit is only a candidate for further validation; it does not prove visual equivalence or driver acceptance. The two captures in CI are synthetic SM2 test shaders. The audit reports zero eligible conversions for them: the pixel shader is already SM2 and the vertex shader is outside the pixel-only tool's scope.
 
@@ -122,13 +126,13 @@ The adapter report separates fixed-function multitexture capability from the rep
 
 ## GitHub Actions verification
 
-**Prototype 0.5-alpha Windows x86 CI passed** in [run #81](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44885590397), commit `6e495c21bd026247160e90374a593f1c8851fa26`. All workflow steps passed: six SM2 shaders compiled and inventoried; the x86 probe and ASI built; the synthetic host loaded the ASI, resolved and called `InitializeASI`, exercised the D3D9 hooks including all four draw methods, and captured two synthetic SM2 shaders; both captures were parsed and the downlevel audit report was generated.
+**Prototype 0.5.1-alpha Windows x86 CI passed** in [run #93](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44886129718), commit `272d9d44ac83e08007510bc60beafdb50b39680f`. All workflow steps passed: six SM2 shaders compiled and inventoried; the x86 probe and ASI built; the synthetic host loaded the ASI, resolved and called `InitializeASI`, exercised the D3D9 hooks including all four draw methods and the Present-frame tag, and captured two synthetic SM2 shaders; both captures were parsed and the downlevel audit report was generated. The log-correlator, PE32 import-inspector, shader-parser and downlevel-audit self-tests also passed.
 
-[Download the Windows x86 artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44885590397/artifacts/14700061775) — artifact ID `14700061775`, 20 files, SHA-256 `4dbc2376cf9a5bf04375e69d386f201a8b55f50552eeee4464ec78fc8634fd9c`.
+[Download the Windows x86 artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44886129718/artifacts/14700107779) — artifact ID `14700107779`, 20 files, SHA-256 `967a6c752d4c88d6aaf0760850ada91a6da3c5a36ede1468e41f89ecb6b1e6c2`.
 
-The two captures are fake-COM CI test shaders, **not shaders captured from GTA IV**. The CI host supplies a synthetic adapter ID `VEN_8086&DEV_29C2` and synthetic SM2 caps; these values are test inputs, not a measurement of the physical Intel GMA 3100. The captured downlevel audit reports zero eligible conversions: one shader is already `ps_2_0`, and the other is `vs_2_0`, outside the pixel-only downlevel tool's scope.
+The two captures are fake-COM CI test shaders, **not shaders captured from GTA IV**. The CI host supplies a synthetic adapter ID `VEN_8086&DEV_29C2` and synthetic SM2 caps; these values are test inputs, not a measurement of the physical Intel GMA 3100. The captured downlevel audit reports zero eligible conversions: one shader is already `ps_2_0`, and the vertex shader is outside the pixel-only downlevel tool's scope.
 
-CI does not test the original game executable, the actual GMA 3100 driver, an in-game ASI loader session, rendering correctness, gameplay, or FPS.
+CI does not inspect the actual original game executable, test the GMA 3100 driver, load the ASI in the game, validate rendering or gameplay, or measure FPS.
 
 ## Known limitations
 
@@ -146,6 +150,12 @@ CI does not test the original game executable, the actual GMA 3100 driver, an in
 The full platform and rendering analysis is in [docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md](docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md). It covers the GMA 3100 SM2.0 limits, GTA IV shader evidence, the GTA IV and Minecraft optimization references, the proposed game-loaded ASI/D3D9 architecture, shader fallback strategy, risks and release gates.
 
 The x86 ASI telemetry foundation passed the synthetic Windows x86 CI test. It validates the host as GTAIV.exe file version 1.0.0.0, exports and invokes InitializeASI in the synthetic test, installs a main-executable IAT hook for Direct3DCreate9, and observes adapter identity, caps, format checks, device creation, render/depth surfaces, Reset, Present failures and shader creation/binding. Opt-in draw telemetry links draw records to active shader-object addresses; bytecode capture and draw telemetry are disabled by default. The plugin does not spoof shader capabilities and does not yet inject shader replacements into GTA IV.
+
+For an eventual check of the **actual original executable**, the read-only inspector can be run against a local copy:
+```bat
+python tools\inspect_gtaiv_executable.py "C:\path\to\GTAIV.exe" --json GTAIV_import_report.json
+```
+It reports PE architecture, file version, normal/delay imports and whether a direct `d3d9.dll!Direct3DCreate9` import exists. This has **not** been run on the user's executable yet. After draw telemetry is enabled in a diagnostic run, `tools\analyze_asi_log.py IVLegacy.log --json draw_report.json` groups recorded submissions by shader-object hashes.
 
 Next steps:
 
