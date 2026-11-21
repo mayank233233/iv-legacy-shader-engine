@@ -57,7 +57,13 @@ namespace
         kDeviceCreateVolumeTextureSlot = 24,
         kDeviceCreateCubeTextureSlot = 25,
         kDeviceSetRenderStateSlot = 57,
-        kDeviceSetTextureStageStateSlot = 67
+        kDeviceSetTextureStageStateSlot = 67,
+        kDeviceCreateVertexDeclarationSlot = 86,
+        kDeviceSetVertexDeclarationSlot = 87,
+        kDeviceSetFVFSlot = 89,
+        kDeviceSetStreamSourceSlot = 100,
+        kDeviceSetStreamSourceFreqSlot = 102,
+        kDeviceSetIndicesSlot = 104
     };
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
@@ -91,6 +97,14 @@ namespace
     volatile LONG g_renderStateKnown[256] = {};
     volatile LONG g_textureStageStates[16][64] = {};
     volatile LONG g_textureStageStateKnown[16][64] = {};
+    PVOID volatile g_currentVertexDeclaration = NULL;
+    PVOID volatile g_currentIndexBuffer = NULL;
+    volatile LONG g_currentFVF = 0;
+    PVOID volatile g_streamBuffers[16] = {};
+    volatile LONG g_streamOffsets[16] = {};
+    volatile LONG g_streamStrides[16] = {};
+    volatile LONG g_streamFrequencies[16] = {};
+    volatile LONG g_streamKnown[16] = {};
     BOOL g_drawTelemetryEnabled = FALSE;
     DWORD g_drawTelemetryMaxCalls = 4096;
     BOOL g_captureShaderConstants = FALSE;
@@ -179,6 +193,17 @@ namespace
         IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
     typedef HRESULT (WINAPI* DeviceSetTextureStageStateFn)(
         IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD);
+    typedef HRESULT (WINAPI* DeviceCreateVertexDeclarationFn)(
+        IDirect3DDevice9*, const D3DVERTEXELEMENT9*, IDirect3DVertexDeclaration9**);
+    typedef HRESULT (WINAPI* DeviceSetVertexDeclarationFn)(
+        IDirect3DDevice9*, IDirect3DVertexDeclaration9*);
+    typedef HRESULT (WINAPI* DeviceSetFVFFn)(IDirect3DDevice9*, DWORD);
+    typedef HRESULT (WINAPI* DeviceSetStreamSourceFn)(
+        IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9*, UINT, UINT);
+    typedef HRESULT (WINAPI* DeviceSetStreamSourceFreqFn)(
+        IDirect3DDevice9*, UINT, UINT);
+    typedef HRESULT (WINAPI* DeviceSetIndicesFn)(
+        IDirect3DDevice9*, IDirect3DIndexBuffer9*);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
     D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
@@ -215,6 +240,12 @@ namespace
     DeviceCreateCubeTextureFn g_realDeviceCreateCubeTexture = NULL;
     DeviceSetRenderStateFn g_realDeviceSetRenderState = NULL;
     DeviceSetTextureStageStateFn g_realDeviceSetTextureStageState = NULL;
+    DeviceCreateVertexDeclarationFn g_realDeviceCreateVertexDeclaration = NULL;
+    DeviceSetVertexDeclarationFn g_realDeviceSetVertexDeclaration = NULL;
+    DeviceSetFVFFn g_realDeviceSetFVF = NULL;
+    DeviceSetStreamSourceFn g_realDeviceSetStreamSource = NULL;
+    DeviceSetStreamSourceFreqFn g_realDeviceSetStreamSourceFreq = NULL;
+    DeviceSetIndicesFn g_realDeviceSetIndices = NULL;
 
     void Log(const char* format, ...)
     {
