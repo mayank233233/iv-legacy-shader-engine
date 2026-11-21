@@ -92,6 +92,12 @@ int main()
 
     D3DCAPS9 caps = {};
     const HRESULT capsHr = d3d->GetDeviceCaps(0, D3DDEVTYPE_HAL, &caps);
+    const HRESULT formatHr = d3d->CheckDeviceFormat(
+        0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
+        D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
+    const HRESULT depthHr = d3d->CheckDepthStencilMatch(
+        0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
+        D3DFMT_A8R8G8B8, D3DFMT_D24S8);
 
     d3d->Release();
 
@@ -101,6 +107,10 @@ int main()
         return Fail("IDirect3D9::GetAdapterIdentifier hook was not observed");
     if (!HasEither("D3D9_GET_DEVICE_CAPS adapter=", "D3D9_GET_DEVICE_CAPS_FAILED"))
         return Fail("IDirect3D9::GetDeviceCaps hook was not observed");
+    if (!HasEither("D3D9_CHECK_DEVICE_FORMAT", "D3D9_CHECK_DEVICE_FORMAT"))
+        return Fail("IDirect3D9::CheckDeviceFormat hook was not observed");
+    if (!HasEither("D3D9_CHECK_DEPTH_MATCH", "D3D9_CHECK_DEPTH_MATCH"))
+        return Fail("IDirect3D9::CheckDepthStencilMatch hook was not observed");
 
     char buffer[32768] = {};
     ReadLog(buffer, sizeof(buffer));
@@ -109,6 +119,10 @@ int main()
         static_cast<unsigned long>(identifierHr));
     std::printf("GetDeviceCaps HRESULT: 0x%08lX\n",
         static_cast<unsigned long>(capsHr));
+    std::printf("CheckDeviceFormat HRESULT: 0x%08lX\n",
+        static_cast<unsigned long>(formatHr));
+    std::printf("CheckDepthStencilMatch HRESULT: 0x%08lX\n",
+        static_cast<unsigned long>(depthHr));
     std::printf("%s\n", buffer);
 
     // The ASI remains loaded until process exit because its IAT/vtable hooks
