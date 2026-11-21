@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import struct
 import sys
 from pathlib import Path
@@ -114,7 +115,44 @@ def parse_capture(path: Path) -> dict[str, Any]:
         ],
     }
 
-def analyze_directory(directory: Path) -> dict[str, Any]:
+def parse_shader_log(path: Path | None) -> dict[tuple[str, str], dict[str, Any]]:
+    if path is None:
+        return {}
+    records: dict[tuple[str, str], dict[str, Any]] = {}
+    fallback_map: dict[str, dict[str, str]] = {}
+    token = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=([^\\s]+)")
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        fields = {key: value.strip(",;") for key, value in token.findall(line)}
+        if "SHADER_OBJECT_CREATED " in line:
+            stage = fields.get("stage", "").upper()
+            address = fields.get("object", "").lower().removeprefix("0x").lstrip("0") or "0"
+            bytecode_hash = fields.get("hash", "").lower()
+            if stage in {"VS", "PS"} and address and bytecode_hash:
+                records[(stage, address)] = {
+                    "profile": fields.get("profile", "unknown").lower(),
+                    "bytecode_hash": bytecode_hash,
+                    "byte_count": int(fields.get("bytes", "0"), 0),
+                }
+                if stage == "PS":
+                    fallback_map.pop(address, None)
+        elif "SHADER_FALLBACK_OBJECT_MAP " in line:
+            address = fields.get("object", "").lower().removeprefix("0x").lstrip("0") or "0"
+            source_hash = fields.get("source_hash", "").lower()
+            target_hash = fields.get("target_hash", "").lower()
+            if address and source_hash and target_hash:
+                fallback_map[address] = {
+                    "source_hash": source_hash,
+                    "target_hash": target_hash,
+                }
+    for address, mapping in fallback_map.items():
+        ps_record = records.get(("PS", address))
+        if ps_record and ps_record["bytecode_hash"] == mapping["target_hash"]:
+            ps_record["source_shader_hash"] = mapping["source_hash"]
+    return records
+
+
+def analyze_directory(directory: Path, log_path: Path | None = None) -> dict[str, Any]:
+    shader_log = parse_shader_log(log_path)
     files = sorted(directory.glob("*.bin"))
     if len(files) > MAX_FILES:
         raise ConstantCaptureError(
@@ -125,8 +163,18 @@ def analyze_directory(directory: Path) -> dict[str, Any]:
     errors: list[dict[str, str]] = []
     for path in files:
         try:
-            records.append(parse_capture(path))
-        except (OSError, ConstantCaptureError, struct.error) as exc:
+            record = parse_capture(path)
+            if record["shader_object"]:
+                address = record["shader_object"].lower().lstrip("0") or "0"
+                shader = shader_log.get((record["stage"], address))
+                if shader:
+                    record["shader_profile"] = shader["profile"]
+                    record["shader_bytecode_hash"] = shader["bytecode_hash"]
+                    record["shader_bytecode_size"] = shader["byte_count"]
+                    if "source_shader_hash" in shader:
+                        record["source_shader_hash"] = shader["source_shader_hash"]
+            records.append(record)
+        except (OSError, ConstantCaptureError, struct.error, ValueError) as exc:
             errors.append({"file": path.name, "error": str(exc)})
 
     stage_counts = {
@@ -136,6 +184,10 @@ def analyze_directory(directory: Path) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "input_directory": str(directory),
+        "input_log": str(log_path) if log_path else None,
+        "shader_objects_resolved": sum(
+            1 for record in records if "shader_bytecode_hash" in record
+        ),
         "record_count": len(records),
         "invalid_record_count": len(errors),
         "stage_counts": stage_counts,
@@ -154,6 +206,7 @@ def analyze_directory(directory: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_directory", type=Path)
+    parser.add_argument("--log", type=Path, help="Optional IVLegacy.log for shader-object/hash resolution")
     parser.add_argument("--json", type=Path, help="Optional JSON report output")
     args = parser.parse_args()
 
@@ -165,7 +218,10 @@ def main() -> int:
         return 2
 
     try:
-        report = analyze_directory(args.input_directory)
+        if args.log is not None and not args.log.is_file():
+            print(f"ERROR: log file not found: {args.log}", file=sys.stderr)
+            return 2
+        report = analyze_directory(args.input_directory, args.log)
     except (OSError, ConstantCaptureError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -184,6 +240,10 @@ def main() -> int:
     print(
         f"Stages: VS={report['stage_counts']['VS']} "
         f"PS={report['stage_counts']['PS']}"
+    )
+    print(
+        f"Shader-object hashes resolved: {report['shader_objects_resolved']}/"
+        f"{report['record_count']}"
     )
     for record in report["records"]:
         print(
