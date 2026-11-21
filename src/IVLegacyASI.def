@@ -1,3 +1,0 @@
-LIBRARY IVLegacyASI
-EXPORTS
-    InitializeASI=_InitializeASI
