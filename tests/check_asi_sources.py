@@ -18,7 +18,7 @@ build = BUILD.read_text(encoding="utf-8")
 
 required_source_markers = (
     "GTAIV.exe",
-    "version_is_not_1.0.0.0",
+    "TARGET_VERSION_MISMATCH",
     "Direct3DCreate9",
     "D3D9_GET_DEVICE_CAPS",
     "D3D9_CREATE_DEVICE_REQUEST",
