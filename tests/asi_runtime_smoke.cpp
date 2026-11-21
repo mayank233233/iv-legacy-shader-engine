@@ -74,6 +74,10 @@ int main()
         L"General", L"EnableD3D9Telemetry", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"StrictGTAIV100", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"CaptureShaderBytecode", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"CaptureMaxFiles", L"16", iniPath);
     DeleteFileW(L"build\\bin\\IVLegacy.log");
 
     HMODULE asi = LoadLibraryW(L"build\\bin\\IVLegacyASI.asi");
@@ -271,6 +275,8 @@ int main()
 
     if (SUCCEEDED(createDeviceHr))
     {
+        if (!HasText("SHADER_CAPTURE_ENABLED"))
+            return Fail("Opt-in shader capture did not initialize");
         if (!HasText("D3D9_DEVICE_HOOK_INSTALLED"))
             return Fail("IDirect3DDevice9 vtable hook was not installed");
         if (!HasText("DEVICE_GET_DEVICE_CAPS"))
@@ -279,6 +285,33 @@ int main()
             return Fail("Device render/depth surface creation hooks were not observed");
         if (!HasText("CREATE_VERTEX_SHADER") || !HasText("CREATE_PIXEL_SHADER"))
             return Fail("Device shader creation hooks were not observed");
+    }
+
+    if (SUCCEEDED(createDeviceHr) &&
+        SUCCEEDED(vertexShaderHr) && SUCCEEDED(pixelShaderHr))
+    {
+        if (!HasText("SHADER_CAPTURED stage=VS") ||
+            !HasText("SHADER_CAPTURED stage=PS"))
+        {
+            return Fail("SM2 vertex/pixel shader bytecode capture did not complete");
+        }
+
+        WIN32_FIND_DATAW findData = {};
+        HANDLE find = FindFirstFileW(
+            L"build\\bin\\IVLegacyCaptures\\*.bin", &findData);
+        if (find == INVALID_HANDLE_VALUE)
+            return Fail("Shader capture output directory contains no bytecode files");
+
+        unsigned captureFiles = 0;
+        do
+        {
+            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                ++captureFiles;
+        } while (FindNextFileW(find, &findData));
+        FindClose(find);
+
+        if (captureFiles < 2 || captureFiles > 16)
+            return Fail("Shader capture file count is outside the configured bound");
     }
 
     char buffer[32768] = {};
