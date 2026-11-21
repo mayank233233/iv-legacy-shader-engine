@@ -347,8 +347,8 @@ namespace
         g_fakeDeviceVTable[29] = reinterpret_cast<void*>(FakeDeviceCreateDepthStencilSurface);
         g_fakeDeviceVTable[37] = reinterpret_cast<void*>(FakeDeviceSetRenderTarget);
         g_fakeDeviceVTable[39] = reinterpret_cast<void*>(FakeDeviceSetDepthStencilSurface);
-        g_fakeDeviceVTable[91] = reinterpret_cast<void*>(FakeDeviceCreateVertexShader);
-        g_fakeDeviceVTable[106] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader);
+        g_fakeDeviceVTable[92] = reinterpret_cast<void*>(FakeDeviceCreateVertexShader);
+        g_fakeDeviceVTable[107] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
     }
 
