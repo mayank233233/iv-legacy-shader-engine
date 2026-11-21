@@ -73,7 +73,7 @@ def main() -> None:
     assert vertex_decl["elements"][1]["offset"] == 12
     assert report["draw_calls"][0]["index_buffer_object"] == "7000"
     assert report["draw_calls"][0]["stream_bindings"][0] == {
-        "stream": 0, "buffer": "5000", "offset": 0, "stride": 20, "frequency": 0
+        "stream": 0, "buffer": "5000", "offset": 0, "stride": 20, "frequency": 1
     }
     assert report["draw_calls"][3]["pixel_shader_fallback"] is None
     assert report["draw_calls"][3]["pixel_shader_key"] == "PS:ddd444"
