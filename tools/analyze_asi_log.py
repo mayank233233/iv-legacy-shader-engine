@@ -61,6 +61,7 @@ def shader_key(shader: dict[str, Any] | None, pointer: str | None) -> str:
 def analyze_log(path: Path) -> dict[str, Any]:
     shaders_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     fallback_by_address: dict[tuple[str, str], dict[str, Any]] = {}
+    textures_by_address: dict[str, dict[str, Any]] = {}
     draws: list[dict[str, Any]] = []
     present_failures = 0
     reset_failures = 0
@@ -97,6 +98,27 @@ def analyze_log(path: Path) -> dict[str, Any]:
             shaders_by_address[(stage, address)] = shader
             continue
 
+        if "TEXTURE_OBJECT_CREATED " in raw_line:
+            fields = parse_fields(raw_line)
+            address = normalize_pointer(fields.get("object"))
+            if address is None:
+                continue
+            descriptor: dict[str, Any] = {
+                "type": fields.get("type", "unknown"),
+                "object": address,
+                "width": int_field(fields, "width", int_field(fields, "edge", 0)),
+                "height": int_field(fields, "height", int_field(fields, "edge", 0)),
+                "depth": int_field(fields, "depth", 1),
+                "levels": int_field(fields, "levels"),
+                "usage": fields.get("usage", "0"),
+                "format": int_field(fields, "format"),
+                "pool": int_field(fields, "pool"),
+                "hr": fields.get("hr", "unknown").lower(),
+                "log_line": line_number,
+            }
+            textures_by_address[address] = descriptor
+            continue
+
         if "SHADER_FALLBACK_OBJECT_MAP " in raw_line:
             fields = parse_fields(raw_line)
             address = normalize_pointer(fields.get("object"))
@@ -129,6 +151,21 @@ def analyze_log(path: Path) -> dict[str, Any]:
             vs = shaders_by_address.get(("VS", vs_pointer)) if vs_pointer else None
             ps = shaders_by_address.get(("PS", ps_pointer)) if ps_pointer else None
             ps_fallback = fallback_by_address.get(("PS", ps_pointer)) if ps_pointer else None
+            texture_bindings = []
+            for binding in fields.get("textures", "").split(";"):
+                if not binding or ":" not in binding:
+                    continue
+                stage_text, address_text = binding.split(":", 1)
+                try:
+                    stage = int(stage_text, 0)
+                except ValueError:
+                    continue
+                address = normalize_pointer(address_text)
+                texture_bindings.append({
+                    "stage": stage,
+                    "object": address,
+                    "descriptor": textures_by_address.get(address) if address else None,
+                })
             draws.append({
                 "seq": sequence,
                 "frame": frame,
@@ -150,6 +187,8 @@ def analyze_log(path: Path) -> dict[str, Any]:
                 "pixel_shader": ps,
                 "pixel_shader_fallback": ps_fallback,
                 "pixel_shader_source_hash": ps_fallback["source_hash"] if ps_fallback else None,
+                "texture_bindings": texture_bindings,
+                "sampler_state_hash": fields.get("sampler_hash", "").lower() or None,
                 "vertex_shader_key": shader_key(vs, vs_pointer),
                 "pixel_shader_key": shader_key(ps, ps_pointer),
                 "hr": f"0x{result_hr & 0xFFFFFFFF:08X}",
@@ -177,6 +216,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
     failed_draws = 0
     unresolved_shader_references = 0
     fallback_usage: dict[tuple[str, str], dict[str, Any]] = {}
+    texture_usage: dict[str, dict[str, Any]] = {}
 
     for draw in draws:
         frame_counts[draw["frame"]] += 1
@@ -229,6 +269,22 @@ def analyze_log(path: Path) -> dict[str, Any]:
         pair["kinds"][draw["kind"]] += 1
         pair["primitive_types"][draw["primitive_name"]] += draw["primitive_count"]
         pair["frames"].add(draw["frame"])
+
+        for binding in draw["texture_bindings"]:
+            address = binding["object"]
+            if address is None:
+                continue
+            texture = binding["descriptor"]
+            item = texture_usage.setdefault(address, {
+                "object": address,
+                "descriptor": texture,
+                "draw_calls": 0,
+                "stages": set(),
+                "shader_pairs": set(),
+            })
+            item["draw_calls"] += 1
+            item["stages"].add(binding["stage"])
+            item["shader_pairs"].add(pair_key)
 
         fallback = draw["pixel_shader_fallback"]
         if fallback:
@@ -288,6 +344,18 @@ def analyze_log(path: Path) -> dict[str, Any]:
         key=lambda x: (-x["draw_calls"], x["source_shader_hash"])
     )
 
+    normalized_texture_usage = [
+        {
+            **item,
+            "stages": sorted(item["stages"]),
+            "shader_pairs": sorted(item["shader_pairs"]),
+        }
+        for item in texture_usage.values()
+    ]
+    normalized_texture_usage.sort(
+        key=lambda x: (-x["draw_calls"], x["object"])
+    )
+
     return {
         "schema_version": 1,
         "input_file": str(path),
@@ -309,6 +377,8 @@ def analyze_log(path: Path) -> dict[str, Any]:
         "shader_usage": normalized_shader_usage,
         "shader_pair_usage": normalized_pair_usage,
         "shader_fallback_usage": normalized_fallback_usage,
+        "texture_object_usage": normalized_texture_usage,
+        "texture_objects_observed": len(textures_by_address),
         "draw_calls": draws,
         "scope_note": (
             "Counts are log-observed D3D9 submissions, not GPU time, "
