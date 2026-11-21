@@ -1429,7 +1429,7 @@ namespace
         {
             InterlockedDecrement(&g_shaderConstantCaptureCount);
             Log(
-                "SHADER_CONSTANT_CAPTURE_FAILED stage=%s sequence=%ld reason=create_file error=%lu",
+                "SHADER_CONSTANT_CAPTURE_FAILED stage=%s kind=F sequence=%ld reason=create_file error=%lu",
                 pixelStage ? "PS" : "VS",
                 sequence,
                 static_cast<unsigned long>(GetLastError()));
@@ -1460,13 +1460,13 @@ namespace
             DeleteFileW(filePath);
             InterlockedDecrement(&g_shaderConstantCaptureCount);
             Log(
-                "SHADER_CONSTANT_CAPTURE_FAILED stage=%s sequence=%ld reason=write",
+                "SHADER_CONSTANT_CAPTURE_FAILED stage=%s kind=F sequence=%ld reason=write",
                 pixelStage ? "PS" : "VS", sequence);
             return;
         }
 
         Log(
-            "SHADER_CONSTANT_CAPTURED stage=%s sequence=%ld frame=%lu shader_object=%p start=%u vectors=%u bytes=%lu",
+            "SHADER_CONSTANT_CAPTURED stage=%s kind=F sequence=%ld frame=%lu shader_object=%p start=%u vectors=%u bytes=%lu",
             pixelStage ? "PS" : "VS",
             sequence,
             static_cast<unsigned long>(header.frameIndex),
