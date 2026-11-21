@@ -891,6 +891,11 @@ int main()
     if (!HasText("SHADER_FALLBACKS_ENABLED") ||
         !HasText("SHADER_FALLBACK_APPLIED"))
         return Fail("Configured PS2 fallback was not applied to the matching PS3 shader");
+    if (!HasText("SHADER_FALLBACK_OBJECT_MAP") ||
+        !HasText("target_profile=ps_2_0") ||
+        !HasText("SHADER_OBJECT_CREATED stage=PS object=") ||
+        !HasText("profile=PS_2_0"))
+        return Fail("Fallback shader object was not correlated with its actual PS2 bytecode");
     if (!HasText("SHADER_FALLBACK_NOT_MAPPED"))
         return Fail("Unmapped PS3 shader did not pass through unchanged");
     if (FAILED(fallbackShaderHr) || FAILED(unmappedShaderHr) ||
