@@ -20,7 +20,9 @@ namespace
     FakeComObject g_fakeDevice = {};
     FakeComObject g_fakeVertexShader = {};
     FakeComObject g_fakePixelShader = {};
+    FakeComObject g_fakeTexture = {};
     void* g_fakeShaderVTable[3] = {};
+    void* g_fakeTextureVTable[3] = {};
     DWORD g_fakeLastPixelShaderVersion = 0;
     volatile LONG g_fakePixelShaderCreateCount = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
@@ -416,6 +418,23 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceCreateTexture(
+        IDirect3DDevice9*,
+        UINT,
+        UINT,
+        UINT,
+        DWORD,
+        D3DFORMAT,
+        D3DPOOL,
+        IDirect3DTexture9** texture,
+        HANDLE*)
+    {
+        if (!texture)
+            return D3DERR_INVALIDCALL;
+        *texture = reinterpret_cast<IDirect3DTexture9*>(&g_fakeTexture);
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeDeviceSetTexture(
         IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*)
     {
@@ -498,6 +517,7 @@ namespace
         g_fakeDeviceVTable[69] = reinterpret_cast<void*>(FakeDeviceSetSamplerState);
         g_fakeDeviceVTable[94] = reinterpret_cast<void*>(FakeDeviceSetVertexShaderConstantF);
         g_fakeDeviceVTable[109] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantF);
+        g_fakeDeviceVTable[23] = reinterpret_cast<void*>(FakeDeviceCreateTexture);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
 
         g_fakeShaderVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
@@ -505,6 +525,11 @@ namespace
         g_fakeShaderVTable[2] = reinterpret_cast<void*>(FakeRelease);
         g_fakeVertexShader.vtable = g_fakeShaderVTable;
         g_fakePixelShader.vtable = g_fakeShaderVTable;
+
+        g_fakeTextureVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
+        g_fakeTextureVTable[1] = reinterpret_cast<void*>(FakeAddRef);
+        g_fakeTextureVTable[2] = reinterpret_cast<void*>(FakeRelease);
+        g_fakeTexture.vtable = g_fakeTextureVTable;
     }
 
     bool PatchImportToFakeCreate9()
@@ -831,7 +856,12 @@ int main()
 
     const float vertexConstants[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
     const float pixelConstants[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
-    const HRESULT setTextureHr = device->SetTexture(0, NULL);
+    IDirect3DTexture9* fakeTexture = NULL;
+    const HRESULT createTextureHr = device->CreateTexture(
+        64, 32, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
+        &fakeTexture, NULL);
+    const HRESULT setTextureHr = device->SetTexture(
+        0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
     const HRESULT setSamplerStateHr = device->SetSamplerState(
         0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
     const HRESULT setVertexConstantsHr = device->SetVertexShaderConstantF(
@@ -862,6 +892,8 @@ int main()
         vertexShader->Release();
     if (pixelShader)
         pixelShader->Release();
+    if (fakeTexture)
+        fakeTexture->Release();
     device->Release();
     d3d->Release();
 
@@ -914,8 +946,9 @@ int main()
         !HasText("kind=DrawPrimitiveUP") ||
         !HasText("kind=DrawIndexedPrimitiveUP"))
         return Fail("One or more D3D9 draw telemetry hooks or frame tags were not observed");
-    if (!HasText("SET_TEXTURE") || !HasText("SET_SAMPLER_STATE"))
-        return Fail("D3D9 texture or sampler-state hooks were not observed");
+    if (!HasText("TEXTURE_OBJECT_CREATED type=2D") ||
+        !HasText("SET_TEXTURE") || !HasText("SET_SAMPLER_STATE"))
+        return Fail("D3D9 texture creation, binding or sampler-state hooks were not observed");
     if (!HasText("SHADER_CONSTANT_CAPTURE_ENABLED") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=VS") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=PS"))
