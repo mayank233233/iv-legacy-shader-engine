@@ -29,7 +29,7 @@ from typing import Any
 
 HEADER_V1 = struct.Struct("<4sHHIIIII")
 HEADER_V2 = struct.Struct("<4sHHIIIIII")
-MAGIC = b"IVCF"
+MAGIC_TO_KIND = {b"IVCF": "float", b"IVCI": "int", b"IVCB": "bool"}
 VERSION = 2
 STAGES = {0: "VS", 1: "PS"}
 MAX_VECTOR_COUNT = 256
@@ -54,10 +54,13 @@ def parse_capture(path: Path) -> dict[str, Any]:
         raise ConstantCaptureError("truncated header")
 
     magic, version, stage_code = struct.unpack_from("<4sHH", data, 0)
-    if magic != MAGIC:
-        raise ConstantCaptureError(f"bad magic {magic!r}")
+    data_kind = MAGIC_TO_KIND.get(magic)
+    if data_kind is None:
+        raise ConstantCaptureError(f"bad or unsupported magic {magic!r}")
 
     if version == 1:
+        if magic != b"IVCF":
+            raise ConstantCaptureError("version-1 records support float constants only")
         if len(data) < HEADER_V1.size:
             raise ConstantCaptureError("truncated version-1 header")
         (_magic, _version, _stage, frame, sequence, start, count, data_bytes) = (
@@ -78,11 +81,15 @@ def parse_capture(path: Path) -> dict[str, Any]:
 
     if stage_code not in STAGES:
         raise ConstantCaptureError(f"invalid shader stage {stage_code}")
-    if count < 1 or count > MAX_VECTOR_COUNT:
-        raise ConstantCaptureError(f"vector count outside 1..{MAX_VECTOR_COUNT}")
+    limit = MAX_VECTOR_COUNT if data_kind in {"float", "int"} else 16
+    if count < 1 or count > limit:
+        raise ConstantCaptureError(f"{data_kind} count outside 1..{limit}")
     if start > 255 or start + count > 256:
         raise ConstantCaptureError("constant register range exceeds c255")
-    expected_data_bytes = count * 4 * 4
+    if data_kind in {"int", "bool"} and (start > 15 or start + count > 16):
+        raise ConstantCaptureError(f"{data_kind} register range exceeds the D3D9 0..15 bank")
+    bytes_per_register = 4 if data_kind == "bool" else 16
+    expected_data_bytes = count * bytes_per_register
     if data_bytes != expected_data_bytes:
         raise ConstantCaptureError(
             f"data byte count {data_bytes} does not match expected {expected_data_bytes}"
@@ -93,26 +100,41 @@ def parse_capture(path: Path) -> dict[str, Any]:
             f"file length {len(data)} does not match expected {expected_file_bytes}"
         )
 
-    float_count = count * 4
-    values = struct.unpack_from(f"<{float_count}f", data, header_size)
-    vectors = [
-        [_json_float(values[index + offset]) for offset in range(4)]
-        for index in range(0, len(values), 4)
-    ]
+    if data_kind == "float":
+        values = struct.unpack_from(f"<{count * 4}f", data, header_size)
+        registers = [
+            {"register": start + index,
+             "xyzw": [_json_float(values[index * 4 + offset]) for offset in range(4)]}
+            for index in range(count)
+        ]
+    elif data_kind == "int":
+        values = struct.unpack_from(f"<{count * 4}i", data, header_size)
+        registers = [
+            {"register": start + index,
+             "xyzw": [values[index * 4 + offset] for offset in range(4)]}
+            for index in range(count)
+        ]
+    else:
+        values = struct.unpack_from(f"<{count}I", data, header_size)
+        registers = [
+            {"register": start + index,
+             "raw_value": value,
+             "enabled": value != 0}
+            for index, value in enumerate(values)
+        ]
+
     return {
         "file": path.name,
         "version": version,
         "stage": STAGES[stage_code],
+        "data_kind": data_kind,
         "frame_index": frame,
         "shader_object": f"{shader_object:08X}" if shader_object is not None else None,
         "sequence": sequence,
         "start_register": start,
         "vector_count": count,
         "data_byte_count": data_bytes,
-        "registers": [
-            {"register": start + index, "xyzw": vector}
-            for index, vector in enumerate(vectors)
-        ],
+        "registers": registers,
     }
 
 def parse_shader_log(path: Path | None) -> dict[tuple[str, str], dict[str, Any]]:
@@ -195,8 +217,8 @@ def analyze_directory(directory: Path, log_path: Path | None = None) -> dict[str
         "records": records,
         "errors": errors,
         "scope_note": (
-            "These are values submitted through SetVertexShaderConstantF and "
-            "SetPixelShaderConstantF after successful D3D9 calls. They are not "
+            "These are float, integer and boolean values submitted through successful D3D9 "
+            "shader-constant setter calls. They are not "
             "named semantic uniforms until matched to shader disassembly and "
             "the game's material/state code."
         ),
