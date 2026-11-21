@@ -48,7 +48,11 @@ namespace
         kDeviceSetTextureSlot = 65,
         kDeviceSetSamplerStateSlot = 69,
         kDeviceSetVertexShaderConstantFSlot = 94,
+        kDeviceSetVertexShaderConstantISlot = 96,
+        kDeviceSetVertexShaderConstantBSlot = 98,
         kDeviceSetPixelShaderConstantFSlot = 109,
+        kDeviceSetPixelShaderConstantISlot = 111,
+        kDeviceSetPixelShaderConstantBSlot = 113,
         kDeviceCreateTextureSlot = 23,
         kDeviceCreateVolumeTextureSlot = 24,
         kDeviceCreateCubeTextureSlot = 25,
@@ -158,6 +162,10 @@ namespace
         IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD);
     typedef HRESULT (WINAPI* DeviceSetShaderConstantFFn)(
         IDirect3DDevice9*, UINT, const float*, UINT);
+    typedef HRESULT (WINAPI* DeviceSetShaderConstantIFn)(
+        IDirect3DDevice9*, UINT, const int*, UINT);
+    typedef HRESULT (WINAPI* DeviceSetShaderConstantBFn)(
+        IDirect3DDevice9*, UINT, const BOOL*, UINT);
     typedef HRESULT (WINAPI* DeviceCreateTextureFn)(
         IDirect3DDevice9*, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL,
         IDirect3DTexture9**, HANDLE*);
@@ -197,7 +205,11 @@ namespace
     DeviceSetTextureFn g_realDeviceSetTexture = NULL;
     DeviceSetSamplerStateFn g_realDeviceSetSamplerState = NULL;
     DeviceSetShaderConstantFFn g_realDeviceSetVertexShaderConstantF = NULL;
+    DeviceSetShaderConstantIFn g_realDeviceSetVertexShaderConstantI = NULL;
+    DeviceSetShaderConstantBFn g_realDeviceSetVertexShaderConstantB = NULL;
     DeviceSetShaderConstantFFn g_realDeviceSetPixelShaderConstantF = NULL;
+    DeviceSetShaderConstantIFn g_realDeviceSetPixelShaderConstantI = NULL;
+    DeviceSetShaderConstantBFn g_realDeviceSetPixelShaderConstantB = NULL;
     DeviceCreateTextureFn g_realDeviceCreateTexture = NULL;
     DeviceCreateVolumeTextureFn g_realDeviceCreateVolumeTexture = NULL;
     DeviceCreateCubeTextureFn g_realDeviceCreateCubeTexture = NULL;
