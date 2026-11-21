@@ -51,7 +51,9 @@ namespace
         kDeviceSetPixelShaderConstantFSlot = 109,
         kDeviceCreateTextureSlot = 23,
         kDeviceCreateVolumeTextureSlot = 24,
-        kDeviceCreateCubeTextureSlot = 25
+        kDeviceCreateCubeTextureSlot = 25,
+        kDeviceSetRenderStateSlot = 57,
+        kDeviceSetTextureStageStateSlot = 67
     };
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
@@ -80,6 +82,11 @@ namespace
     PVOID volatile g_currentPixelShader = NULL;
     PVOID volatile g_currentTextures[16] = {};
     volatile LONG g_samplerStates[16][14] = {};
+    volatile LONG g_samplerStateKnown[16][14] = {};
+    volatile LONG g_renderStates[256] = {};
+    volatile LONG g_renderStateKnown[256] = {};
+    volatile LONG g_textureStageStates[16][64] = {};
+    volatile LONG g_textureStageStateKnown[16][64] = {};
     BOOL g_drawTelemetryEnabled = FALSE;
     DWORD g_drawTelemetryMaxCalls = 4096;
     BOOL g_captureShaderConstants = FALSE;
@@ -160,6 +167,10 @@ namespace
     typedef HRESULT (WINAPI* DeviceCreateCubeTextureFn)(
         IDirect3DDevice9*, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL,
         IDirect3DCubeTexture9**, HANDLE*);
+    typedef HRESULT (WINAPI* DeviceSetRenderStateFn)(
+        IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+    typedef HRESULT (WINAPI* DeviceSetTextureStageStateFn)(
+        IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
     D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
@@ -190,6 +201,8 @@ namespace
     DeviceCreateTextureFn g_realDeviceCreateTexture = NULL;
     DeviceCreateVolumeTextureFn g_realDeviceCreateVolumeTexture = NULL;
     DeviceCreateCubeTextureFn g_realDeviceCreateCubeTexture = NULL;
+    DeviceSetRenderStateFn g_realDeviceSetRenderState = NULL;
+    DeviceSetTextureStageStateFn g_realDeviceSetTextureStageState = NULL;
 
     void Log(const char* format, ...)
     {
@@ -776,7 +789,20 @@ namespace
             {
                 InterlockedExchangePointer(&g_currentTextures[stage], NULL);
                 for (DWORD state = 0; state < 14; ++state)
+                {
                     InterlockedExchange(&g_samplerStates[stage][state], 0);
+                    InterlockedExchange(&g_samplerStateKnown[stage][state], 0);
+                }
+                for (DWORD state = 0; state < 64; ++state)
+                {
+                    InterlockedExchange(&g_textureStageStates[stage][state], 0);
+                    InterlockedExchange(&g_textureStageStateKnown[stage][state], 0);
+                }
+            }
+            for (DWORD state = 0; state < 256; ++state)
+            {
+                InterlockedExchange(&g_renderStates[state], 0);
+                InterlockedExchange(&g_renderStateKnown[state], 0);
             }
         }
         return hr;
@@ -1438,6 +1464,65 @@ namespace
             static_cast<unsigned long>(dataByteCount));
     }
 
+    HRESULT WINAPI HookDeviceSetRenderState(
+        IDirect3DDevice9* self,
+        D3DRENDERSTATETYPE state,
+        DWORD value)
+    {
+        const HRESULT hr = g_realDeviceSetRenderState
+            ? g_realDeviceSetRenderState(self, state, value)
+            : D3DERR_INVALIDCALL;
+
+        const DWORD stateIndex = static_cast<DWORD>(state);
+        if (SUCCEEDED(hr) && stateIndex < 256)
+        {
+            InterlockedExchange(&g_renderStates[stateIndex], static_cast<LONG>(value));
+            InterlockedExchange(&g_renderStateKnown[stateIndex], 1);
+        }
+
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log(
+                "SET_RENDER_STATE state=%u value=%lu hr=0x%08lX",
+                stateIndex,
+                static_cast<unsigned long>(value),
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetTextureStageState(
+        IDirect3DDevice9* self,
+        DWORD stage,
+        D3DTEXTURESTAGESTATETYPE state,
+        DWORD value)
+    {
+        const HRESULT hr = g_realDeviceSetTextureStageState
+            ? g_realDeviceSetTextureStageState(self, stage, state, value)
+            : D3DERR_INVALIDCALL;
+
+        const DWORD stateIndex = static_cast<DWORD>(state);
+        if (SUCCEEDED(hr) && stage < 16 && stateIndex < 64)
+        {
+            InterlockedExchange(
+                &g_textureStageStates[stage][stateIndex], static_cast<LONG>(value));
+            InterlockedExchange(&g_textureStageStateKnown[stage][stateIndex], 1);
+        }
+
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log(
+                "SET_TEXTURE_STAGE_STATE stage=%lu state=%u value=%lu hr=0x%08lX",
+                static_cast<unsigned long>(stage),
+                stateIndex,
+                static_cast<unsigned long>(value),
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
     HRESULT WINAPI HookDeviceCreateTexture(
         IDirect3DDevice9* self,
         UINT width,
@@ -1593,6 +1678,7 @@ namespace
             InterlockedExchange(
                 &g_samplerStates[sampler][stateIndex],
                 static_cast<LONG>(value));
+            InterlockedExchange(&g_samplerStateKnown[sampler][stateIndex], 1);
         }
 
         if (g_drawTelemetryEnabled &&
@@ -1687,22 +1773,60 @@ namespace
         }
 
         unsigned __int64 samplerHash = 14695981039346656037ULL;
+        DWORD samplerStateCount = 0;
         for (DWORD sampler = 0; sampler < 16; ++sampler)
         {
             for (DWORD state = 0; state < 14; ++state)
             {
+                if (InterlockedCompareExchange(
+                    &g_samplerStateKnown[sampler][state], 0, 0) == 0)
+                    continue;
                 const DWORD value = static_cast<DWORD>(
                     InterlockedCompareExchange(
                         &g_samplerStates[sampler][state], 0, 0));
                 samplerHash ^= (sampler << 24) | (state << 16) | (value & 0xFFFF);
                 samplerHash *= 1099511628211ULL;
+                ++samplerStateCount;
+            }
+        }
+
+        unsigned __int64 renderStateHash = 14695981039346656037ULL;
+        DWORD renderStateCount = 0;
+        for (DWORD state = 0; state < 256; ++state)
+        {
+            if (InterlockedCompareExchange(&g_renderStateKnown[state], 0, 0) == 0)
+                continue;
+            const DWORD value = static_cast<DWORD>(
+                InterlockedCompareExchange(&g_renderStates[state], 0, 0));
+            renderStateHash ^= (state << 16) | (value & 0xFFFF);
+            renderStateHash *= 1099511628211ULL;
+            ++renderStateCount;
+        }
+
+        unsigned __int64 textureStageHash = 14695981039346656037ULL;
+        DWORD textureStageStateCount = 0;
+        for (DWORD stage = 0; stage < 16; ++stage)
+        {
+            for (DWORD state = 0; state < 64; ++state)
+            {
+                if (InterlockedCompareExchange(
+                    &g_textureStageStateKnown[stage][state], 0, 0) == 0)
+                    continue;
+                const DWORD value = static_cast<DWORD>(
+                    InterlockedCompareExchange(
+                        &g_textureStageStates[stage][state], 0, 0));
+                textureStageHash ^= (stage << 24) | (state << 16) | (value & 0xFFFF);
+                textureStageHash *= 1099511628211ULL;
+                ++textureStageStateCount;
             }
         }
 
         Log(
             "DRAW_CALL seq=%ld frame=%ld kind=%s device=%p primitive=%u primitives=%u "
             "start_vertex=%u base_vertex=%ld min_vertex=%u num_vertices=%u "
-            "start_index=%u bound_vs=%p bound_ps=%p textures=%s sampler_hash=%016llX hr=0x%08lX",
+            "start_index=%u bound_vs=%p bound_ps=%p textures=%s sampler_hash=%016llX "
+            "sampler_count=%lu render_state_hash=%016llX render_state_count=%lu "
+            "texture_stage_hash=%016llX texture_stage_count=%lu hr=0x%08lX",
             sequence,
             frameIndex,
             kind,
@@ -1718,6 +1842,11 @@ namespace
             pixelShader,
             textureBindings,
             samplerHash,
+            static_cast<unsigned long>(samplerStateCount),
+            renderStateHash,
+            static_cast<unsigned long>(renderStateCount),
+            textureStageHash,
+            static_cast<unsigned long>(textureStageStateCount),
             static_cast<unsigned long>(result));
     }
 
@@ -1888,6 +2017,10 @@ namespace
             reinterpret_cast<DeviceCreateVolumeTextureFn>(original[kDeviceCreateVolumeTextureSlot]);
         g_realDeviceCreateCubeTexture =
             reinterpret_cast<DeviceCreateCubeTextureFn>(original[kDeviceCreateCubeTextureSlot]);
+        g_realDeviceSetRenderState =
+            reinterpret_cast<DeviceSetRenderStateFn>(original[kDeviceSetRenderStateSlot]);
+        g_realDeviceSetTextureStageState =
+            reinterpret_cast<DeviceSetTextureStageStateFn>(original[kDeviceSetTextureStageStateSlot]);
 
         hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
@@ -1911,6 +2044,8 @@ namespace
             hooked[kDeviceCreateTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateTexture);
             hooked[kDeviceCreateVolumeTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateVolumeTexture);
             hooked[kDeviceCreateCubeTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateCubeTexture);
+            hooked[kDeviceSetRenderStateSlot] = reinterpret_cast<void*>(HookDeviceSetRenderState);
+            hooked[kDeviceSetTextureStageStateSlot] = reinterpret_cast<void*>(HookDeviceSetTextureStageState);
         }
         if (g_captureShaderConstants)
         {
