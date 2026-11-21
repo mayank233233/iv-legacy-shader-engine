@@ -23,13 +23,13 @@
 |---|---|
 | Original v0.2 archive SHA-256 and ZIP integrity | PASS — `34cd5c3efa2d15bbf0fec1e6035ba90346c6c495c82d14cd3ebbcba5a69a29aa` |
 | Six original shader files | PASS — byte-for-byte SHA-256 matches against the original archive |
-| Source sanity tests | PASS — GitHub Actions run #8 |
+| Source sanity tests | PASS — GitHub Actions run #10 |
 | FXC compilation | PASS — all six shaders compiled as `vs_2_0` / `ps_2_0` |
 | MSVC x86 compilation | PASS — `D3D9ShaderProbe.exe` built successfully with x86 MSVC |
 | Compiled bytecode headers | PASS — two VS files report `0xFFFE0200`, four PS files report `0xFFFF0200`; all end with `D3DSIO_END` |
 | Executable architecture | PASS — downloaded artifact inspected as PE32 Intel i386 |
-| GitHub Actions Windows x86 build | PASS — [run #8](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480), commit `3a27e439e33ac0907fbe76ebb2babea717bf077d` |
-| Windows x86 build artifact | PASS — [download artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480/artifacts/14696800281), ID `14696800281`; expires 2027-02-19 |
+| GitHub Actions Windows x86 build | PASS — [run #10](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271), commit `0aeeeab9c60038ae0bbecc7d9004dfae843cc5f1` |
+| Windows x86 build artifact | PASS — [download artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271/artifacts/14696049437), ID `14696049437`; includes repository-relative `build/` paths; expires 2027-02-19 |
 | D3D9 runtime shader creation | NOT RUN |
 | HAL software-VP rendering on GMA 3100 | NOT RUN |
 | HAL hardware-VP rendering on GMA 3100 | NOT RUN |
@@ -40,8 +40,8 @@
 ## Build artifact details
 
 - Artifact: `iv-legacy-shader-engine-windows-x86.zip`
-- Contains six FXC bytecode files, six FXC assembly listings and `D3D9ShaderProbe.exe`.
-- SHA-256: `f887cfba637242c0613a55c11b6b0c0b8cce6eadc498158e55db65cfcc6625f1`
+- Contains `build/bin/D3D9ShaderProbe.exe`, six files under `build/out/` (`.vso` / `.pso`), six matching FXC assembly listings, and `build/run_probe.bat`. Extract over the repository root to preserve the expected paths.
+- SHA-256: `95c4a622c5137fe49be912013fc08891bccf6fe23ab7f94ba914c256a7d8c51c`
 
 ## Important boundary
 
