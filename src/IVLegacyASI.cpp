@@ -16,9 +16,9 @@ namespace
     const UINT kD3D9InterfaceSlots = 17;
     const UINT kD3D9DeviceInterfaceSlots = 119;
 
-    HINSTANCE g_module = NULL;
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
     wchar_t g_gamePath[MAX_PATH] = {};
+    wchar_t g_logPath[MAX_PATH] = {};
     wchar_t g_iniPath[MAX_PATH] = {};
     volatile LONG g_logLock = 0;
     volatile LONG g_capsLogCount = 0;
@@ -26,7 +26,6 @@ namespace
     volatile LONG g_pixelShaderLogCount = 0;
     volatile LONG g_renderTargetLogCount = 0;
     volatile LONG g_setRenderTargetLogCount = 0;
-    BOOL g_isTargetBuild = FALSE;
     BOOL g_telemetryEnabled = TRUE;
 
     typedef IDirect3D9* (WINAPI* Direct3DCreate9Fn)(UINT);
@@ -191,7 +190,7 @@ namespace
         }
     }
 
-    bool ValidateTargetExecutable()
+    bool ValidateTargetExecutable(BOOL strictVersion)
     {
         HMODULE exe = GetModuleHandleW(NULL);
         if (!exe || !Is32BitPE(exe))
@@ -227,8 +226,12 @@ namespace
 
         if (major != 1 || minor != 0 || build != 0 || revision != 0)
         {
-            Log("TARGET_REJECTED reason=version_is_not_1.0.0.0");
-            return false;
+            Log("TARGET_VERSION_MISMATCH expected=1.0.0.0 actual=%u.%u.%u.%u",
+                major, minor, build, revision);
+            if (strictVersion)
+                return false;
+            Log("WARNING strict version gate disabled; telemetry-only mode");
+            return true;
         }
 
         Log("TARGET_VERSION_GATE passed=1.0.0.0");
@@ -735,15 +738,14 @@ namespace
             GetPrivateProfileIntW(
                 L"General", L"StrictGTAIV100", 1, g_iniPath) != 0;
 
-        if (!ValidateTargetExecutable())
+        if (!ValidateTargetExecutable(strictVersion))
         {
             Log("BOOTSTRAP_STOP reason=target_validation_failed");
             return 0;
         }
 
-        g_isTargetBuild = TRUE;
         if (!strictVersion)
-            Log("WARNING strict executable version gate disabled");
+            Log("WARNING non-1.0.0.0 executable may use different runtime behavior; telemetry only");
 
         if (!g_telemetryEnabled)
         {
@@ -765,7 +767,6 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
-        g_module = instance;
         DisableThreadLibraryCalls(instance);
 
         HANDLE thread = CreateThread(NULL, 0, BootstrapThread, NULL, 0, NULL);
