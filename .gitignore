@@ -1,0 +1,6 @@
+/build/bin/
+/build/out/
+/D3D9ProbeReport.txt
+*.user
+*.suo
+.vs/
