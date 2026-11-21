@@ -117,3 +117,31 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 | Render GTA IV scenes on Intel GMA 3100 | NOT TESTED |
 | Measure FPS / 30 FPS objective | NOT TESTED |
 
+
+ 
+## Prototype 0.5-alpha verification — 2026-11-21
+
+- Exact target remains the original PC `GTAIV.exe` file version `1.0.0.0`; the strict gate rejects other versions by default.
+- Latest Windows x86 CI: [run #81](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44885590397), commit `6e495c21bd026247160e90374a593f1c8851fa26`; all workflow steps passed.
+- Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44885590397/artifacts/14700061775), ID `14700061775`; SHA-256 `4dbc2376cf9a5bf04375e69d386f201a8b55f50552eeee4464ec78fc8634fd9c`.
+- Added C-linkage exported `InitializeASI`; synthetic host resolves it by exact export name and invokes it. The DllMain worker fallback is guarded against duplicate initialization.
+- Added opt-in `CaptureDrawTelemetry=1` hooks for `DrawPrimitive`, `DrawIndexedPrimitive`, `DrawPrimitiveUP`, and `DrawIndexedPrimitiveUP`, using verified slots 81–84. Logging is capped by `CaptureDrawMaxCalls` (default 4096; clamp 1–65536); disabled by default.
+- Added shader object/hash records so the object addresses in draw telemetry can be correlated to a shader's profile and bytecode hash.
+- The synthetic host exercises shader creation/binding and all four draw methods. Its fake adapter identity 8086:29C2 and SM2 caps are test fixtures, not a measurement of the physical GMA 3100.
+- Artifact has two synthetic SM2 captures: one pixel shader and one vertex shader. The offline inventory parses both successfully.
+- The restricted offline pixel-shader downlevel audit reports **zero** eligible files in this artifact: the pixel shader is already PS2.0, and the vertex shader is outside the tool's PS-only scope. Its self-tests do exercise a separate, tiny synthetic PS3.0 candidate and explicit rejection cases.
+- The audit tool is not a general SM3 translator. It accepts only a limited PS3.0 subset and performs structural screening; candidates still require D3D9 runtime, driver and visual validation.
+- The original GTA IV executable, actual ASI-loader game session, GMA 3100 driver, game shader capture, scene rendering, and FPS remain **not tested**.
+
+### Next engineering gates
+
+| Gate | State |
+|---|---|
+| Confirm original GTAIV.exe direct D3D9 factory import and import timing | NOT VERIFIED |
+| Load the exported ASI through the actual loader in GTA IV 1.0.0.0 | NOT TESTED |
+| Capture real game PS3.0 and VS3.0 bytecode and correlate draws | NOT RUN |
+| Expand audit/lowering only for specification-backed shader cases | IN PROGRESS — offline PS subset only |
+| Integrate a real fallback into device shader creation safely | NOT IMPLEMENTED |
+| Render original GTA IV scenes on GMA 3100 | NOT TESTED |
+| Measure average / 1% low FPS against the 30 FPS objective | NOT TESTED |
+
