@@ -61,11 +61,27 @@ def main() -> None:
         assert legacy["shader_object"] is None
         assert legacy["registers"][0]["xyzw"] == [9.0, 8.0, 7.0, 6.0]
 
-        report = analyze_directory(directory)
+        log_path = directory / "IVLegacy.log"
+        log_path.write_text(
+            "[12:00:00.000] SHADER_OBJECT_CREATED stage=VS object=1234ABCD profile=VS_3_0 bytes=96 hash=aaa111 hr=0x00000000\\n"
+            "[12:00:00.001] SHADER_OBJECT_CREATED stage=PS object=ABCDEF01 profile=PS_2_0 bytes=64 hash=bbb222 hr=0x00000000\\n"
+            "[12:00:00.002] SHADER_FALLBACK_OBJECT_MAP object=ABCDEF01 source_hash=ccc333 target_hash=bbb222 target_profile=ps_2_0\\n",
+            encoding="utf-8",
+        )
+        report = analyze_directory(directory, log_path)
         assert report["record_count"] == 3
         assert report["invalid_record_count"] == 0
         assert report["stage_counts"] == {"VS": 2, "PS": 1}
         assert report["frame_indices"] == [2, 3]
+        assert report["shader_objects_resolved"] == 2
+
+        vs_sidecar = next(record for record in report["records"] if record["stage"] == "VS" and record["version"] == 2)
+        ps_sidecar = next(record for record in report["records"] if record["stage"] == "PS")
+        assert vs_sidecar["shader_profile"] == "vs_3_0"
+        assert vs_sidecar["shader_bytecode_hash"] == "aaa111"
+        assert ps_sidecar["shader_profile"] == "ps_2_0"
+        assert ps_sidecar["shader_bytecode_hash"] == "bbb222"
+        assert ps_sidecar["source_shader_hash"] == "ccc333"
 
         bad_path = directory / "bad.bin"
         bad_path.write_bytes(b"BAD!" + vs_path.read_bytes()[4:])
