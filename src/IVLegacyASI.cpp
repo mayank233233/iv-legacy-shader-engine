@@ -216,9 +216,12 @@ namespace
             return;
         }
 
-        if (InterlockedCompareExchange(&g_captureUniqueCount, 0, 0) >=
-            static_cast<LONG>(g_captureMaxFiles))
+        // Reserve a unique-file slot atomically before touching the filesystem.
+        // Multiple render/resource threads may create shaders concurrently.
+        const LONG reservedSlot = InterlockedIncrement(&g_captureUniqueCount);
+        if (reservedSlot > static_cast<LONG>(g_captureMaxFiles))
         {
+            InterlockedDecrement(&g_captureUniqueCount);
             return;
         }
 
@@ -247,12 +250,19 @@ namespace
 
         if (file == INVALID_HANDLE_VALUE)
         {
+            const DWORD error = GetLastError();
+            InterlockedDecrement(&g_captureUniqueCount);
+
             // Existing content-addressed capture means this shader was
             // already recorded. Do not log every repeated material use.
+            if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS)
+            {
+                Log(
+                    "SHADER_CAPTURE_FAILED stage=%ls hash=%016llX create_error=%lu",
+                    stage, hash, static_cast<unsigned long>(error));
+            }
             return;
         }
-
-        InterlockedIncrement(&g_captureUniqueCount);
 
         DWORD written = 0;
         BOOL writeSucceeded = FALSE;
@@ -270,6 +280,7 @@ namespace
         if (!writeSucceeded || written != byteCount)
         {
             DeleteFileW(filePath);
+            InterlockedDecrement(&g_captureUniqueCount);
             Log(
                 "SHADER_CAPTURE_FAILED stage=%ls hash=%016llX bytes=%lu",
                 stage, hash, static_cast<unsigned long>(byteCount));
