@@ -46,6 +46,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests\check_asi_log_analyzer.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests\check_asi_constants.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools\analyze_d3d9_shaders.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests\check_shader_analyzer.py
@@ -107,6 +109,10 @@ jobs:
       - name: Inventory captured runtime shader bytecode
         shell: pwsh
         run: |
+          python tools\analyze_asi_constants.py build\bin\IVLegacyConstants --json build\bin\shader_constant_inventory.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $constantInventory = Get-Content build\bin\shader_constant_inventory.json -Raw | ConvertFrom-Json
+          if ($constantInventory.record_count -ne 2 -or $constantInventory.invalid_record_count -ne 0) { throw 'Expected two valid synthetic shader constant records.' }
           python tools\analyze_d3d9_shaders.py build\bin\IVLegacyCaptures --output build\bin\captured_shader_inventory.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $captured = Get-Content build\bin\captured_shader_inventory.json -Raw | ConvertFrom-Json
@@ -128,6 +134,8 @@ jobs:
           Copy-Item build\out\shader_inventory.json artifact\build\out\
           Copy-Item build\bin\captured_shader_inventory.json artifact\build\bin\
           Copy-Item build\bin\captured_shader_downlevel_audit.json artifact\build\bin\
+          Copy-Item build\bin\shader_constant_inventory.json artifact\build\bin\
+          Copy-Item build\bin\IVLegacyConstants artifact\build\bin\ -Recurse
           Copy-Item build\bin\IVLegacyCaptures artifact\build\bin\ -Recurse
           Copy-Item build\bin\IVLegacyShaderFallbacks.ini artifact\build\bin\
           Copy-Item build\bin\IVLegacyFallbacks artifact\build\bin\ -Recurse
@@ -136,6 +144,9 @@ jobs:
           Copy-Item build\run_probe.bat artifact\build\
           if (-not (Test-Path artifact\build\bin\D3D9ShaderProbe.exe)) { throw 'Staged x86 probe executable is missing.' }
           if (-not (Test-Path artifact\IVLegacyASI.asi)) { throw 'Staged GTA IV telemetry ASI is missing.' }
+          if (-not (Test-Path artifact\build\bin\IVLegacyConstants)) { throw 'Staged shader constant sidecars are missing.' }
+          $constantFiles = @(Get-ChildItem artifact\build\bin\IVLegacyConstants -File -Filter '*.bin')
+          if ($constantFiles.Count -ne 2) { throw "Expected 2 constant sidecars in staged artifact; found $($constantFiles.Count)." }
           $bytecode = @(Get-ChildItem artifact\build\out -File | Where-Object { $_.Extension -in @('.vso', '.pso') })
           if ($bytecode.Count -ne 6) { throw "Expected 6 shader bytecode files in staged artifact; found $($bytecode.Count)." }
 
