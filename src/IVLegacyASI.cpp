@@ -875,9 +875,9 @@ namespace
         g_realDeviceSetDepthStencilSurface =
             reinterpret_cast<DeviceSetDepthStencilSurfaceFn>(original[39]);
         g_realDeviceCreateVertexShader =
-            reinterpret_cast<DeviceCreateVertexShaderFn>(original[91]);
+            reinterpret_cast<DeviceCreateVertexShaderFn>(original[92]);
         g_realDeviceCreatePixelShader =
-            reinterpret_cast<DeviceCreatePixelShaderFn>(original[106]);
+            reinterpret_cast<DeviceCreatePixelShaderFn>(original[107]);
 
         hooked[7] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[16] = reinterpret_cast<void*>(HookDeviceReset);
@@ -886,8 +886,8 @@ namespace
         hooked[29] = reinterpret_cast<void*>(HookDeviceCreateDepthStencilSurface);
         hooked[37] = reinterpret_cast<void*>(HookDeviceSetRenderTarget);
         hooked[39] = reinterpret_cast<void*>(HookDeviceSetDepthStencilSurface);
-        hooked[91] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
-        hooked[106] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
+        hooked[92] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
+        hooked[107] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
 
         DWORD oldProtection = 0;
         if (!VirtualProtect(objectVTable, sizeof(void*), PAGE_READWRITE, &oldProtection))
