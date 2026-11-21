@@ -2,11 +2,12 @@
 
 ## Implemented in source
 
-- Preserved the six v0.2 generic HLSL shaders and their \`vs_2_0\` / \`ps_2_0\` targets.
-- Fixed FXC path discovery for common Windows 8.1 and versioned Windows SDK layouts, with DirectX SDK June 2010 fallbacks.
+- Preserved all six v0.2 HLSL shader files byte-for-byte; SHA-256 comparisons against the original v0.2 archive passed.
+- Fixed FXC path discovery for common Windows 8.1 and versioned Windows SDK layouts, with DirectX SDK June 2010 fallback.
+- Removed FXC strict-mode `/Ges`: the legacy D3D9 `sampler2D` declarations are valid for these SM2 shaders, but strict mode rejects them as deprecated syntax.
 - Added non-empty bytecode and assembly-output checks after each FXC invocation.
-- Added checked HRESULT handling for texture and readback \`UnlockRect\` calls.
-- Added complete adapter PCI identity fields and explicit adapter-identification failure logging.
+- Added checked HRESULT handling for texture and readback `UnlockRect` calls.
+- Added adapter PCI identity fields and explicit adapter-identification failure logging.
 - Renamed the fixed-function texture capability field and logged PS 2.0 extended-capability fields separately.
 - Retained the HAL/software-VP baseline and added a separate conditional HAL/hardware-VP test path.
 - Added a non-identity WVP/View transform, non-uniform world scale and inverse-transpose normal matrix.
@@ -20,12 +21,15 @@
 
 | Check | State |
 |---|---|
-| v0.2 archive SHA-256 and ZIP integrity | PASS |
-| Six original shader files retained | PASS — source files copied unchanged |
-| Local source sanity tests | PASS |
-| FXC compilation | NOT RUN in this environment |
-| MSVC x86 compilation | NOT RUN in this environment |
-| GitHub Actions Windows x86 build | NOT VERIFIED — earlier attempts stopped during FXC discovery; latest workflow attempt is active, and FXC compilation / MSVC build have not yet produced a passing result |
+| Original v0.2 archive SHA-256 and ZIP integrity | PASS — `34cd5c3efa2d15bbf0fec1e6035ba90346c6c495c82d14cd3ebbcba5a69a29aa` |
+| Six original shader files | PASS — byte-for-byte SHA-256 matches against the original archive |
+| Source sanity tests | PASS — GitHub Actions run #8 |
+| FXC compilation | PASS — all six shaders compiled as `vs_2_0` / `ps_2_0` |
+| MSVC x86 compilation | PASS — `D3D9ShaderProbe.exe` built successfully with x86 MSVC |
+| Compiled bytecode headers | PASS — two VS files report `0xFFFE0200`, four PS files report `0xFFFF0200`; all end with `D3DSIO_END` |
+| Executable architecture | PASS — downloaded artifact inspected as PE32 Intel i386 |
+| GitHub Actions Windows x86 build | PASS — [run #8](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480), commit `3a27e439e33ac0907fbe76ebb2babea717bf077d` |
+| Windows x86 build artifact | PASS — [download artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480/artifacts/14696800281), ID `14696800281`; expires 2027-02-19 |
 | D3D9 runtime shader creation | NOT RUN |
 | HAL software-VP rendering on GMA 3100 | NOT RUN |
 | HAL hardware-VP rendering on GMA 3100 | NOT RUN |
@@ -33,6 +37,12 @@
 | GTA IV integration | NOT IMPLEMENTED |
 | GTA IV launch / FPS | NOT TESTED |
 
+## Build artifact details
+
+- Artifact: `iv-legacy-shader-engine-windows-x86.zip`
+- Contains six FXC bytecode files, six FXC assembly listings and `D3D9ShaderProbe.exe`.
+- SHA-256: `f887cfba637242c0613a55c11b6b0c0b8cce6eadc498158e55db65cfcc6625f1`
+
 ## Important boundary
 
-Prototype 0.3 is source code plus build automation. It is not yet a verified Windows executable and has not been run on the target GPU. CI success, when obtained, will prove only that the shaders compile and the x86 probe builds in the CI environment. It will not prove GMA 3100 driver acceptance, hardware vertex processing, correct rendering, GTA IV compatibility or performance.
+Prototype 0.3 now has a successful hosted Windows x86 compile. It is **not** yet a verified D3D9 runtime on the target computer and has not been run on the GMA 3100. CI success proves that the shader sources compile and the x86 probe links in the hosted environment. It does not prove GMA 3100 driver acceptance, hardware vertex processing, rendering correctness, GTA IV compatibility or performance.
