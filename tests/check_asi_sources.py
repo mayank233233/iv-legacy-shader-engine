@@ -57,14 +57,22 @@ if "wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath)" not in source:
     fail("path setup must preserve the full executable path for version validation")
 
 required_vtable_bindings = (
-    "original[92]",
-    "original[107]",
-    "hooked[92] = reinterpret_cast<void*>(HookDeviceCreateVertexShader)",
-    "hooked[107] = reinterpret_cast<void*>(HookDeviceCreatePixelShader)",
+    "kDeviceCreateVertexShaderSlot = 91",
+    "kDeviceCreatePixelShaderSlot = 106",
+    "original[kDeviceCreateVertexShaderSlot]",
+    "original[kDeviceCreatePixelShaderSlot]",
+    "hooked[kDeviceCreateVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceCreateVertexShader)",
+    "hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader)",
 )
 for binding in required_vtable_bindings:
     if binding not in source:
         fail(f"incorrect or missing IDirect3DDevice9 shader vtable binding: {binding}")
+
+smoke_source = SMOKE_SOURCE.read_text(encoding="utf-8")
+if "g_fakeDeviceVTable[91] = reinterpret_cast<void*>(FakeDeviceCreateVertexShader)" not in smoke_source:
+    fail("synthetic IDirect3DDevice9 CreateVertexShader slot is incorrect")
+if "g_fakeDeviceVTable[106] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader)" not in smoke_source:
+    fail("synthetic IDirect3DDevice9 CreatePixelShader slot is incorrect")
 
 if "caps->PixelShaderVersion =" in source or "caps->VertexShaderVersion =" in source:
     fail("telemetry plugin must not spoof shader-model capabilities")
