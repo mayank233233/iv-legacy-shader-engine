@@ -478,6 +478,17 @@ int main()
     if (!asi)
         return Fail("LoadLibrary failed for IVLegacyASI.asi");
 
+    FARPROC initializeAddress = GetProcAddress(asi, "InitializeASI");
+    if (!initializeAddress)
+        return Fail("ASI does not export the undecorated InitializeASI entry point");
+
+    typedef void (*InitializeASIFn)(void);
+    InitializeASIFn initializeASI =
+        reinterpret_cast<InitializeASIFn>(initializeAddress);
+    SmokeMark("before-InitializeASI");
+    initializeASI();
+    SmokeMark("after-InitializeASI");
+
     if (!WaitForLog("D3D9_IAT_HOOK_INSTALLED", 10000))
         return Fail("ASI bootstrap did not install the Direct3DCreate9 IAT hook");
 
