@@ -26,7 +26,7 @@ jobs:
       - name: Locate FXC
         shell: pwsh
         run: |
-          $fxc = Join-Path "$env:ProgramFiles(x86)" "Microsoft DirectX SDK (June 2010)\Utilities\bin\x86\fxc.exe"
+          $fxc = Join-Path "${env:ProgramFiles(x86)}" "Microsoft DirectX SDK (June 2010)\Utilities\bin\x86\fxc.exe"
           if (-not (Test-Path $fxc)) { throw "FXC not found at expected DirectX SDK location: $fxc" }
           Write-Host "Using FXC: $fxc"
           Split-Path $fxc -Parent | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
