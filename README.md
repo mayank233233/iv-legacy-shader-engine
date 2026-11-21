@@ -14,7 +14,8 @@ Prototype 0.3 is an experimental D3D9 shader-compatibility and reduction probe. 
 | `shaders/water_ps20.hlsl` | Two-texture scrolling water approximation |
 | `shaders/flat_lod_vs20.hlsl` | Position/vertex-colour transform for flat distant geometry |
 | `shaders/flat_lod_ps20.hlsl` | Texture-free vertex-colour/fog pass |
-| `src/D3D9ShaderProbe.cpp` | x86 D3D9 capability, shader-creation, draw/present and readback probe |
+| `src/D3D9ShaderProbe.cpp` | Standalone x86 D3D9 capability, shader-creation, draw/present and readback probe |
+| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI telemetry foundation; D3D9 import/vtable hooks only, no shader replacement yet |
 | `build/compile_shaders.bat` | FXC compilation and assembly-listing generation for all six shaders |
 | `build/build_probe.bat` | x86 MSVC build |
 | `build/run_probe.bat` | Launches the probe after checking its six bytecode files |
@@ -95,7 +96,8 @@ The adapter report separates fixed-function multitexture capability from the rep
 ## Known limitations
 
 - No GTA IV executable, game assets, proprietary bytecode, material definitions or render-state interfaces are included or reverse-engineered.
-- No D3D9 proxy DLL, ASI plugin, injection, hook, runtime interception, bytecode translation or game integration exists.
+- The x86 ASI telemetry foundation exists and hooks the main executable's direct `d3d9.dll!Direct3DCreate9` import, then selected `IDirect3D9` / `IDirect3DDevice9` vtable methods. It does not provide a complete D3D9 proxy, does not cover every dynamic-loading path, and has not yet been validated inside the real GTA IV executable.
+- No SM3-to-SM2 bytecode translation, shader replacement library, capability override, or working reduced renderer exists.
 - No exact reference-image comparison, shader correctness oracle, frame-time benchmark, performance tuning or device-loss/reset handling exists.
 - The patterned texture and non-identity matrix cases exercise more paths than v0.2 but do not independently prove every UV, matrix or normal-transform result.
 - Hardware VP may be unavailable or rejected by the driver. The software-VP and hardware-VP results must remain separate.
@@ -106,14 +108,16 @@ The adapter report separates fixed-function multitexture capability from the rep
 
 The full platform and rendering analysis is in [docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md](docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md). It covers the GMA 3100 SM2.0 limits, GTA IV shader evidence, the GTA IV and Minecraft optimization references, the proposed game-loaded ASI/D3D9 architecture, shader fallback strategy, risks and release gates.
 
-The next development work is a **GTA IV 1.0.0.0 game-loaded x86 plugin**, not another standalone shader demo:
+The first x86 ASI telemetry foundation is now implemented and compiled. It validates the host as GTAIV.exe with file version 1.0.0.0, creates a log/config, hooks Direct3DCreate9 through the main executable's IAT, and observes adapter identity, D3D9 caps, format checks, device creation, shader creation, render-target/depth-surface operations, Present failures and device Reset. It never spoofs shader capabilities or replaces shader bytecode.
 
-1. Create a version-aware ASI/plugin foundation with safe startup/shutdown, config and logs.
-2. Instrument the real D3D9 device without reporting fake capabilities.
-3. Inventory the game's shader creation, render-target and format requirements.
+Next steps:
+
+1. Prove the hook logic in the synthetic GTAIV.exe runtime smoke test now being added to CI.
+2. Validate the IAT assumption and plugin load timing against the real GTA IV 1.0.0.0 executable.
+3. Inventory actual game shader requests, device caps and render-target use.
 4. Build selected SM2 fallback shaders while preserving the game's constant/vertex interfaces.
-5. Add conservative state caching, buffer/resource reuse, visible-only rendering and reduced-effects options after instrumentation identifies safe targets.
+5. Add state caching, buffer/resource reuse, visible-only rendering and reduced effects after instrumentation identifies safe targets.
 
-The v0.3 standalone probe remains a developer reference for generic SM2 behavior. The next requested user test should be an installable GTA IV-loaded mod build, not the probe.
+The v0.3 standalone probe remains a developer reference for generic SM2 behavior. The next user test will be requested only when the compatibility path contains an actual GTA IV shader/rendering fallback, not merely because the telemetry plugin compiles.
 
 No GTA IV launch, rendering or FPS claim is made until the game-loaded build has been tested on the target machine. 30 FPS remains a target, not a guarantee.
