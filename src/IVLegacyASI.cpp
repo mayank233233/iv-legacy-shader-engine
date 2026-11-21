@@ -485,6 +485,10 @@ namespace
             WritePrivateProfileStringW(
                 L"General", L"CaptureDrawMaxCalls", L"4096", g_iniPath);
             WritePrivateProfileStringW(
+                L"General", L"CaptureShaderConstants", L"0", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"CaptureShaderConstantMaxRecords", L"2048", g_iniPath);
+            WritePrivateProfileStringW(
                 L"General", L"EnableShaderFallbacks", L"0", g_iniPath);
         }
     }
@@ -1701,6 +1705,14 @@ namespace
             reinterpret_cast<DeviceDrawPrimitiveUPFn>(original[kDeviceDrawPrimitiveUPSlot]);
         g_realDeviceDrawIndexedPrimitiveUP =
             reinterpret_cast<DeviceDrawIndexedPrimitiveUPFn>(original[kDeviceDrawIndexedPrimitiveUPSlot]);
+        g_realDeviceSetTexture =
+            reinterpret_cast<DeviceSetTextureFn>(original[kDeviceSetTextureSlot]);
+        g_realDeviceSetSamplerState =
+            reinterpret_cast<DeviceSetSamplerStateFn>(original[kDeviceSetSamplerStateSlot]);
+        g_realDeviceSetVertexShaderConstantF =
+            reinterpret_cast<DeviceSetShaderConstantFFn>(original[kDeviceSetVertexShaderConstantFSlot]);
+        g_realDeviceSetPixelShaderConstantF =
+            reinterpret_cast<DeviceSetShaderConstantFFn>(original[kDeviceSetPixelShaderConstantFSlot]);
 
         hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
@@ -1719,6 +1731,15 @@ namespace
             hooked[kDeviceDrawIndexedPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitive);
             hooked[kDeviceDrawPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitiveUP);
             hooked[kDeviceDrawIndexedPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
+            hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
+            hooked[kDeviceSetSamplerStateSlot] = reinterpret_cast<void*>(HookDeviceSetSamplerState);
+        }
+        if (g_captureShaderConstants)
+        {
+            hooked[kDeviceSetVertexShaderConstantFSlot] =
+                reinterpret_cast<void*>(HookDeviceSetVertexShaderConstantF);
+            hooked[kDeviceSetPixelShaderConstantFSlot] =
+                reinterpret_cast<void*>(HookDeviceSetPixelShaderConstantF);
         }
 
         DWORD oldProtection = 0;
@@ -1978,6 +1999,15 @@ namespace
                 L"General", L"CaptureDrawTelemetry", 0, g_iniPath) != 0;
         g_drawTelemetryMaxCalls = GetPrivateProfileIntW(
             L"General", L"CaptureDrawMaxCalls", 4096, g_iniPath);
+        g_captureShaderConstants =
+            GetPrivateProfileIntW(
+                L"General", L"CaptureShaderConstants", 0, g_iniPath) != 0;
+        g_captureShaderConstantMaxRecords = GetPrivateProfileIntW(
+            L"General", L"CaptureShaderConstantMaxRecords", 2048, g_iniPath);
+        if (g_captureShaderConstantMaxRecords == 0)
+            g_captureShaderConstantMaxRecords = 1;
+        if (g_captureShaderConstantMaxRecords > 8192)
+            g_captureShaderConstantMaxRecords = 8192;
         if (g_drawTelemetryMaxCalls == 0)
             g_drawTelemetryMaxCalls = 1;
         if (g_drawTelemetryMaxCalls > 65536)
@@ -1992,6 +2022,28 @@ namespace
             g_captureMaxFiles = 1;
         if (g_captureMaxFiles > 4096)
             g_captureMaxFiles = 4096;
+
+        if (g_captureShaderConstants)
+        {
+            _snwprintf_s(
+                g_shaderConstantCaptureDirectory,
+                MAX_PATH,
+                _TRUNCATE,
+                L"%s\\IVLegacyConstants",
+                g_gameDirectory);
+            if (CreateDirectoryW(g_shaderConstantCaptureDirectory, NULL) ||
+                GetLastError() == ERROR_ALREADY_EXISTS)
+            {
+                Log(
+                    "SHADER_CONSTANT_CAPTURE_ENABLED directory=IVLegacyConstants max_records=%lu",
+                    static_cast<unsigned long>(g_captureShaderConstantMaxRecords));
+            }
+            else
+            {
+                g_captureShaderConstants = FALSE;
+                Log("SHADER_CONSTANT_CAPTURE_DISABLED reason=cannot_create_capture_directory");
+            }
+        }
 
         if (g_captureShaderBytecode)
         {
