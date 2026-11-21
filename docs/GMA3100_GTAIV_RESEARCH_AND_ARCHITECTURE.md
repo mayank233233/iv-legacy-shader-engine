@@ -3,7 +3,7 @@
 **Target game:** Grand Theft Auto IV PC 1.0.0.0  
 **Target machine:** ASUS P5KPL-AM IN; Intel GMA 3100 (PCI VEN_8086 / DEV_29C2); Pentium Dual-Core E5200 2.50 GHz; 3 GB DDR2; Windows 8.1 32-bit; 1440×900  
 **Objective:** an installable, game-loaded compatibility/optimization mod, with a long-term 30 FPS target.  
-**Current baseline:** IV Legacy Shader Engine Prototype 0.3. It is a standalone D3D9 test harness, not the game mod.
+**Current baseline:** Prototype 0.5-alpha: a standalone SM2 D3D9 probe, an original-version-gated x86 ASI telemetry module, and conservative offline shader-analysis tooling. It is not yet a playable GTA IV mod.
 
 ## 1. Executive finding
 
@@ -197,10 +197,12 @@ Intel's integrated-graphics developer guidance warns that intermediate render ta
 | Milestone | Deliverable | Exit condition |
 |---|---|---|
 | Research baseline | This document, version/capability matrix, shader-family inventory and known-unknowns list | Architecture and failure modes documented |
-| 0.4-alpha — x86 telemetry foundation | Implemented ASI module with strict 1.0.0.0 file-version gate, log/config, main-executable Direct3DCreate9 IAT hook, per-object D3D9 vtable telemetry, opt-in bounded shader capture | Synthetic Windows x86 D3D9 smoke test passes; actual GTA IV load/import path remains unverified |
-| 0.5 — original-game D3D9 inventory | Validate the original executable's factory import path; capture actual device caps, format checks, shader create/bind calls and render-target use | Evidence from the unmodified GTAIV.exe 1.0.0.0 process |
-| 0.6 — first low-end shader family | A small set of mapped SM2 fallbacks (e.g. unlit/default materials) | Known surfaces render with documented visual compromises |
-| 0.6 — first low-end shader family | A small set of mapped SM2 fallbacks (e.g. unlit/default materials) | Known surfaces render with documented visual compromises |
+| 0.4-alpha — x86 telemetry foundation | Strict 1.0.0.0 version gate, log/config, main-executable Direct3DCreate9 IAT hook, per-object D3D9 vtable telemetry and bounded shader capture | Synthetic Windows x86 D3D9 smoke test passes; actual GTA IV load/import path remains unverified |
+| 0.5-alpha — loader and draw inventory foundation | Exported InitializeASI, opt-in draw hooks with shader-object/hash correlation, offline bytecode inventory and restrictive PS3-to-PS2 audit candidate generator | Synthetic Windows x86 run #81 passes; no original-game shader captures |
+| 0.6 — original-game D3D9 inventory and first fallback | Verify actual GTAIV.exe factory import path, capture real shader requests, map runtime variants, then select a small fallback family | Evidence from unmodified GTAIV.exe 1.0.0.0 and a tested material fallback on target D3D9 |
+| 0.7 — low-end renderer profile | More critical shader families plus safe state caching, reduced effects and LOD options | Game reaches a repeatable playable scene without missing critical materials |
+| 0.8 — memory/CPU work | Bounded resource reuse, safe culling and selected render batching | Improvements measured without mission/physics regressions |
+| 1.0 — installable compatibility/optimization release | Packaged plugin, presets, reversible install, known limitations and benchmark instructions | Confirmed game loading/rendering on target hardware; FPS stated only after real measurements |
 | 0.7 — low-end renderer profile | More critical shader families plus safe state caching, reduced effects and LOD options | Game reaches a repeatable playable scene without missing critical materials |
 | 0.8 — memory/CPU work | Bounded resource reuse, safe culling and selected render batching | Improvements measured without mission/physics regressions |
 | 1.0 — installable compatibility/optimization release | Packaged plugin, presets, reversible install, known limitations and benchmark instructions | Confirmed game loading/rendering on target hardware; FPS stated only after real measurements |
@@ -222,10 +224,14 @@ Use an evidence-based sequence:
 
 ## 9. Immediate engineering decision
 
-The x86 telemetry ASI and the synthetic hook test now exist. The latest Windows x86 CI run (#61) compiles the plugin, exercises the D3D9 factory/device hooks against a synthetic COM implementation, captures two synthetic SM2 shaders and inventories them. This verifies the test harness and hook path, not GTA IV.
+Prototype 0.5-alpha now passes the complete Windows x86 CI workflow (run #81). The synthetic host loads the ASI, resolves and invokes the exported `InitializeASI` symbol, drives the D3D9 factory/device hooks, creates/binds fake vertex and pixel shader objects, exercises all four D3D9 draw methods, and verifies bytecode capture and inventory. The draw log is opt-in and associates active shader-object addresses with primitive/draw metadata; shader creation records associate those object addresses with bytecode hashes.
 
-Keep the current D3D9 factory hook conservative: it patches the main executable's direct `d3d9.dll!Direct3DCreate9` IAT import only. An attempted all-loaded-module scan failed the synthetic test and was rolled back. Do not broaden interception again without a reproducible parser/test result. First verify the import table and plugin loading mechanism against the exact original GTAIV.exe 1.0.0.0 binary.
+A conservative offline shader audit/lowering tool is also present. It supports only a restricted pixel-shader subset: COLOR0/1 and TEXCOORD0–7 input remapping, a narrow PS2 instruction/register set, and explicit slot/dependent-read checks. It rejects vertex shaders and unsupported SM3 constructs. In the CI artifact, both captured shaders are synthetic SM2: the pixel shader is already PS2.0 and the vertex shader is outside the audit tool's scope. The CI run did **not** convert a real GTA IV shader.
 
-Then capture actual in-game shader bytecode, map runtime hashes to game shader variants and metadata, and implement the first targeted SM2 fallback while preserving vertex declarations, constants, samplers, render states and required animation. The six generic probe shaders and the two synthetic captures do not cover the game's shader set.
+The current factory hook remains deliberately conservative: it patches a direct `d3d9.dll!Direct3DCreate9` import in the main executable's IAT only. An all-loaded-module scan experiment failed the synthetic runtime test and was rolled back. Actual original `GTAIV.exe` import layout, load timing and UAL integration have not been verified in the game.
 
-This is still an experimental compatibility foundation, not an installable playable mod. The compatibility renderer remains unimplemented; performance settings alone cannot bypass the missing Shader Model 3.0 requirement.
+Next, verify the import path and ASI load path for the exact original GTA IV 1.0.0.0 executable; only then capture real shader bytecode and live draw/shader associations. Map those hashes to GTA IV disassembly/metadata, inventory required inputs, constants, samplers, render-targets and state. Expand the offline audit only when each supported instruction and interface transformation is specification-backed and tested. Implement a device-creation fallback only for a proven subset, with original-call fallback on unknown shaders and no false capability reporting.
+
+The shader audit is **not** a universal SM3-to-SM2 compiler, and its structurally eligible output is only a candidate for further D3D9 runtime and image comparison. No shader fallback is currently injected into GTA IV. This is still an experimental instrumentation/analysis foundation, not an installable playable mod.
+
+The GMA 3100 driver, real GTA IV scenes, mission/gameplay integrity and the 30 FPS objective remain untested. Performance must be measured only after a real scene renders correctly; hosted CI results cannot establish game compatibility or FPS.
