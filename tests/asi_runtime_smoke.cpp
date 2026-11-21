@@ -987,8 +987,38 @@ int main()
     const HRESULT setPixelBooleanConstantsHr = device->SetPixelShaderConstantB(
         5, pixelBooleanConstants, 2);
 
+    D3DVERTEXELEMENT9 declarationElements[3] = {};
+    declarationElements[0].Stream = 0;
+    declarationElements[0].Offset = 0;
+    declarationElements[0].Type = D3DDECLTYPE_FLOAT3;
+    declarationElements[0].Method = D3DDECLMETHOD_DEFAULT;
+    declarationElements[0].Usage = D3DDECLUSAGE_POSITION;
+    declarationElements[0].UsageIndex = 0;
+    declarationElements[1].Stream = 0;
+    declarationElements[1].Offset = 12;
+    declarationElements[1].Type = D3DDECLTYPE_FLOAT2;
+    declarationElements[1].Method = D3DDECLMETHOD_DEFAULT;
+    declarationElements[1].Usage = D3DDECLUSAGE_TEXCOORD;
+    declarationElements[1].UsageIndex = 0;
+    declarationElements[2].Stream = 0xFF;
+    declarationElements[2].Type = D3DDECLTYPE_UNUSED;
+
+    IDirect3DVertexDeclaration9* vertexDeclaration = NULL;
+    const HRESULT createVertexDeclarationHr = device->CreateVertexDeclaration(
+        declarationElements, &vertexDeclaration);
+    const HRESULT setVertexDeclarationHr = device->SetVertexDeclaration(vertexDeclaration);
+    const HRESULT setStreamSourceHr = device->SetStreamSource(
+        0,
+        reinterpret_cast<IDirect3DVertexBuffer9*>(&g_fakeVertexBuffer),
+        0,
+        20);
+    const HRESULT setStreamSourceFreqHr = device->SetStreamSourceFreq(0, 1);
+    const HRESULT setIndicesHr = device->SetIndices(
+        reinterpret_cast<IDirect3DIndexBuffer9*>(&g_fakeIndexBuffer));
+
     const HRESULT drawPrimitiveHr = device->DrawPrimitive(
         D3DPT_TRIANGLELIST, 0, 1);
+    const HRESULT setFVFHr = device->SetFVF(D3DFVF_XYZ | D3DFVF_TEX1);
     const HRESULT drawIndexedPrimitiveHr = device->DrawIndexedPrimitive(
         D3DPT_TRIANGLELIST, 0, 0, 3, 0, 1);
     const HRESULT drawPrimitiveUPHr = device->DrawPrimitiveUP(
@@ -1016,6 +1046,8 @@ int main()
         fallbackPixelShader->Release();
     if (fakeTexture)
         fakeTexture->Release();
+    if (vertexDeclaration)
+        vertexDeclaration->Release();
     device->Release();
     d3d->Release();
 
@@ -1076,6 +1108,16 @@ int main()
         !HasText("render_state_count=1") ||
         !HasText("texture_stage_count=1"))
         return Fail("D3D9 render-state or texture-stage snapshot hooks were not observed");
+    if (!HasText("VERTEX_DECL_OBJECT_CREATED") ||
+        !HasText("VERTEX_DECL_ELEMENT") ||
+        !HasText("SET_VERTEX_DECLARATION") ||
+        !HasText("SET_FVF") ||
+        !HasText("SET_STREAM_SOURCE") ||
+        !HasText("SET_STREAM_SOURCE_FREQ") ||
+        !HasText("SET_INDICES") ||
+        !HasText("vertex_decl=") ||
+        !HasText("streams="))
+        return Fail("D3D9 vertex declaration/FVF/stream/index telemetry was not observed");
     if (!HasText("SHADER_CONSTANT_CAPTURE_ENABLED") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=VS kind=F") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=PS kind=F") ||
