@@ -477,6 +477,30 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceSetVertexShaderConstantI(
+        IDirect3DDevice9*, UINT, const int*, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetPixelShaderConstantI(
+        IDirect3DDevice9*, UINT, const int*, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetVertexShaderConstantB(
+        IDirect3DDevice9*, UINT, const BOOL*, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetPixelShaderConstantB(
+        IDirect3DDevice9*, UINT, const BOOL*, UINT)
+    {
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeCreateDevice(
         IDirect3D9*,
         UINT,
@@ -534,7 +558,11 @@ namespace
         g_fakeDeviceVTable[65] = reinterpret_cast<void*>(FakeDeviceSetTexture);
         g_fakeDeviceVTable[69] = reinterpret_cast<void*>(FakeDeviceSetSamplerState);
         g_fakeDeviceVTable[94] = reinterpret_cast<void*>(FakeDeviceSetVertexShaderConstantF);
+        g_fakeDeviceVTable[96] = reinterpret_cast<void*>(FakeDeviceSetVertexShaderConstantI);
+        g_fakeDeviceVTable[98] = reinterpret_cast<void*>(FakeDeviceSetVertexShaderConstantB);
         g_fakeDeviceVTable[109] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantF);
+        g_fakeDeviceVTable[111] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantI);
+        g_fakeDeviceVTable[113] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantB);
         g_fakeDeviceVTable[23] = reinterpret_cast<void*>(FakeDeviceCreateTexture);
         g_fakeDeviceVTable[57] = reinterpret_cast<void*>(FakeDeviceSetRenderState);
         g_fakeDeviceVTable[67] = reinterpret_cast<void*>(FakeDeviceSetTextureStageState);
@@ -880,6 +908,10 @@ int main()
 
     const float vertexConstants[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
     const float pixelConstants[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
+    const int vertexIntegerConstants[4] = { 1, -2, 3, -4 };
+    const int pixelIntegerConstants[4] = { -5, 6, -7, 8 };
+    const BOOL vertexBooleanConstants[2] = { FALSE, TRUE };
+    const BOOL pixelBooleanConstants[2] = { TRUE, FALSE };
     IDirect3DTexture9* fakeTexture = NULL;
     const HRESULT createTextureHr = device->CreateTexture(
         64, 32, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
@@ -896,6 +928,14 @@ int main()
         4, vertexConstants, 1);
     const HRESULT setPixelConstantsHr = device->SetPixelShaderConstantF(
         7, pixelConstants, 1);
+    const HRESULT setVertexIntegerConstantsHr = device->SetVertexShaderConstantI(
+        2, vertexIntegerConstants, 1);
+    const HRESULT setPixelIntegerConstantsHr = device->SetPixelShaderConstantI(
+        1, pixelIntegerConstants, 1);
+    const HRESULT setVertexBooleanConstantsHr = device->SetVertexShaderConstantB(
+        4, vertexBooleanConstants, 2);
+    const HRESULT setPixelBooleanConstantsHr = device->SetPixelShaderConstantB(
+        5, pixelBooleanConstants, 2);
 
     const HRESULT drawPrimitiveHr = device->DrawPrimitive(
         D3DPT_TRIANGLELIST, 0, 1);
@@ -987,9 +1027,13 @@ int main()
         !HasText("texture_stage_count=1"))
         return Fail("D3D9 render-state or texture-stage snapshot hooks were not observed");
     if (!HasText("SHADER_CONSTANT_CAPTURE_ENABLED") ||
-        !HasText("SHADER_CONSTANT_CAPTURED stage=VS") ||
-        !HasText("SHADER_CONSTANT_CAPTURED stage=PS"))
-        return Fail("Vertex/pixel shader constant sidecar capture was not observed");
+        !HasText("SHADER_CONSTANT_CAPTURED stage=VS kind=F") ||
+        !HasText("SHADER_CONSTANT_CAPTURED stage=PS kind=F") ||
+        !HasText("SHADER_CONSTANT_CAPTURED stage=VS kind=I") ||
+        !HasText("SHADER_CONSTANT_CAPTURED stage=PS kind=I") ||
+        !HasText("SHADER_CONSTANT_CAPTURED stage=VS kind=B") ||
+        !HasText("SHADER_CONSTANT_CAPTURED stage=PS kind=B"))
+        return Fail("Float/integer/boolean VS/PS constant sidecar capture was not observed");
     if (!HasText("SHADER_CAPTURE_ENABLED") ||
         !HasText("SHADER_CAPTURED stage=VS") ||
         !HasText("SHADER_CAPTURED stage=PS"))
@@ -1026,8 +1070,8 @@ int main()
             ++constantFiles;
     } while (FindNextFileW(constantFind, &constantFindData));
     FindClose(constantFind);
-    if (constantFiles != 2)
-        return Fail("Expected exactly two bounded shader constant sidecar records");
+    if (constantFiles != 6)
+        return Fail("Expected six bounded float/integer/boolean shader constant sidecar records");
 
     std::printf("PASS: synthetic D3D9 interface/device hooks, shader capture and constant telemetry executed.\n");
     std::printf("Adapter: %s; vendor=0x%04lX device=0x%04lX\n",
