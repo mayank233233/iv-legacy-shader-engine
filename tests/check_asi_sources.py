@@ -46,6 +46,8 @@ required_source_markers = (
     "CaptureDrawMaxCalls",
     "SHADER_OBJECT_CREATED",
     "LogDrawTelemetry",
+    "g_presentFrameIndex",
+    "frameIndex",
     "HookDeviceDrawPrimitive",
     "HookDeviceDrawIndexedPrimitive",
     "HookDeviceDrawPrimitiveUP",
@@ -116,6 +118,7 @@ expected_draw_test_markers = (
     "device->DrawPrimitiveUP(",
     "device->DrawIndexedPrimitiveUP(",
     'L"General", L"CaptureDrawTelemetry", L"1"',
+    'HasText("frame=1")',
 )
 for marker in expected_draw_test_markers:
     if marker not in smoke_source:
