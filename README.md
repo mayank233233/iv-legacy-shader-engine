@@ -24,7 +24,7 @@ All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs
 
 ## v0.3 changes
 
-- FXC discovery checks the common Windows 8.1 SDK `bin\\x86` layout, versioned SDK layout, and both Program Files locations for the June 2010 DirectX SDK.
+- FXC discovery checks the common Windows 8.1 SDK `bin\x86` layout, versioned SDK layout, and both Program Files locations for the June 2010 DirectX SDK.
 - Texture `UnlockRect` and readback `UnlockRect` HRESULTs are checked and reported.
 - Adapter output includes vendor, device, subsystem and revision IDs, description, driver string and driver version. Adapter-identification failure is no longer silent.
 - Fixed-function `MaxSimultaneousTextures` is reported as `MaxFixedFunctionTextures`; PS 2.0 extended-capability fields are logged separately.
@@ -51,14 +51,14 @@ The target machine is expected to be Windows 8.1 x86, Intel GMA 3100 (`VEN_8086&
 Open an **x86 Native Tools Command Prompt** for Visual Studio, change to the repository root, then run:
 
 ```bat
-build\\compile_shaders.bat
-build\\build_probe.bat
-build\\run_probe.bat
+build\compile_shaders.bat
+build\build_probe.bat
+build\run_probe.bat
 ```
 
-The compiler script writes six bytecode files (`.vso` / `.pso`) and six FXC assembly listings into `build\\out`. The C++ build writes `build\\bin\\D3D9ShaderProbe.exe`. The probe writes `D3D9ProbeReport.txt` in the repository root.
+The compiler script writes six bytecode files (`.vso` / `.pso`) and six FXC assembly listings into `build\out`. The C++ build writes `build\bin\D3D9ShaderProbe.exe`. The probe writes `D3D9ProbeReport.txt` in the repository root.
 
-The FXC script searches `PATH`, the unversioned Windows SDK `bin\\x86` path, the versioned SDK path, and common DirectX SDK June 2010 locations. If FXC is installed elsewhere, add its directory to `PATH`.
+The FXC script searches `PATH`, the unversioned Windows SDK `bin\x86` path, the versioned SDK path, and common DirectX SDK June 2010 locations. If FXC is installed elsewhere, add its directory to `PATH`.
 
 ## Test modes and report interpretation
 
@@ -90,7 +90,7 @@ The adapter report separates fixed-function multitexture capability from the rep
 
 ## GitHub Actions boundary
 
-**Prototype 0.3 Windows x86 CI passed** in [run #10](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271). The workflow compiled all six HLSL files with FXC, built the 32-bit C++ executable with MSVC, staged the outputs under the repository-relative `build/` folder, and uploaded the 14-file artifact ([download](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271/artifacts/14696049437)). Extract the artifact over the repository root; it supplies `build/bin/D3D9ShaderProbe.exe`, `build/out/` bytecode and assembly files, and `build/run_probe.bat`. CI does **not** run the D3D9 windowed probe, validate a physical graphics driver, or prove hardware vertex-shader execution. Passing CI cannot replace running `build\\run_probe.bat` on the actual GMA 3100 machine.
+**Prototype 0.3 Windows x86 CI passed** in [run #10](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271). The workflow compiled all six HLSL files with FXC, built the 32-bit C++ executable with MSVC, staged the outputs under the repository-relative `build/` folder, and uploaded the 14-file artifact ([download](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271/artifacts/14696049437)). Extract the artifact over the repository root; it supplies `build/bin/D3D9ShaderProbe.exe`, `build/out/` bytecode and assembly files, and `build/run_probe.bat`. CI does **not** run the D3D9 windowed probe, validate a physical graphics driver, or prove hardware vertex-shader execution. Passing CI cannot replace running `build\run_probe.bat` on the actual GMA 3100 machine.
 
 ## Known limitations
 
