@@ -65,7 +65,7 @@ def main() -> None:
         assert report["record_count"] == 3
         assert report["invalid_record_count"] == 0
         assert report["stage_counts"] == {"VS": 2, "PS": 1}
-        assert report["frame_indices"] == [3]
+        assert report["frame_indices"] == [2, 3]
 
         bad_path = directory / "bad.bin"
         bad_path.write_bytes(b"BAD!" + vs_path.read_bytes()[4:])
