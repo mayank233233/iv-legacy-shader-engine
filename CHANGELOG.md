@@ -10,6 +10,9 @@
 - Added non-identity transforms, non-uniform world scale, varying vertex depth, patterned textures and a dedicated alpha-blended water test.
 - Split draw/present, readback and centre-pixel-change summaries.
 - Added Windows x86 CI for shader compilation and C++ build.
+- Removed FXC strict-mode `/Ges`, which rejects the Direct3D 9-era `sampler2D` syntax used by these Shader Model 2.0 shaders.
+- Verified all six FXC shader compilations and the x86 MSVC build in GitHub Actions run #10.
+- Corrected the build artifact to preserve `build/bin`, `build/out` and `build/run_probe.bat` paths.
 
 ## Prototype 0.2
 
