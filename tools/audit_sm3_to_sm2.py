@@ -660,6 +660,15 @@ def _check_source(
                 f"{OPCODE_NAMES.get(ins.opcode, 'instruction')} at DWORD {ins.offset} "
                 f"reads t{number}; ps_2_0 has t0-t7"
             )
+        elif number not in {
+            mapped_number
+            for mapped_type, mapped_number in input_remap.values()
+            if mapped_type == REG_TEXTURE
+        }:
+            reasons.append(
+                f"{OPCODE_NAMES.get(ins.opcode, 'instruction')} at DWORD {ins.offset} "
+                f"reads undeclared texture-coordinate register t{number}"
+            )
     elif kind == REG_SAMPLER:
         if not sampler:
             reasons.append(
@@ -882,6 +891,46 @@ def _self_test() -> None:
         make_source(REG_CONST, 0))
     masked_output.append(OP_END)
     assert not audit_and_lower_ps3(pack_words(*masked_output))["eligible"]
+
+    # Reject PS3 input DCL flags that this semantic-remapping pass cannot preserve.
+    flagged_dcl = [PS3_VERSION]
+    emit_instruction(
+        flagged_dcl, OP_DCL,
+        USAGE_TEXCOORD | (1 << 20),
+        make_register(REG_INPUT, 0)
+    )
+    emit_instruction(flagged_dcl, OP_MOV,
+        make_register(REG_COLOROUT, 0), make_source(REG_CONST, 0))
+    flagged_dcl.append(OP_END)
+    assert not audit_and_lower_ps3(pack_words(*flagged_dcl))["eligible"]
+
+    # Matrix instructions need contiguous c# registers and cannot negate the matrix source.
+    matrix_range = [PS3_VERSION]
+    emit_instruction(matrix_range, 20,
+        make_register(REG_TEMP, 0),
+        make_source(REG_TEMP, 1),
+        make_source(REG_CONST, 30))
+    emit_instruction(matrix_range, OP_MOV,
+        make_register(REG_COLOROUT, 0), make_source(REG_TEMP, 0))
+    matrix_range.append(OP_END)
+    range_result = audit_and_lower_ps3(pack_words(*matrix_range))
+    assert not range_result["eligible"] and any(
+        "constant range" in reason for reason in range_result["reasons"]
+    )
+
+    matrix_modifier = [PS3_VERSION]
+    emit_instruction(matrix_modifier, 20,
+        make_register(REG_TEMP, 0),
+        make_source(REG_TEMP, 1),
+        make_source(REG_CONST, 0, modifier=SOURCE_MOD_NEGATE))
+    emit_instruction(matrix_modifier, OP_MOV,
+        make_register(REG_COLOROUT, 0), make_source(REG_TEMP, 0))
+    matrix_modifier.append(OP_END)
+    modifier_result = audit_and_lower_ps3(pack_words(*matrix_modifier))
+    assert not modifier_result["eligible"] and any(
+        "modifier or swizzle on its matrix source" in reason
+        for reason in modifier_result["reasons"]
+    )
 
     print("PASS: conservative ps_3_0 to ps_2_0 downlevel audit self-tests")
 
