@@ -1,3 +1,12 @@
+## Prototype 0.5.5-alpha — vertex/index buffer descriptors
+
+- Added opt-in D3D9 CreateVertexBuffer and CreateIndexBuffer hooks at slots 26 and 27.
+- Successful creation records include object address, byte length, usage, FVF or index format, and pool.
+- Extended offline draw correlation to resolve vertex-stream and index-buffer pointers back to their creation descriptors.
+- Synthetic host creates a managed 4096-byte vertex buffer and a managed 1024-byte INDEX16 index buffer; analyzer verifies both descriptors are associated with the first draw.
+- Windows x86 CI run #172 passes every step. Artifact 14701424322; SHA-256 `bf39064f10d794d89c2ba04f96b6bc93b0be07a37a43a37fab897bea06dcf148`.
+- Buffer descriptors are synthetic test data. Original GTA IV and the physical GMA 3100 remain untested.
+
 ## Prototype 0.5.4-alpha — vertex input telemetry
 
 - Added opt-in hooks for D3D9 vertex declaration creation/binding, FVF binding, stream source/frequency and index-buffer binding at slots 86, 87, 89, 100, 102 and 104.
