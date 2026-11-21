@@ -23,6 +23,9 @@ namespace
     wchar_t g_iniPath[MAX_PATH] = {};
     volatile LONG g_logLock = 0;
     volatile LONG g_capsLogCount = 0;
+    volatile LONG g_adapterLogCount = 0;
+    volatile LONG g_formatCheckLogCount = 0;
+    volatile LONG g_depthMatchLogCount = 0;
     volatile LONG g_vertexShaderLogCount = 0;
     volatile LONG g_pixelShaderLogCount = 0;
     volatile LONG g_renderTargetLogCount = 0;
@@ -30,6 +33,12 @@ namespace
     BOOL g_telemetryEnabled = TRUE;
 
     typedef IDirect3D9* (WINAPI* Direct3DCreate9Fn)(UINT);
+    typedef HRESULT (WINAPI* D3D9GetAdapterIdentifierFn)(
+        IDirect3D9*, UINT, DWORD, D3DADAPTER_IDENTIFIER9*);
+    typedef HRESULT (WINAPI* D3D9CheckDeviceFormatFn)(
+        IDirect3D9*, UINT, D3DDEVTYPE, D3DFORMAT, DWORD, D3DRESOURCETYPE, D3DFORMAT);
+    typedef HRESULT (WINAPI* D3D9CheckDepthStencilMatchFn)(
+        IDirect3D9*, UINT, D3DDEVTYPE, D3DFORMAT, D3DFORMAT, D3DFORMAT);
     typedef HRESULT (WINAPI* D3D9GetDeviceCapsFn)(
         IDirect3D9*, UINT, D3DDEVTYPE, D3DCAPS9*);
     typedef HRESULT (WINAPI* D3D9CreateDeviceFn)(
@@ -45,6 +54,11 @@ namespace
     typedef HRESULT (WINAPI* DeviceCreateRenderTargetFn)(
         IDirect3DDevice9*, UINT, UINT, D3DFORMAT, D3DMULTISAMPLE_TYPE,
         DWORD, BOOL, IDirect3DSurface9**, HANDLE*);
+    typedef HRESULT (WINAPI* DeviceCreateDepthStencilSurfaceFn)(
+        IDirect3DDevice9*, UINT, UINT, D3DFORMAT, D3DMULTISAMPLE_TYPE,
+        DWORD, BOOL, IDirect3DSurface9**, HANDLE*);
+    typedef HRESULT (WINAPI* DeviceSetDepthStencilSurfaceFn)(
+        IDirect3DDevice9*, IDirect3DSurface9*);
     typedef HRESULT (WINAPI* DeviceSetRenderTargetFn)(
         IDirect3DDevice9*, DWORD, IDirect3DSurface9*);
     typedef HRESULT (WINAPI* DeviceCreateVertexShaderFn)(
@@ -53,6 +67,9 @@ namespace
         IDirect3DDevice9*, const DWORD*, IDirect3DPixelShader9**);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
+    D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
+    D3D9CheckDeviceFormatFn g_realD3D9CheckDeviceFormat = NULL;
+    D3D9CheckDepthStencilMatchFn g_realD3D9CheckDepthStencilMatch = NULL;
     D3D9GetDeviceCapsFn g_realD3D9GetDeviceCaps = NULL;
     D3D9CreateDeviceFn g_realD3D9CreateDevice = NULL;
 
@@ -60,7 +77,9 @@ namespace
     DeviceResetFn g_realDeviceReset = NULL;
     DevicePresentFn g_realDevicePresent = NULL;
     DeviceCreateRenderTargetFn g_realDeviceCreateRenderTarget = NULL;
+    DeviceCreateDepthStencilSurfaceFn g_realDeviceCreateDepthStencilSurface = NULL;
     DeviceSetRenderTargetFn g_realDeviceSetRenderTarget = NULL;
+    DeviceSetDepthStencilSurfaceFn g_realDeviceSetDepthStencilSurface = NULL;
     DeviceCreateVertexShaderFn g_realDeviceCreateVertexShader = NULL;
     DeviceCreatePixelShaderFn g_realDeviceCreatePixelShader = NULL;
 
@@ -309,6 +328,101 @@ namespace
         return hr;
     }
 
+    HRESULT WINAPI HookD3D9GetAdapterIdentifier(
+        IDirect3D9* self,
+        UINT adapter,
+        DWORD flags,
+        D3DADAPTER_IDENTIFIER9* identifier)
+    {
+        if (!g_realD3D9GetAdapterIdentifier)
+            return D3DERR_INVALIDCALL;
+
+        const HRESULT hr =
+            g_realD3D9GetAdapterIdentifier(self, adapter, flags, identifier);
+        if (SUCCEEDED(hr) && identifier &&
+            InterlockedIncrement(&g_adapterLogCount) <= 16)
+        {
+            Log(
+                "D3D9_ADAPTER adapter=%u vendor=0x%04lX device=0x%04lX "
+                "subsys=0x%08lX revision=0x%08lX driver_version=%08lX:%08lX "
+                "description=%s driver=%s",
+                adapter,
+                static_cast<unsigned long>(identifier->VendorId),
+                static_cast<unsigned long>(identifier->DeviceId),
+                static_cast<unsigned long>(identifier->SubSysId),
+                static_cast<unsigned long>(identifier->Revision),
+                static_cast<unsigned long>(identifier->DriverVersion.HighPart),
+                static_cast<unsigned long>(identifier->DriverVersion.LowPart),
+                identifier->Description,
+                identifier->Driver);
+        }
+        else if (FAILED(hr))
+        {
+            Log(
+                "D3D9_ADAPTER_IDENTIFIER_FAILED adapter=%u hr=0x%08lX",
+                adapter, static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookD3D9CheckDeviceFormat(
+        IDirect3D9* self,
+        UINT adapter,
+        D3DDEVTYPE deviceType,
+        D3DFORMAT adapterFormat,
+        DWORD usage,
+        D3DRESOURCETYPE resourceType,
+        D3DFORMAT checkFormat)
+    {
+        const HRESULT hr = g_realD3D9CheckDeviceFormat
+            ? g_realD3D9CheckDeviceFormat(
+                self, adapter, deviceType, adapterFormat,
+                usage, resourceType, checkFormat)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_formatCheckLogCount) <= 512)
+        {
+            Log(
+                "D3D9_CHECK_DEVICE_FORMAT adapter=%u type=%u adapter_format=%u "
+                "usage=0x%08lX resource_type=%u check_format=%u hr=0x%08lX",
+                adapter, static_cast<unsigned>(deviceType),
+                static_cast<unsigned>(adapterFormat),
+                static_cast<unsigned long>(usage),
+                static_cast<unsigned>(resourceType),
+                static_cast<unsigned>(checkFormat),
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookD3D9CheckDepthStencilMatch(
+        IDirect3D9* self,
+        UINT adapter,
+        D3DDEVTYPE deviceType,
+        D3DFORMAT adapterFormat,
+        D3DFORMAT renderTargetFormat,
+        D3DFORMAT depthStencilFormat)
+    {
+        const HRESULT hr = g_realD3D9CheckDepthStencilMatch
+            ? g_realD3D9CheckDepthStencilMatch(
+                self, adapter, deviceType, adapterFormat,
+                renderTargetFormat, depthStencilFormat)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_depthMatchLogCount) <= 256)
+        {
+            Log(
+                "D3D9_CHECK_DEPTH_MATCH adapter=%u type=%u adapter_format=%u "
+                "render_format=%u depth_format=%u hr=0x%08lX",
+                adapter, static_cast<unsigned>(deviceType),
+                static_cast<unsigned>(adapterFormat),
+                static_cast<unsigned>(renderTargetFormat),
+                static_cast<unsigned>(depthStencilFormat),
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
     HRESULT WINAPI HookDeviceGetDeviceCaps(
         IDirect3DDevice9* self,
         D3DCAPS9* caps)
@@ -396,6 +510,63 @@ namespace
                 static_cast<unsigned long>(hr));
         }
         return hr;
+    }
+
+    HRESULT WINAPI HookDeviceCreateDepthStencilSurface(
+        IDirect3DDevice9* self,
+        UINT width,
+        UINT height,
+        D3DFORMAT format,
+        D3DMULTISAMPLE_TYPE multisample,
+        DWORD quality,
+        BOOL discard,
+        IDirect3DSurface9** surface,
+        HANDLE* sharedHandle)
+    {
+        const HRESULT hr = g_realDeviceCreateDepthStencilSurface
+            ? g_realDeviceCreateDepthStencilSurface(
+                self, width, height, format, multisample,
+                quality, discard, surface, sharedHandle)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_renderTargetLogCount) <= 256)
+        {
+            Log(
+                "CREATE_DEPTH_STENCIL_SURFACE width=%u height=%u format=%u "
+                "multisample=%u quality=%lu discard=%u hr=0x%08lX",
+                width, height, static_cast<unsigned>(format),
+                static_cast<unsigned>(multisample),
+                static_cast<unsigned long>(quality),
+                discard ? 1 : 0,
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetDepthStencilSurface(
+        IDirect3DDevice9* self,
+        IDirect3DSurface9* surface)
+    {
+        if (surface && InterlockedIncrement(&g_setRenderTargetLogCount) <= 512)
+        {
+            D3DSURFACE_DESC desc = {};
+            const HRESULT descHr = surface->GetDesc(&desc);
+            if (SUCCEEDED(descHr))
+            {
+                Log(
+                    "SET_DEPTH_STENCIL_SURFACE width=%u height=%u format=%u",
+                    desc.Width, desc.Height, static_cast<unsigned>(desc.Format));
+            }
+            else
+            {
+                Log("SET_DEPTH_STENCIL_SURFACE desc_hr=0x%08lX",
+                    static_cast<unsigned long>(descHr));
+            }
+        }
+
+        return g_realDeviceSetDepthStencilSurface
+            ? g_realDeviceSetDepthStencilSurface(self, surface)
+            : D3DERR_INVALIDCALL;
     }
 
     HRESULT WINAPI HookDeviceSetRenderTarget(
@@ -494,8 +665,12 @@ namespace
         g_realDevicePresent = reinterpret_cast<DevicePresentFn>(original[17]);
         g_realDeviceCreateRenderTarget =
             reinterpret_cast<DeviceCreateRenderTargetFn>(original[28]);
+        g_realDeviceCreateDepthStencilSurface =
+            reinterpret_cast<DeviceCreateDepthStencilSurfaceFn>(original[29]);
         g_realDeviceSetRenderTarget =
             reinterpret_cast<DeviceSetRenderTargetFn>(original[37]);
+        g_realDeviceSetDepthStencilSurface =
+            reinterpret_cast<DeviceSetDepthStencilSurfaceFn>(original[39]);
         g_realDeviceCreateVertexShader =
             reinterpret_cast<DeviceCreateVertexShaderFn>(original[91]);
         g_realDeviceCreatePixelShader =
@@ -505,7 +680,9 @@ namespace
         hooked[16] = reinterpret_cast<void*>(HookDeviceReset);
         hooked[17] = reinterpret_cast<void*>(HookDevicePresent);
         hooked[28] = reinterpret_cast<void*>(HookDeviceCreateRenderTarget);
+        hooked[29] = reinterpret_cast<void*>(HookDeviceCreateDepthStencilSurface);
         hooked[37] = reinterpret_cast<void*>(HookDeviceSetRenderTarget);
+        hooked[39] = reinterpret_cast<void*>(HookDeviceSetDepthStencilSurface);
         hooked[91] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
         hooked[106] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
 
@@ -586,11 +763,20 @@ namespace
         }
 
         CopyMemory(hooked, original, sizeof(void*) * kD3D9InterfaceSlots);
+        g_realD3D9GetAdapterIdentifier =
+            reinterpret_cast<D3D9GetAdapterIdentifierFn>(original[5]);
+        g_realD3D9CheckDeviceFormat =
+            reinterpret_cast<D3D9CheckDeviceFormatFn>(original[10]);
+        g_realD3D9CheckDepthStencilMatch =
+            reinterpret_cast<D3D9CheckDepthStencilMatchFn>(original[12]);
         g_realD3D9GetDeviceCaps =
             reinterpret_cast<D3D9GetDeviceCapsFn>(original[14]);
         g_realD3D9CreateDevice =
             reinterpret_cast<D3D9CreateDeviceFn>(original[16]);
 
+        hooked[5] = reinterpret_cast<void*>(HookD3D9GetAdapterIdentifier);
+        hooked[10] = reinterpret_cast<void*>(HookD3D9CheckDeviceFormat);
+        hooked[12] = reinterpret_cast<void*>(HookD3D9CheckDepthStencilMatch);
         hooked[14] = reinterpret_cast<void*>(HookD3D9GetDeviceCaps);
         hooked[16] = reinterpret_cast<void*>(HookD3D9CreateDevice);
 
