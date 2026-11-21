@@ -751,6 +751,12 @@ namespace
         {
             InterlockedExchangePointer(&g_currentVertexShader, NULL);
             InterlockedExchangePointer(&g_currentPixelShader, NULL);
+            for (DWORD stage = 0; stage < 16; ++stage)
+            {
+                InterlockedExchangePointer(&g_currentTextures[stage], NULL);
+                for (DWORD state = 0; state < 14; ++state)
+                    InterlockedExchange(&g_samplerStates[stage][state], 0);
+            }
         }
         return hr;
     }
@@ -1487,10 +1493,43 @@ namespace
         const LONG frameIndex =
             InterlockedCompareExchange(&g_presentFrameIndex, 0, 0);
 
+        char textureBindings[512] = {};
+        size_t textureOffset = 0;
+        for (DWORD stage = 0; stage < 16; ++stage)
+        {
+            PVOID texture = InterlockedCompareExchangePointer(
+                &g_currentTextures[stage], NULL, NULL);
+            const int appended = _snprintf_s(
+                textureBindings + textureOffset,
+                _countof(textureBindings) - textureOffset,
+                _TRUNCATE,
+                "%lu:%p;",
+                static_cast<unsigned long>(stage),
+                texture);
+            if (appended < 0)
+                break;
+            textureOffset += static_cast<size_t>(appended);
+            if (textureOffset >= _countof(textureBindings) - 1)
+                break;
+        }
+
+        unsigned __int64 samplerHash = 14695981039346656037ULL;
+        for (DWORD sampler = 0; sampler < 16; ++sampler)
+        {
+            for (DWORD state = 0; state < 14; ++state)
+            {
+                const DWORD value = static_cast<DWORD>(
+                    InterlockedCompareExchange(
+                        &g_samplerStates[sampler][state], 0, 0));
+                samplerHash ^= (sampler << 24) | (state << 16) | (value & 0xFFFF);
+                samplerHash *= 1099511628211ULL;
+            }
+        }
+
         Log(
             "DRAW_CALL seq=%ld frame=%ld kind=%s device=%p primitive=%u primitives=%u "
             "start_vertex=%u base_vertex=%ld min_vertex=%u num_vertices=%u "
-            "start_index=%u bound_vs=%p bound_ps=%p hr=0x%08lX",
+            "start_index=%u bound_vs=%p bound_ps=%p textures=%s sampler_hash=%016llX hr=0x%08lX",
             sequence,
             frameIndex,
             kind,
@@ -1504,6 +1543,8 @@ namespace
             startIndex,
             vertexShader,
             pixelShader,
+            textureBindings,
+            samplerHash,
             static_cast<unsigned long>(result));
     }
 
