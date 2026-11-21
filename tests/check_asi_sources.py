@@ -5,6 +5,7 @@ SOURCE = ROOT / "src" / "IVLegacyASI.cpp"
 BUILD = ROOT / "build" / "build_asi.bat"
 SMOKE_SOURCE = ROOT / "tests" / "asi_runtime_smoke.cpp"
 SMOKE_RESOURCE = ROOT / "tests" / "test_gtaiv_version.rc"
+EXPORT_DEF = ROOT / "src" / "IVLegacyASI.def"
 
 def fail(message: str) -> None:
     print(f"FAIL: {message}")
@@ -14,14 +15,18 @@ if not SOURCE.is_file():
     fail("missing game-loaded ASI source")
 if not BUILD.is_file():
     fail("missing x86 ASI build script")
-if not SMOKE_SOURCE.is_file() or not SMOKE_RESOURCE.is_file():
-    fail("missing D3D9 ASI runtime smoke-test source or version resource")
+if not SMOKE_SOURCE.is_file() or not SMOKE_RESOURCE.is_file() or not EXPORT_DEF.is_file():
+    fail("missing D3D9 ASI runtime smoke-test source, version resource or export definition")
 
 source = SOURCE.read_text(encoding="utf-8")
 build = BUILD.read_text(encoding="utf-8")
 
 required_source_markers = (
     "GTAIV.exe",
+    "InitializePluginOnce",
+    "BootstrapWorkerThread",
+    "g_bootstrapStarted",
+    "g_bootstrapCompleted",
     "TARGET_VERSION_MISMATCH",
     "Direct3DCreate9",
     "D3D9_ADAPTER",
@@ -56,6 +61,14 @@ required_source_markers = (
 for marker in required_source_markers:
     if marker not in source:
         fail(f"required telemetry hook marker missing: {marker}")
+
+export_definition = EXPORT_DEF.read_text(encoding="utf-8")
+if "InitializeASI=_InitializeASI" not in export_definition:
+    fail("x86 module definition must export undecorated InitializeASI")
+if "src\\IVLegacyASI.def" not in build:
+    fail("ASI build must link the InitializeASI module definition")
+if 'GetProcAddress(asi, "InitializeASI")' not in SMOKE_SOURCE.read_text(encoding="utf-8"):
+    fail("synthetic runtime smoke test must resolve InitializeASI by its public export name")
 
 if "wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath)" not in source:
     fail("path setup must preserve the full executable path for version validation")
