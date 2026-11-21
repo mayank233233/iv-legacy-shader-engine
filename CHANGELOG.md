@@ -1,3 +1,13 @@
+## Prototype 0.5.4-alpha — vertex input telemetry
+
+- Added opt-in hooks for D3D9 vertex declaration creation/binding, FVF binding, stream source/frequency and index-buffer binding at slots 86, 87, 89, 100, 102 and 104.
+- Logged bounded `D3DVERTEXELEMENT9` declaration elements, including stream, byte offset, type, method, usage and usage index.
+- Added declaration/FVF, index-buffer and stream-buffer/offset/stride/frequency state to frame-indexed draw records; successful Reset clears the cached input bindings.
+- Extended the offline draw analyzer to reconstruct declaration elements and aggregate draws by vertex input layout, stream and index-buffer.
+- Synthetic test creates a POSITION float3 + TEXCOORD float2 declaration, binds a fake vertex stream and index buffer, draws once with the declaration, then switches to FVF `0x00000102`.
+- Windows x86 CI run #165 passes all steps, including the new vertex input runtime smoke test and analyzer assertions. Artifact 14700884610; SHA-256 `639671695847d8609ac9c9feb1790172dcd674b09359632faf85b1f701e21655`.
+- These are synthetic D3D9 inputs. No original GTA IV vertex declarations or shaders have been captured or translated.
+
 ## Prototype 0.5.1-alpha — frame-aware draw analysis and executable inspection
 
 - Added the successful-Present frame index to opt-in D3D9 draw records.
