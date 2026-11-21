@@ -1,4 +1,4 @@
-# Prototype 0.3 — status
+# IV Legacy Shader Engine — status
 
 ## Implemented in source
 
@@ -78,16 +78,42 @@ Prototype 0.3 now has a successful hosted Windows x86 compile. It is **not** yet
 
 | Check | State |
 |---|---|
-| ASI source sanity checks | PASS — GitHub Actions run #21 |
-| x86 MSVC compile/link | PASS — GitHub Actions run #21 |
-| PE format | PASS — extracted artifact is PE32, machine 0x14C (Intel i386), DLL characteristic set |
-| ASI artifact | PASS — [run #21 artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44880965914/artifacts/14697791796), artifact ID 14697791796 |
-| Synthetic GTAIV.exe runtime hook smoke test | ADDED TO CI; result pending latest run |
-| Actual GTA IV 1.0.0.0 load / hook execution | NOT RUN |
+| ASI source sanity checks | PASS — GitHub Actions run #61 |
+| x86 MSVC compile/link | PASS — run #61; ASI produced as PE32 x86 DLL-format module |
+| D3D9 synthetic runtime hooks | PASS — run #61; factory, caps/format/device/surface/shader creation and shader binding test paths |
+| Bounded SM2 capture | PASS — run #61; two synthetic SM2 shader binaries written and parsed |
+| Original GTA IV 1.0.0.0 load / hook execution | NOT RUN |
 | Actual GMA 3100 D3D9 driver behaviour | NOT RUN |
+| GTA IV shader bytecode capture | NOT RUN |
 | Shader bytecode fallback / SM3 reduction | NOT IMPLEMENTED |
 | GTA IV scene rendering / FPS | NOT TESTED |
 
 ### Important integration boundary
 
 The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in the main executable. It is not a complete d3d9.dll proxy and does not yet handle every possible GetProcAddress, delay-load, or secondary-module creation path. The synthetic CI host tests the method-hook mechanism, not GTA IV's exact binary/import layout. That must be validated before relying on it for game integration.
+
+ 
+## Prototype 0.4-alpha verification — 2026-11-21
+
+- Exact target: original PC GTAIV.exe file version 1.0.0.0; the default plugin gate rejects other file versions. No later patch or Complete Edition is a target.
+- Current CI: [Windows x86 run #61](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44884318642), commit b707bb8361580dedc457dfe51ea13068a67b9846, all workflow steps passed.
+- Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44884318642/artifacts/14698909429), artifact ID 14698909429; SHA-256 57115fe856777802f7470ba93d944b022dce7967dcf654ed8fde6fe183482bb3.
+- Artifact contents: IVLegacyASI.asi, build/bin/D3D9ShaderProbe.exe, six SM2 bytecode files and six FXC assembly listings, compiled shader inventory JSON, two captured synthetic SM2 binaries and their inventory JSON, and the probe launcher.
+- The synthetic host reports PCI ID 8086:29C2 and SM2 caps, but those values are supplied by a fake COM implementation. It tests hook logic only; it is not the Intel driver or the original game.
+- The two captured bytecode files are the synthetic CI host's SM2 test shaders. They are not GTA IV's proprietary/runtime shaders.
+- Shader creation and binding hooks cover the verified D3D9 method slots: CreateVertexShader 91, SetVertexShader 92, CreatePixelShader 106, SetPixelShader 107.
+- The factory interception currently patches the direct d3d9.dll!Direct3DCreate9 import in the main executable's IAT. The experimental all-loaded-module scan was rolled back after it failed the synthetic test. Dynamic GetProcAddress, delay-load and secondary-module paths are not covered by the current build.
+- The ASI uses DLL entry-point loading and is built with the .asi extension, but its behavior through a real ASI loader has not been verified.
+
+### Remaining gates
+
+| Gate | State |
+|---|---|
+| Confirm actual original GTAIV.exe PE import table and direct D3D9 factory path | NOT VERIFIED |
+| Load plugin inside original GTA IV 1.0.0.0 via the intended loader | NOT TESTED |
+| Capture real GTA IV SM3 shaders and map hashes to game variants | NOT RUN |
+| Implement the first actual SM2 fallback shader(s) | NOT IMPLEMENTED |
+| Replace or safely lower unsupported SM3 shader requests | NOT IMPLEMENTED |
+| Render GTA IV scenes on Intel GMA 3100 | NOT TESTED |
+| Measure FPS / 30 FPS objective | NOT TESTED |
+
