@@ -40,7 +40,11 @@ namespace
         kDeviceCreateVertexShaderSlot = 91,
         kDeviceSetVertexShaderSlot = 92,
         kDeviceCreatePixelShaderSlot = 106,
-        kDeviceSetPixelShaderSlot = 107
+        kDeviceSetPixelShaderSlot = 107,
+        kDeviceDrawPrimitiveSlot = 81,
+        kDeviceDrawIndexedPrimitiveSlot = 82,
+        kDeviceDrawPrimitiveUPSlot = 83,
+        kDeviceDrawIndexedPrimitiveUPSlot = 84
     };
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
@@ -61,6 +65,11 @@ namespace
     volatile LONG g_pixelShaderLogCount = 0;
     volatile LONG g_setVertexShaderLogCount = 0;
     volatile LONG g_setPixelShaderLogCount = 0;
+    volatile LONG g_drawCallCount = 0;
+    PVOID volatile g_currentVertexShader = NULL;
+    PVOID volatile g_currentPixelShader = NULL;
+    BOOL g_drawTelemetryEnabled = FALSE;
+    DWORD g_drawTelemetryMaxCalls = 4096;
     volatile LONG g_renderTargetLogCount = 0;
     volatile LONG g_depthTargetCreateLogCount = 0;
     volatile LONG g_setRenderTargetLogCount = 0;
@@ -106,6 +115,15 @@ namespace
         IDirect3DDevice9*, IDirect3DVertexShader9*);
     typedef HRESULT (WINAPI* DeviceSetPixelShaderFn)(
         IDirect3DDevice9*, IDirect3DPixelShader9*);
+    typedef HRESULT (WINAPI* DeviceDrawPrimitiveFn)(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
+    typedef HRESULT (WINAPI* DeviceDrawIndexedPrimitiveFn)(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
+    typedef HRESULT (WINAPI* DeviceDrawPrimitiveUPFn)(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, const void*, UINT);
+    typedef HRESULT (WINAPI* DeviceDrawIndexedPrimitiveUPFn)(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT,
+        const void*, D3DFORMAT, const void*, UINT);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
     D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
@@ -125,6 +143,10 @@ namespace
     DeviceSetVertexShaderFn g_realDeviceSetVertexShader = NULL;
     DeviceCreatePixelShaderFn g_realDeviceCreatePixelShader = NULL;
     DeviceSetPixelShaderFn g_realDeviceSetPixelShader = NULL;
+    DeviceDrawPrimitiveFn g_realDeviceDrawPrimitive = NULL;
+    DeviceDrawIndexedPrimitiveFn g_realDeviceDrawIndexedPrimitive = NULL;
+    DeviceDrawPrimitiveUPFn g_realDeviceDrawPrimitiveUP = NULL;
+    DeviceDrawIndexedPrimitiveUPFn g_realDeviceDrawIndexedPrimitiveUP = NULL;
 
     void Log(const char* format, ...)
     {
@@ -426,6 +448,10 @@ namespace
                 L"General", L"StrictGTAIV100", L"1", g_iniPath);
             WritePrivateProfileStringW(
                 L"General", L"CaptureShaderBytecode", L"0", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"CaptureDrawTelemetry", L"0", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"CaptureDrawMaxCalls", L"4096", g_iniPath);
         }
     }
 
@@ -679,6 +705,11 @@ namespace
             : D3DERR_INVALIDCALL;
 
         Log("DEVICE_RESET_RESULT hr=0x%08lX", static_cast<unsigned long>(hr));
+        if (SUCCEEDED(hr))
+        {
+            InterlockedExchangePointer(&g_currentVertexShader, NULL);
+            InterlockedExchangePointer(&g_currentPixelShader, NULL);
+        }
         return hr;
     }
 
@@ -862,6 +893,9 @@ namespace
             ? g_realDeviceSetVertexShader(self, shader)
             : D3DERR_INVALIDCALL;
 
+        if (SUCCEEDED(hr))
+            InterlockedExchangePointer(&g_currentVertexShader, shader);
+
         if (InterlockedIncrement(&g_setVertexShaderLogCount) <= 2048)
         {
             Log(
@@ -879,12 +913,139 @@ namespace
             ? g_realDeviceSetPixelShader(self, shader)
             : D3DERR_INVALIDCALL;
 
+        if (SUCCEEDED(hr))
+            InterlockedExchangePointer(&g_currentPixelShader, shader);
+
         if (InterlockedIncrement(&g_setPixelShaderLogCount) <= 2048)
         {
             Log(
                 "SET_PIXEL_SHADER object=%p hr=0x%08lX",
                 shader, static_cast<unsigned long>(hr));
         }
+        return hr;
+    }
+
+
+    void LogDrawTelemetry(
+        const char* kind,
+        IDirect3DDevice9* device,
+        D3DPRIMITIVETYPE primitiveType,
+        UINT primitiveCount,
+        HRESULT result,
+        UINT startVertex,
+        INT baseVertex,
+        UINT minVertex,
+        UINT numVertices,
+        UINT startIndex)
+    {
+        if (!g_drawTelemetryEnabled)
+            return;
+
+        const LONG sequence = InterlockedIncrement(&g_drawCallCount);
+        if (sequence > static_cast<LONG>(g_drawTelemetryMaxCalls))
+            return;
+
+        PVOID vertexShader =
+            InterlockedCompareExchangePointer(&g_currentVertexShader, NULL, NULL);
+        PVOID pixelShader =
+            InterlockedCompareExchangePointer(&g_currentPixelShader, NULL, NULL);
+
+        Log(
+            "DRAW_CALL seq=%ld kind=%s device=%p primitive=%u primitives=%u "
+            "start_vertex=%u base_vertex=%ld min_vertex=%u num_vertices=%u "
+            "start_index=%u bound_vs=%p bound_ps=%p hr=0x%08lX",
+            sequence,
+            kind,
+            device,
+            static_cast<unsigned>(primitiveType),
+            primitiveCount,
+            startVertex,
+            static_cast<long>(baseVertex),
+            minVertex,
+            numVertices,
+            startIndex,
+            vertexShader,
+            pixelShader,
+            static_cast<unsigned long>(result));
+    }
+
+    HRESULT WINAPI HookDeviceDrawPrimitive(
+        IDirect3DDevice9* self,
+        D3DPRIMITIVETYPE primitiveType,
+        UINT startVertex,
+        UINT primitiveCount)
+    {
+        const HRESULT hr = g_realDeviceDrawPrimitive
+            ? g_realDeviceDrawPrimitive(self, primitiveType, startVertex, primitiveCount)
+            : D3DERR_INVALIDCALL;
+
+        LogDrawTelemetry(
+            "DrawPrimitive", self, primitiveType, primitiveCount, hr,
+            startVertex, 0, 0, 0, 0);
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceDrawIndexedPrimitive(
+        IDirect3DDevice9* self,
+        D3DPRIMITIVETYPE primitiveType,
+        INT baseVertexIndex,
+        UINT minVertexIndex,
+        UINT numVertices,
+        UINT startIndex,
+        UINT primitiveCount)
+    {
+        const HRESULT hr = g_realDeviceDrawIndexedPrimitive
+            ? g_realDeviceDrawIndexedPrimitive(
+                self, primitiveType, baseVertexIndex, minVertexIndex,
+                numVertices, startIndex, primitiveCount)
+            : D3DERR_INVALIDCALL;
+
+        LogDrawTelemetry(
+            "DrawIndexedPrimitive", self, primitiveType, primitiveCount, hr,
+            0, baseVertexIndex, minVertexIndex, numVertices, startIndex);
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceDrawPrimitiveUP(
+        IDirect3DDevice9* self,
+        D3DPRIMITIVETYPE primitiveType,
+        UINT primitiveCount,
+        const void* vertexStreamZeroData,
+        UINT vertexStreamZeroStride)
+    {
+        const HRESULT hr = g_realDeviceDrawPrimitiveUP
+            ? g_realDeviceDrawPrimitiveUP(
+                self, primitiveType, primitiveCount,
+                vertexStreamZeroData, vertexStreamZeroStride)
+            : D3DERR_INVALIDCALL;
+
+        LogDrawTelemetry(
+            "DrawPrimitiveUP", self, primitiveType, primitiveCount, hr,
+            0, 0, 0, 0, 0);
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceDrawIndexedPrimitiveUP(
+        IDirect3DDevice9* self,
+        D3DPRIMITIVETYPE primitiveType,
+        UINT minVertexIndex,
+        UINT numVertices,
+        UINT primitiveCount,
+        const void* indexData,
+        D3DFORMAT indexDataFormat,
+        const void* vertexStreamZeroData,
+        UINT vertexStreamZeroStride)
+    {
+        const HRESULT hr = g_realDeviceDrawIndexedPrimitiveUP
+            ? g_realDeviceDrawIndexedPrimitiveUP(
+                self, primitiveType, minVertexIndex, numVertices,
+                primitiveCount, indexData, indexDataFormat,
+                vertexStreamZeroData, vertexStreamZeroStride)
+            : D3DERR_INVALIDCALL;
+
+        LogDrawTelemetry(
+            "DrawIndexedPrimitiveUP", self, primitiveType, primitiveCount, hr,
+            0, 0, minVertexIndex, numVertices, 0);
         return hr;
     }
 
@@ -953,6 +1114,14 @@ namespace
             reinterpret_cast<DeviceSetVertexShaderFn>(original[kDeviceSetVertexShaderSlot]);
         g_realDeviceSetPixelShader =
             reinterpret_cast<DeviceSetPixelShaderFn>(original[kDeviceSetPixelShaderSlot]);
+        g_realDeviceDrawPrimitive =
+            reinterpret_cast<DeviceDrawPrimitiveFn>(original[kDeviceDrawPrimitiveSlot]);
+        g_realDeviceDrawIndexedPrimitive =
+            reinterpret_cast<DeviceDrawIndexedPrimitiveFn>(original[kDeviceDrawIndexedPrimitiveSlot]);
+        g_realDeviceDrawPrimitiveUP =
+            reinterpret_cast<DeviceDrawPrimitiveUPFn>(original[kDeviceDrawPrimitiveUPSlot]);
+        g_realDeviceDrawIndexedPrimitiveUP =
+            reinterpret_cast<DeviceDrawIndexedPrimitiveUPFn>(original[kDeviceDrawIndexedPrimitiveUPSlot]);
 
         hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
@@ -965,6 +1134,10 @@ namespace
         hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
         hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
         hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
+        hooked[kDeviceDrawPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitive);
+        hooked[kDeviceDrawIndexedPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitive);
+        hooked[kDeviceDrawPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitiveUP);
+        hooked[kDeviceDrawIndexedPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
 
         DWORD oldProtection = 0;
         if (!VirtualProtect(objectVTable, sizeof(void*), PAGE_READWRITE, &oldProtection))
@@ -1211,6 +1384,21 @@ namespace
                 L"General", L"CaptureShaderBytecode", 0, g_iniPath) != 0;
         g_captureMaxFiles = GetPrivateProfileIntW(
             L"General", L"CaptureMaxFiles", 1024, g_iniPath);
+        g_drawTelemetryEnabled =
+            GetPrivateProfileIntW(
+                L"General", L"CaptureDrawTelemetry", 0, g_iniPath) != 0;
+        g_drawTelemetryMaxCalls = GetPrivateProfileIntW(
+            L"General", L"CaptureDrawMaxCalls", 4096, g_iniPath);
+        if (g_drawTelemetryMaxCalls == 0)
+            g_drawTelemetryMaxCalls = 1;
+        if (g_drawTelemetryMaxCalls > 65536)
+            g_drawTelemetryMaxCalls = 65536;
+        if (g_drawTelemetryEnabled)
+        {
+            Log(
+                "DRAW_TELEMETRY_ENABLED max_calls=%lu",
+                static_cast<unsigned long>(g_drawTelemetryMaxCalls));
+        }
         if (g_captureMaxFiles == 0)
             g_captureMaxFiles = 1;
         if (g_captureMaxFiles > 4096)
