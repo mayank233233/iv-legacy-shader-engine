@@ -1388,8 +1388,27 @@ namespace
             return 0;
         }
 
-        if (!HookD3D9Import())
+        BOOL d3d9HookInstalled = FALSE;
+        DWORD d3d9HookException = 0;
+        __try
+        {
+            d3d9HookInstalled = HookD3D9Import() ? TRUE : FALSE;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            d3d9HookException = GetExceptionCode();
+        }
+
+        if (d3d9HookException != 0)
+        {
+            Log(
+                "BOOTSTRAP_WARNING D3D9 import scan raised SEH exception=0x%08lX",
+                static_cast<unsigned long>(d3d9HookException));
+        }
+        else if (!d3d9HookInstalled)
+        {
             Log("BOOTSTRAP_WARNING D3D9 import hook could not be installed");
+        }
 
         Log(
             "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=%u",
