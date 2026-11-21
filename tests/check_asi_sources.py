@@ -55,6 +55,8 @@ required_source_markers = (
     "CaptureDrawMaxCalls",
     "CaptureShaderConstants",
     "CaptureShaderConstantMaxRecords",
+    "g_shaderConstantCaptureSession",
+    "GetSystemTimeAsFileTime",
     "IVLegacyConstants",
     "SHADER_CONSTANT_CAPTURE_ENABLED",
     "SHADER_CONSTANT_CAPTURED",
