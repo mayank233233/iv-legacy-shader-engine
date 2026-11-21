@@ -59,10 +59,14 @@ if "wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath)" not in source:
 required_vtable_bindings = (
     "kDeviceCreateVertexShaderSlot = 91",
     "kDeviceCreatePixelShaderSlot = 106",
+    "kDeviceSetVertexShaderSlot = 92",
+    "kDeviceSetPixelShaderSlot = 107",
     "original[kDeviceCreateVertexShaderSlot]",
     "original[kDeviceCreatePixelShaderSlot]",
     "hooked[kDeviceCreateVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceCreateVertexShader)",
     "hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader)",
+    "hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader)",
+    "hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader)",
 )
 for binding in required_vtable_bindings:
     if binding not in source:
