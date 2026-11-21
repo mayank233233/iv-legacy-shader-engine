@@ -34,7 +34,7 @@
 | HAL software-VP rendering on GMA 3100 | NOT RUN |
 | HAL hardware-VP rendering on GMA 3100 | NOT RUN |
 | GMA 3100 readback / repeatability | NOT RUN |
-| GTA IV integration | NOT IMPLEMENTED |
+| GTA IV ASI telemetry foundation | IMPLEMENTED IN SOURCE; x86 CI build passed; actual game not loaded/tested |
 | GTA IV launch / FPS | NOT TESTED |
 
 ## Build artifact details
@@ -58,3 +58,36 @@ Prototype 0.3 now has a successful hosted Windows x86 compile. It is **not** yet
 - Studied GTA IV community references including ZolikaPatch, FusionFix, GTA IV Shaders, the optimization guide and ASI loader.
 - Updated README: the next development gate is a GTA IV 1.0.0.0 game-loaded x86 plugin, not asking the user to run the standalone v0.3 probe.
 - Runtime caps from the actual GMA driver, shader-to-runtime permutation coverage, target formats and the attainable FPS remain unknown until a game-loaded build records/validates them.
+
+ 
+## GTA IV ASI telemetry foundation (2026-11-21)
+
+### Implemented in source
+
+- Added src/IVLegacyASI.cpp, a 32-bit ASI/DLL module intended for GTA IV 1.0.0.0.
+- Bootstrap validates a 32-bit PE host named GTAIV.exe and checks the executable file version resource for 1.0.0.0 by default.
+- Creates IVLegacy.log and a default IVLegacy.ini beside the host executable.
+- Hooks the main executable's direct d3d9.dll!Direct3DCreate9 import-table entry; if that import is absent, it logs that the hook was not installed.
+- Clones the returned IDirect3D9 object's vtable and observes GetAdapterIdentifier, CheckDeviceFormat, CheckDepthStencilMatch, GetDeviceCaps and CreateDevice.
+- Clones the returned IDirect3DDevice9 object's vtable and observes device caps, Reset, failed Present calls, shader creation profile tokens, render-target allocation/binding, and depth-stencil allocation/binding.
+- Logs PCI VendorId/DeviceId/SubsystemId/Revision, driver identity, shader-model versions, SM2 cap fields, render/depth formats, dimensions, usage and HRESULTs.
+- Does not spoof PixelShaderVersion / VertexShaderVersion, does not replace shader bytecode, and does not patch GTA IV executable code.
+- Uses per-object vtable copies so original methods remain available and can be called through saved pointers. The ASI must remain loaded for the lifetime of the hooked process; hot-unloading is not supported.
+
+### Verification state
+
+| Check | State |
+|---|---|
+| ASI source sanity checks | PASS — GitHub Actions run #21 |
+| x86 MSVC compile/link | PASS — GitHub Actions run #21 |
+| PE format | PASS — extracted artifact is PE32, machine 0x14C (Intel i386), DLL characteristic set |
+| ASI artifact | PASS — [run #21 artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44880965914/artifacts/14697791796), artifact ID 14697791796 |
+| Synthetic GTAIV.exe runtime hook smoke test | ADDED TO CI; result pending latest run |
+| Actual GTA IV 1.0.0.0 load / hook execution | NOT RUN |
+| Actual GMA 3100 D3D9 driver behaviour | NOT RUN |
+| Shader bytecode fallback / SM3 reduction | NOT IMPLEMENTED |
+| GTA IV scene rendering / FPS | NOT TESTED |
+
+### Important integration boundary
+
+The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in the main executable. It is not a complete d3d9.dll proxy and does not yet handle every possible GetProcAddress, delay-load, or secondary-module creation path. The synthetic CI host tests the method-hook mechanism, not GTA IV's exact binary/import layout. That must be validated before relying on it for game integration.
