@@ -288,6 +288,10 @@ def audit_and_lower_ps3(
         destination_number = reg_number(destination)
 
         if destination_type == REG_SAMPLER:
+            if declaration & ~0x78000000:
+                reasons.append(
+                    f"sampler s{destination_number} DCL contains unsupported reserved/control bits"
+                )
             sampler_type = (declaration & 0x78000000) >> 27
             if sampler_type not in (2, 3, 4):
                 reasons.append(
@@ -310,6 +314,11 @@ def audit_and_lower_ps3(
             continue
 
         source_register = destination_number
+        if declaration & ~0x000F000F:
+            reasons.append(
+                f"input v{source_register} DCL contains unsupported interpolation/reserved bits"
+            )
+            continue
         if source_register > 9:
             reasons.append(f"ps_3_0 input v{source_register} exceeds the ten-input-register limit")
             continue
@@ -396,12 +405,30 @@ def audit_and_lower_ps3(
             continue
 
         if opcode in MATRIX_OPCODES:
-            # D3D9 PS 2.0 forbids source negation on the matrix operand (src1).
+            # Matrix source is a contiguous block of float constants.
+            # D3D9 PS 2.0 forbids source modifiers on this operand.
             matrix_source = ins.operands[2]
-            if _source_modifier(matrix_source) != SOURCE_MOD_NONE:
+            matrix_register_count = {
+                20: 4,  # m4x4
+                21: 3,  # m4x3
+                22: 4,  # m3x4
+                23: 3,  # m3x3
+                24: 2,  # m3x2
+            }[opcode]
+            if reg_type(matrix_source) != REG_CONST:
                 reasons.append(
-                    f"{name} at DWORD {ins.offset} uses a modifier on its matrix source; "
-                    "ps_2_0 forbids this operand modifier"
+                    f"{name} at DWORD {ins.offset} requires a float-constant matrix source"
+                )
+            elif reg_number(matrix_source) + matrix_register_count > 32:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} reads past the ps_2_0 c0-c31 constant range"
+                )
+            if (
+                _source_modifier(matrix_source) != SOURCE_MOD_NONE
+                or _source_swizzle(matrix_source) != DEFAULT_SWIZZLE
+            ):
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses a modifier or swizzle on its matrix source"
                 )
 
         if opcode == OP_TEXKILL:
@@ -428,8 +455,12 @@ def audit_and_lower_ps3(
                 reasons.append(
                     f"texture result at DWORD {ins.offset} uses r{reg_number(destination)}; ps_2_0 has r0-r11"
                 )
-            if _dest_mask(destination) != 0xF or _dest_modifier(destination) != DEST_MOD_NONE:
-                reasons.append(f"texture result at DWORD {ins.offset} needs a full, unmodified destination")
+            if (
+                _dest_mask(destination) != 0xF
+                or _dest_modifier(destination) != DEST_MOD_NONE
+                or _dest_shift(destination) != 0
+            ):
+                reasons.append(f"texture result at DWORD {ins.offset} needs a full, unmodified, unshifted destination")
             _check_source(coordinates, ins, reasons, input_remap, texture_coordinate=True)
             _check_source(sampler, ins, reasons, input_remap, sampler=True)
             sampler_number = reg_number(sampler)
