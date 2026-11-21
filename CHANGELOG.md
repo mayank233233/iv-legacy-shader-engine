@@ -1,5 +1,11 @@
 # Changelog
 
+## Research update — 2026-11-21
+
+- Added `docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md` with hardware capability findings, sampled GTA IV SM3 shader analysis, Minecraft optimization technique mapping, GTA IV community-mod compatibility notes, and a game-loaded ASI/D3D9 development architecture.
+- Changed the next project gate from asking the user to run the standalone probe to developing a GTA IV 1.0.0.0 game-loaded x86 plugin.
+- Recorded that the 30 FPS objective is a target and cannot be promised before real in-game measurement.
+
 ## Prototype 0.3
 
 - Fixed FXC discovery for Windows 8.1 and versioned Windows SDK layouts.
