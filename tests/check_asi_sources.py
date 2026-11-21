@@ -20,11 +20,16 @@ required_source_markers = (
     "GTAIV.exe",
     "TARGET_VERSION_MISMATCH",
     "Direct3DCreate9",
+    "D3D9_ADAPTER",
+    "D3D9_CHECK_DEVICE_FORMAT",
+    "D3D9_CHECK_DEPTH_MATCH",
     "D3D9_GET_DEVICE_CAPS",
     "D3D9_CREATE_DEVICE_REQUEST",
     "CREATE_VERTEX_SHADER",
     "CREATE_PIXEL_SHADER",
     "CREATE_RENDER_TARGET",
+    "CREATE_DEPTH_STENCIL_SURFACE",
+    "SET_DEPTH_STENCIL_SURFACE",
     "SET_RENDER_TARGET",
     "DEVICE_RESET_REQUEST",
     "StrictGTAIV100",
@@ -37,6 +42,9 @@ required_source_markers = (
 for marker in required_source_markers:
     if marker not in source:
         fail(f"required telemetry hook marker missing: {marker}")
+
+if "wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath)" not in source:
+    fail("path setup must preserve the full executable path for version validation")
 
 if "caps->PixelShaderVersion =" in source or "caps->VertexShaderVersion =" in source:
     fail("telemetry plugin must not spoof shader-model capabilities")
