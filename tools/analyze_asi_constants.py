@@ -120,7 +120,7 @@ def parse_shader_log(path: Path | None) -> dict[tuple[str, str], dict[str, Any]]
         return {}
     records: dict[tuple[str, str], dict[str, Any]] = {}
     fallback_map: dict[str, dict[str, str]] = {}
-    token = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=([^\\s]+)")
+    token = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=([^\s]+)")
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         fields = {key: value.strip(",;") for key, value in token.findall(line)}
         if "SHADER_OBJECT_CREATED " in line:
