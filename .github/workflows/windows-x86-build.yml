@@ -115,6 +115,7 @@ jobs:
           if ($drawAnalysis.draw_calls_observed -ne 4) { throw "Expected 4 synthetic draw calls; found $($drawAnalysis.draw_calls_observed)." }
           if ($drawAnalysis.texture_objects_observed -lt 1) { throw 'Expected texture creation/binding correlation in the synthetic log.' }
           if ($drawAnalysis.shader_fallback_usage.Count -lt 1) { throw 'Expected a source-to-PS2 fallback shader pair in the synthetic draw log.' }
+          if ($drawAnalysis.draw_calls[0].sampler_state_count -lt 1 -or $drawAnalysis.draw_calls[0].render_state_count -lt 1 -or $drawAnalysis.draw_calls[0].texture_stage_state_count -lt 1) { throw 'Expected sampler, render-state and texture-stage fingerprints in the synthetic draw record.' }
           python tools\analyze_asi_constants.py build\bin\IVLegacyConstants --json build\bin\shader_constant_inventory.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $constantInventory = Get-Content build\bin\shader_constant_inventory.json -Raw | ConvertFrom-Json
