@@ -1,0 +1,28 @@
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "IV Legacy Research\0"
+            VALUE "FileDescription", "GTA IV 1.0.0.0 ASI Runtime Test Host\0"
+            VALUE "FileVersion", "1.0.0.0\0"
+            VALUE "InternalName", "GTAIV\0"
+            VALUE "OriginalFilename", "GTAIV.exe\0"
+            VALUE "ProductName", "IV Legacy ASI Runtime Test\0"
+            VALUE "ProductVersion", "1.0.0.0\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
