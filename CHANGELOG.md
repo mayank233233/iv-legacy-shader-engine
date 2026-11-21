@@ -1,3 +1,15 @@
+## Prototype 0.5-alpha — loader and shader/draw telemetry
+
+- Exported the undecorated C-linkage `InitializeASI` entry point required by Ultimate ASI Loader; added a guarded one-time initialization path and a DllMain worker fallback for LoadLibrary-only loaders.
+- Extended the synthetic x86 host test to resolve and call `InitializeASI` with `GetProcAddress`.
+- Added opt-in D3D9 draw telemetry for methods at vtable slots 81–84: DrawPrimitive, DrawIndexedPrimitive, DrawPrimitiveUP and DrawIndexedPrimitiveUP.
+- Draw records include primitive/count metadata and current vertex/pixel shader object addresses. Successful shader creation records pair each object address with its bytecode profile, size and hash.
+- Draw telemetry is disabled by default; `CaptureDrawTelemetry=1` enables it, and `CaptureDrawMaxCalls` bounds it.
+- Added `tools/audit_sm3_to_sm2.py`, a restrictive offline PS3.0-to-PS2.0 audit/lowering candidate generator with explicit rejection paths, input remapping and PS2 instruction/register/dependent-read limits. It does not handle vertex shaders or general SM3 programs.
+- Windows x86 CI run #81 passes the ASI build, exported-entry-point check, synthetic D3D9 shader/draw hook test, two-shader capture/inventory, and audit-tool self-tests. Artifact 14700061775, SHA-256 `4dbc2376cf9a5bf04375e69d386f201a8b55f50552eeee4464ec78fc8634fd9c`.
+- The two captured files in CI are synthetic SM2 test programs. The offline audit correctly marks the pixel shader as already PS2 and rejects the vertex shader as outside its PS-only scope; no real GTA IV shader has been converted.
+- No actual GTA IV 1.0.0.0 runtime, GMA 3100 rendering, or FPS result exists yet.
+
 # Changelog
 
 ## Prototype 0.4-alpha — D3D9 telemetry ASI
