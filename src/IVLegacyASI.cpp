@@ -21,7 +21,9 @@ namespace
     wchar_t g_gameDirectory[MAX_PATH] = {};
     wchar_t g_logPath[MAX_PATH] = {};
     wchar_t g_iniPath[MAX_PATH] = {};
+    wchar_t g_captureDirectory[MAX_PATH] = {};
     volatile LONG g_logLock = 0;
+    volatile LONG g_captureUniqueCount = 0;
     volatile LONG g_capsLogCount = 0;
     volatile LONG g_adapterLogCount = 0;
     volatile LONG g_formatCheckLogCount = 0;
@@ -33,6 +35,8 @@ namespace
     volatile LONG g_setRenderTargetLogCount = 0;
     volatile LONG g_setDepthTargetLogCount = 0;
     BOOL g_telemetryEnabled = TRUE;
+    BOOL g_captureShaderBytecode = FALSE;
+    DWORD g_captureMaxFiles = 1024;
 
     typedef IDirect3D9* (WINAPI* Direct3DCreate9Fn)(UINT);
     typedef HRESULT (WINAPI* D3D9GetAdapterIdentifierFn)(
@@ -117,6 +121,168 @@ namespace
 
         InterlockedExchange(&g_logLock, 0);
         OutputDebugStringA(line);
+    }
+
+    bool GetShaderBytecodeInfo(
+        const DWORD* function,
+        BOOL pixelStage,
+        DWORD* versionToken,
+        DWORD* byteCount,
+        unsigned __int64* hash)
+    {
+        if (!function || !versionToken || !byteCount || !hash)
+            return false;
+
+        bool valid = false;
+        __try
+        {
+            const DWORD version = function[0];
+            const DWORD expectedMarker = pixelStage ? 0xFFFF0000UL : 0xFFFE0000UL;
+            if ((version & 0xFFFF0000UL) != expectedMarker)
+                __leave;
+
+            const DWORD major = (version >> 8) & 0xFF;
+            if (major < 2 || major > 3)
+                __leave;
+
+            const DWORD maxTokens = 65536;
+            DWORD index = 1;
+            bool foundEnd = false;
+
+            while (index < maxTokens)
+            {
+                const DWORD instruction = function[index++];
+                const DWORD opcode = instruction & 0xFFFFUL;
+
+                if (opcode == 0xFFFFUL) // D3DSIO_END
+                {
+                    foundEnd = true;
+                    break;
+                }
+
+                if (opcode == 0xFFFEUL) // D3DSIO_COMMENT
+                {
+                    const DWORD commentTokens = (instruction >> 16) & 0x7FFFUL;
+                    if (commentTokens > maxTokens - index)
+                        __leave;
+                    index += commentTokens;
+                    continue;
+                }
+
+                // For SM2/SM3, the instruction token carries the count of
+                // following parameter tokens in bits 24..27.
+                const DWORD parameterTokens = (instruction >> 24) & 0x0FUL;
+                if (parameterTokens > maxTokens - index)
+                    __leave;
+                index += parameterTokens;
+            }
+
+            if (!foundEnd)
+                __leave;
+
+            const DWORD sizeBytes = index * sizeof(DWORD);
+            const BYTE* bytes = reinterpret_cast<const BYTE*>(function);
+            unsigned __int64 hashValue = 14695981039346656037ULL;
+            for (DWORD i = 0; i < sizeBytes; ++i)
+            {
+                hashValue ^= bytes[i];
+                hashValue *= 1099511628211ULL;
+            }
+
+            *versionToken = version;
+            *byteCount = sizeBytes;
+            *hash = hashValue;
+            valid = true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            valid = false;
+        }
+
+        return valid;
+    }
+
+    void CaptureShaderBytecode(const wchar_t* stage, BOOL pixelStage, const DWORD* function)
+    {
+        if (!g_captureShaderBytecode || !stage || !function)
+            return;
+
+        DWORD versionToken = 0;
+        DWORD byteCount = 0;
+        unsigned __int64 hash = 0;
+        if (!GetShaderBytecodeInfo(
+            function, pixelStage, &versionToken, &byteCount, &hash))
+        {
+            return;
+        }
+
+        if (InterlockedCompareExchange(&g_captureUniqueCount, 0, 0) >=
+            static_cast<LONG>(g_captureMaxFiles))
+        {
+            return;
+        }
+
+        const DWORD major = (versionToken >> 8) & 0xFF;
+        const DWORD minor = versionToken & 0xFF;
+        wchar_t filePath[MAX_PATH] = {};
+        _snwprintf_s(
+            filePath,
+            MAX_PATH,
+            _TRUNCATE,
+            L"%s\\%s_%u_%u_%016llX.bin",
+            g_captureDirectory,
+            stage,
+            major,
+            minor,
+            hash);
+
+        HANDLE file = CreateFileW(
+            filePath,
+            GENERIC_WRITE,
+            FILE_SHARE_READ,
+            NULL,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL);
+
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            // Existing content-addressed capture means this shader was
+            // already recorded. Do not log every repeated material use.
+            return;
+        }
+
+        InterlockedIncrement(&g_captureUniqueCount);
+
+        DWORD written = 0;
+        BOOL writeSucceeded = FALSE;
+        __try
+        {
+            writeSucceeded = WriteFile(file, function, byteCount, &written, NULL);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            writeSucceeded = FALSE;
+        }
+
+        CloseHandle(file);
+
+        if (!writeSucceeded || written != byteCount)
+        {
+            DeleteFileW(filePath);
+            Log(
+                "SHADER_CAPTURE_FAILED stage=%ls hash=%016llX bytes=%lu",
+                stage, hash, static_cast<unsigned long>(byteCount));
+            return;
+        }
+
+        Log(
+            "SHADER_CAPTURED stage=%ls profile=%u_%u hash=%016llX bytes=%lu",
+            stage,
+            major,
+            minor,
+            hash,
+            static_cast<unsigned long>(byteCount));
     }
 
     bool QueryFileVersion(
@@ -210,6 +376,8 @@ namespace
                 L"General", L"EnableD3D9Telemetry", L"1", g_iniPath);
             WritePrivateProfileStringW(
                 L"General", L"StrictGTAIV100", L"1", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"CaptureShaderBytecode", L"0", g_iniPath);
         }
     }
 
@@ -621,6 +789,7 @@ namespace
             ? g_realDeviceCreateVertexShader(self, function, shader)
             : D3DERR_INVALIDCALL;
         LogShaderProfile("VS", function, hr);
+        CaptureShaderBytecode(L"VS", FALSE, function);
         return hr;
     }
 
@@ -633,6 +802,7 @@ namespace
             ? g_realDeviceCreatePixelShader(self, function, shader)
             : D3DERR_INVALIDCALL;
         LogShaderProfile("PS", function, hr);
+        CaptureShaderBytecode(L"PS", TRUE, function);
         return hr;
     }
 
@@ -923,6 +1093,38 @@ namespace
         g_telemetryEnabled =
             GetPrivateProfileIntW(
                 L"General", L"EnableD3D9Telemetry", 1, g_iniPath) != 0;
+
+        g_captureShaderBytecode =
+            GetPrivateProfileIntW(
+                L"General", L"CaptureShaderBytecode", 0, g_iniPath) != 0;
+        g_captureMaxFiles = GetPrivateProfileIntW(
+            L"General", L"CaptureMaxFiles", 1024, g_iniPath);
+        if (g_captureMaxFiles == 0)
+            g_captureMaxFiles = 1;
+        if (g_captureMaxFiles > 4096)
+            g_captureMaxFiles = 4096;
+
+        if (g_captureShaderBytecode)
+        {
+            _snwprintf_s(
+                g_captureDirectory,
+                MAX_PATH,
+                _TRUNCATE,
+                L"%s\\IVLegacyCaptures",
+                g_gameDirectory);
+            if (CreateDirectoryW(g_captureDirectory, NULL) ||
+                GetLastError() == ERROR_ALREADY_EXISTS)
+            {
+                Log(
+                    "SHADER_CAPTURE_ENABLED directory=IVLegacyCaptures max_files=%lu",
+                    static_cast<unsigned long>(g_captureMaxFiles));
+            }
+            else
+            {
+                g_captureShaderBytecode = FALSE;
+                Log("SHADER_CAPTURE_DISABLED reason=cannot_create_capture_directory");
+            }
+        }
 
         const BOOL strictVersion =
             GetPrivateProfileIntW(
