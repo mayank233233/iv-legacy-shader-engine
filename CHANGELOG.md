@@ -1,3 +1,13 @@
+## Prototype 0.5.1-alpha — frame-aware draw analysis and executable inspection
+
+- Added the successful-Present frame index to opt-in D3D9 draw records.
+- Added `tools/analyze_asi_log.py` to correlate shader object addresses with bytecode profile/hash records and summarize draw calls by shader pair, draw method, primitive type and frame.
+- Added a deterministic parser test for shader correlation, unresolved pointers, draw totals and failure records.
+- Added `tools/inspect_gtaiv_executable.py`, a read-only PE32 inspector for normal and delay imports, D3D9 factory imports, Windows file version and file SHA-256. It has only been tested with a synthetic PE fixture; the original game executable has not been inspected.
+- Latest Windows x86 CI run #93 passes every step, including the log-correlator and PE inspector self-tests, ASI build, exported `InitializeASI` runtime call, frame-indexed synthetic draw-hook test and captured-shader audits.
+- Artifact 14700107779; SHA-256 `967a6c752d4c88d6aaf0760850ada91a6da3c5a36ede1468e41f89ecb6b1e6c2`.
+- The synthetic captures remain SM2 test programs. No original GTA IV shader is captured, translated or injected.
+
 ## Prototype 0.5-alpha — loader and shader/draw telemetry
 
 - Exported the undecorated C-linkage `InitializeASI` entry point required by Ultimate ASI Loader; added a guarded one-time initialization path and a DllMain worker fallback for LoadLibrary-only loaders.
