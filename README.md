@@ -1,25 +1,20 @@
 # IV Legacy Shader Engine
 
-Prototype 0.2 backup for the GTA IV 1.0.0.0 / Intel GMA 3100 legacy Direct3D 9 investigation.
+Repository for the GTA IV 1.0.0.0 / Intel GMA 3100 legacy Direct3D 9 investigation.
 
-## Contents
+## Backup status
 
-- `IV_Legacy_Shader_Engine_Prototype_0.2.zip` — original uploaded archive.
-- `IV_Legacy_Shader_Engine_Prototype_0.2/` — extracted project sources and documentation.
+This repository has been initialized, but the Prototype 0.2 archive and extracted source files have **not yet been committed**. Do not treat this repository as a complete project backup until those files appear in the tree.
 
-## Verification status
+Expected archive:
+- `IV_Legacy_Shader_Engine_Prototype_0.2.zip`
 
-The archive integrity and SHA-256 were checked before upload. This is a source package, not a validated renderer.
+Expected extracted project:
+- `IV_Legacy_Shader_Engine_Prototype_0.2/`
 
-Not yet established:
-- FXC HLSL compilation
-- MSVC x86 compilation
-- D3D9 shader creation on the target driver
-- Rendering correctness on Intel GMA 3100
-- GTA IV integration or playable performance
+## Original archive identity
 
-See the included `STATUS.md` for the prototype's detailed limitations. Do not treat source presence or archive integrity as runtime validation.
-
-## Original archive SHA-256
-
+SHA-256:
 `34cd5c3efa2d15bbf0fec1e6035ba90346c6c495c82d14cd3ebbcba5a69a29aa`
+
+The archive was checked locally for ZIP integrity before this repository upload attempt. The following tests remain unverified: FXC compilation, MSVC x86 compilation, D3D9 shader creation on the target driver, GMA 3100 rendering correctness, and GTA IV integration.
