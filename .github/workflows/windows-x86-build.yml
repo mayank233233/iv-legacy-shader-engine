@@ -55,13 +55,23 @@ jobs:
           cmd.exe /d /c build\build_probe.bat
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Stage build outputs with repository-relative paths
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact\build\out | Out-Null
+          New-Item -ItemType Directory -Force artifact\build\bin | Out-Null
+          Copy-Item build\out\*.vso artifact\build\out\
+          Copy-Item build\out\*.pso artifact\build\out\
+          Copy-Item build\out\*.asm artifact\build\out\
+          Copy-Item build\bin\D3D9ShaderProbe.exe artifact\build\bin\
+          Copy-Item build\run_probe.bat artifact\build\
+          if (-not (Test-Path artifact\build\bin\D3D9ShaderProbe.exe)) { throw 'Staged x86 probe executable is missing.' }
+          $bytecode = @(Get-ChildItem artifact\build\out -Include *.vso,*.pso -File)
+          if ($bytecode.Count -ne 6) { throw "Expected 6 shader bytecode files in staged artifact; found $($bytecode.Count)." }
+
       - name: Upload build outputs
         uses: actions/upload-artifact@v4
         with:
           name: iv-legacy-shader-engine-windows-x86
-          path: |
-            build/out/*.vso
-            build/out/*.pso
-            build/out/*.asm
-            build/bin/D3D9ShaderProbe.exe
+          path: artifact/
           if-no-files-found: error
