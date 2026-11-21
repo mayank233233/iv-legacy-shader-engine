@@ -116,6 +116,11 @@ jobs:
           if ($drawAnalysis.texture_objects_observed -lt 1) { throw 'Expected texture creation/binding correlation in the synthetic log.' }
           if ($drawAnalysis.shader_fallback_usage.Count -lt 1) { throw 'Expected a source-to-PS2 fallback shader pair in the synthetic draw log.' }
           if ($drawAnalysis.draw_calls[0].sampler_state_count -lt 1 -or $drawAnalysis.draw_calls[0].render_state_count -lt 1 -or $drawAnalysis.draw_calls[0].texture_stage_state_count -lt 1) { throw 'Expected sampler, render-state and texture-stage fingerprints in the synthetic draw record.' }
+          if ($drawAnalysis.vertex_declarations_observed -lt 1) { throw 'Expected synthetic vertex declaration capture.' }
+          if (@($drawAnalysis.draw_calls[0].vertex_declaration.elements).Count -ne 2) { throw 'Expected two vertex declaration elements in the first draw.' }
+          if (@($drawAnalysis.draw_calls[0].stream_bindings).Count -lt 1) { throw 'Expected stream source binding in the first draw.' }
+          if ([string]::IsNullOrWhiteSpace($drawAnalysis.draw_calls[0].index_buffer_object)) { throw 'Expected index buffer binding in the first draw.' }
+          if ($drawAnalysis.draw_calls[1].fvf -eq 0) { throw 'Expected FVF state on the second draw after SetFVF.' }
           python tools\analyze_asi_constants.py build\bin\IVLegacyConstants --log build\bin\IVLegacy.log --json build\bin\shader_constant_inventory.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $constantInventory = Get-Content build\bin\shader_constant_inventory.json -Raw | ConvertFrom-Json
