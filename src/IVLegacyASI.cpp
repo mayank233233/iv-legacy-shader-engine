@@ -1722,6 +1722,199 @@ namespace
         return hr;
     }
 
+
+    void CaptureShaderIntegerConstantRange(
+        BOOL pixelStage, UINT startRegister, const int* values, UINT vectorCount)
+    {
+        if (!g_captureShaderConstants || !values || vectorCount == 0)
+            return;
+        if (vectorCount > 16 || startRegister > 15 ||
+            vectorCount > 16 - startRegister)
+        {
+            Log("SHADER_CONSTANT_CAPTURE_SKIPPED stage=%s kind=I start=%u vectors=%u reason=range_limit",
+                pixelStage ? "PS" : "VS", startRegister, vectorCount);
+            return;
+        }
+        const LONG sequence = InterlockedIncrement(&g_shaderConstantCaptureCount);
+        if (sequence > static_cast<LONG>(g_captureShaderConstantMaxRecords))
+        {
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            return;
+        }
+
+        const DWORD byteCount = vectorCount * 4 * sizeof(int);
+        ShaderConstantCaptureHeader header = {};
+        memcpy(header.magic, "IVCI", 4);
+        header.version = 2;
+        header.stage = pixelStage ? 1 : 0;
+        header.frameIndex = static_cast<DWORD>(
+            InterlockedCompareExchange(&g_presentFrameIndex, 0, 0));
+        PVOID activeShader = pixelStage
+            ? InterlockedCompareExchangePointer(&g_currentPixelShader, NULL, NULL)
+            : InterlockedCompareExchangePointer(&g_currentVertexShader, NULL, NULL);
+        header.shaderObject = static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(activeShader));
+        header.sequence = static_cast<DWORD>(sequence);
+        header.startRegister = startRegister;
+        header.vectorCount = vectorCount;
+        header.dataByteCount = byteCount;
+
+        wchar_t path[MAX_PATH] = {};
+        _snwprintf_s(path, _countof(path), _TRUNCATE,
+            L"%s\\%s_I_%016llX_%06lu.bin",
+            g_shaderConstantCaptureDirectory, pixelStage ? L"PS" : L"VS",
+            g_shaderConstantCaptureSession, static_cast<unsigned long>(sequence));
+        HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            Log("SHADER_CONSTANT_CAPTURE_FAILED stage=%s kind=I sequence=%ld error=%lu",
+                pixelStage ? "PS" : "VS", sequence,
+                static_cast<unsigned long>(GetLastError()));
+            return;
+        }
+        DWORD headerWritten = 0, dataWritten = 0;
+        BOOL success = FALSE;
+        __try
+        {
+            const BOOL headerOk = WriteFile(file, &header, sizeof(header), &headerWritten, NULL);
+            const BOOL dataOk = headerOk && WriteFile(file, values, byteCount, &dataWritten, NULL);
+            success = headerOk && dataOk && headerWritten == sizeof(header) && dataWritten == byteCount;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { success = FALSE; }
+        CloseHandle(file);
+        if (!success)
+        {
+            DeleteFileW(path);
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            Log("SHADER_CONSTANT_CAPTURE_FAILED stage=%s kind=I sequence=%ld reason=write",
+                pixelStage ? "PS" : "VS", sequence);
+            return;
+        }
+        Log("SHADER_CONSTANT_CAPTURED stage=%s kind=I sequence=%ld frame=%lu shader_object=%p start=%u vectors=%u bytes=%lu",
+            pixelStage ? "PS" : "VS", sequence,
+            static_cast<unsigned long>(header.frameIndex), activeShader,
+            startRegister, vectorCount, static_cast<unsigned long>(byteCount));
+    }
+
+    void CaptureShaderBooleanConstantRange(
+        BOOL pixelStage, UINT startRegister, const BOOL* values, UINT boolCount)
+    {
+        if (!g_captureShaderConstants || !values || boolCount == 0)
+            return;
+        if (boolCount > 16 || startRegister > 15 ||
+            boolCount > 16 - startRegister)
+        {
+            Log("SHADER_CONSTANT_CAPTURE_SKIPPED stage=%s kind=B start=%u count=%u reason=range_limit",
+                pixelStage ? "PS" : "VS", startRegister, boolCount);
+            return;
+        }
+        const LONG sequence = InterlockedIncrement(&g_shaderConstantCaptureCount);
+        if (sequence > static_cast<LONG>(g_captureShaderConstantMaxRecords))
+        {
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            return;
+        }
+
+        const DWORD byteCount = boolCount * sizeof(BOOL);
+        ShaderConstantCaptureHeader header = {};
+        memcpy(header.magic, "IVCB", 4);
+        header.version = 2;
+        header.stage = pixelStage ? 1 : 0;
+        header.frameIndex = static_cast<DWORD>(
+            InterlockedCompareExchange(&g_presentFrameIndex, 0, 0));
+        PVOID activeShader = pixelStage
+            ? InterlockedCompareExchangePointer(&g_currentPixelShader, NULL, NULL)
+            : InterlockedCompareExchangePointer(&g_currentVertexShader, NULL, NULL);
+        header.shaderObject = static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(activeShader));
+        header.sequence = static_cast<DWORD>(sequence);
+        header.startRegister = startRegister;
+        header.vectorCount = boolCount;
+        header.dataByteCount = byteCount;
+
+        wchar_t path[MAX_PATH] = {};
+        _snwprintf_s(path, _countof(path), _TRUNCATE,
+            L"%s\\%s_B_%016llX_%06lu.bin",
+            g_shaderConstantCaptureDirectory, pixelStage ? L"PS" : L"VS",
+            g_shaderConstantCaptureSession, static_cast<unsigned long>(sequence));
+        HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            Log("SHADER_CONSTANT_CAPTURE_FAILED stage=%s kind=B sequence=%ld error=%lu",
+                pixelStage ? "PS" : "VS", sequence,
+                static_cast<unsigned long>(GetLastError()));
+            return;
+        }
+        DWORD headerWritten = 0, dataWritten = 0;
+        BOOL success = FALSE;
+        __try
+        {
+            const BOOL headerOk = WriteFile(file, &header, sizeof(header), &headerWritten, NULL);
+            const BOOL dataOk = headerOk && WriteFile(file, values, byteCount, &dataWritten, NULL);
+            success = headerOk && dataOk && headerWritten == sizeof(header) && dataWritten == byteCount;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { success = FALSE; }
+        CloseHandle(file);
+        if (!success)
+        {
+            DeleteFileW(path);
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            Log("SHADER_CONSTANT_CAPTURE_FAILED stage=%s kind=B sequence=%ld reason=write",
+                pixelStage ? "PS" : "VS", sequence);
+            return;
+        }
+        Log("SHADER_CONSTANT_CAPTURED stage=%s kind=B sequence=%ld frame=%lu shader_object=%p start=%u count=%u bytes=%lu",
+            pixelStage ? "PS" : "VS", sequence,
+            static_cast<unsigned long>(header.frameIndex), activeShader,
+            startRegister, boolCount, static_cast<unsigned long>(byteCount));
+    }
+
+    HRESULT WINAPI HookDeviceSetVertexShaderConstantI(
+        IDirect3DDevice9* self, UINT startRegister, const int* data, UINT vectorCount)
+    {
+        const HRESULT hr = g_realDeviceSetVertexShaderConstantI
+            ? g_realDeviceSetVertexShaderConstantI(self, startRegister, data, vectorCount)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+            CaptureShaderIntegerConstantRange(FALSE, startRegister, data, vectorCount);
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetPixelShaderConstantI(
+        IDirect3DDevice9* self, UINT startRegister, const int* data, UINT vectorCount)
+    {
+        const HRESULT hr = g_realDeviceSetPixelShaderConstantI
+            ? g_realDeviceSetPixelShaderConstantI(self, startRegister, data, vectorCount)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+            CaptureShaderIntegerConstantRange(TRUE, startRegister, data, vectorCount);
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetVertexShaderConstantB(
+        IDirect3DDevice9* self, UINT startRegister, const BOOL* data, UINT boolCount)
+    {
+        const HRESULT hr = g_realDeviceSetVertexShaderConstantB
+            ? g_realDeviceSetVertexShaderConstantB(self, startRegister, data, boolCount)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+            CaptureShaderBooleanConstantRange(FALSE, startRegister, data, boolCount);
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetPixelShaderConstantB(
+        IDirect3DDevice9* self, UINT startRegister, const BOOL* data, UINT boolCount)
+    {
+        const HRESULT hr = g_realDeviceSetPixelShaderConstantB
+            ? g_realDeviceSetPixelShaderConstantB(self, startRegister, data, boolCount)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+            CaptureShaderBooleanConstantRange(TRUE, startRegister, data, boolCount);
+        return hr;
+    }
+
     HRESULT WINAPI HookDeviceSetPixelShaderConstantF(
         IDirect3DDevice9* self,
         UINT startRegister,
