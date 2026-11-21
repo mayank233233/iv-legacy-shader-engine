@@ -16,6 +16,31 @@ namespace
     const UINT kD3D9InterfaceSlots = 17;
     const UINT kD3D9DeviceInterfaceSlots = 119;
 
+    // IDirect3D9 slots, counting IUnknown methods at indexes 0 through 2.
+    enum D3D9VTableSlot
+    {
+        kD3D9GetAdapterIdentifierSlot = 5,
+        kD3D9CheckDeviceFormatSlot = 10,
+        kD3D9CheckDepthStencilMatchSlot = 12,
+        kD3D9GetDeviceCapsSlot = 14,
+        kD3D9CreateDeviceSlot = 16
+    };
+
+    // IDirect3DDevice9 slots from the D3D9 SDK interface order.
+    // CreateVertexShader = 91; CreatePixelShader = 106.
+    enum D3D9DeviceVTableSlot
+    {
+        kDeviceGetDeviceCapsSlot = 7,
+        kDeviceResetSlot = 16,
+        kDevicePresentSlot = 17,
+        kDeviceCreateRenderTargetSlot = 28,
+        kDeviceCreateDepthStencilSurfaceSlot = 29,
+        kDeviceSetRenderTargetSlot = 37,
+        kDeviceSetDepthStencilSurfaceSlot = 39,
+        kDeviceCreateVertexShaderSlot = 91,
+        kDeviceCreatePixelShaderSlot = 106
+    };
+
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
     wchar_t g_gamePath[MAX_PATH] = {};
     wchar_t g_gameDirectory[MAX_PATH] = {};
@@ -828,7 +853,7 @@ namespace
 
         void** original = *objectVTable;
         Log("D3D9_DEVICE_HOOK_BEGIN device=%p vtable=%p", device, original);
-        if (original[7] == reinterpret_cast<void*>(HookDeviceGetDeviceCaps))
+        if (original[kDeviceGetDeviceCapsSlot] == reinterpret_cast<void*>(HookDeviceGetDeviceCaps))
             return true;
 
         const SIZE_T vtableBytes =
@@ -863,31 +888,31 @@ namespace
         Log("D3D9_DEVICE_VTABLE_COPIED bytes=%lu", static_cast<unsigned long>(vtableBytes));
 
         g_realDeviceGetDeviceCaps =
-            reinterpret_cast<DeviceGetDeviceCapsFn>(original[7]);
-        g_realDeviceReset = reinterpret_cast<DeviceResetFn>(original[16]);
-        g_realDevicePresent = reinterpret_cast<DevicePresentFn>(original[17]);
+            reinterpret_cast<DeviceGetDeviceCapsFn>(original[kDeviceGetDeviceCapsSlot]);
+        g_realDeviceReset = reinterpret_cast<DeviceResetFn>(original[kDeviceResetSlot]);
+        g_realDevicePresent = reinterpret_cast<DevicePresentFn>(original[kDevicePresentSlot]);
         g_realDeviceCreateRenderTarget =
-            reinterpret_cast<DeviceCreateRenderTargetFn>(original[28]);
+            reinterpret_cast<DeviceCreateRenderTargetFn>(original[kDeviceCreateRenderTargetSlot]);
         g_realDeviceCreateDepthStencilSurface =
-            reinterpret_cast<DeviceCreateDepthStencilSurfaceFn>(original[29]);
+            reinterpret_cast<DeviceCreateDepthStencilSurfaceFn>(original[kDeviceCreateDepthStencilSurfaceSlot]);
         g_realDeviceSetRenderTarget =
-            reinterpret_cast<DeviceSetRenderTargetFn>(original[37]);
+            reinterpret_cast<DeviceSetRenderTargetFn>(original[kDeviceSetRenderTargetSlot]);
         g_realDeviceSetDepthStencilSurface =
-            reinterpret_cast<DeviceSetDepthStencilSurfaceFn>(original[39]);
+            reinterpret_cast<DeviceSetDepthStencilSurfaceFn>(original[kDeviceSetDepthStencilSurfaceSlot]);
         g_realDeviceCreateVertexShader =
-            reinterpret_cast<DeviceCreateVertexShaderFn>(original[92]);
+            reinterpret_cast<DeviceCreateVertexShaderFn>(original[kDeviceCreateVertexShaderSlot]);
         g_realDeviceCreatePixelShader =
-            reinterpret_cast<DeviceCreatePixelShaderFn>(original[107]);
+            reinterpret_cast<DeviceCreatePixelShaderFn>(original[kDeviceCreatePixelShaderSlot]);
 
-        hooked[7] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
-        hooked[16] = reinterpret_cast<void*>(HookDeviceReset);
-        hooked[17] = reinterpret_cast<void*>(HookDevicePresent);
-        hooked[28] = reinterpret_cast<void*>(HookDeviceCreateRenderTarget);
-        hooked[29] = reinterpret_cast<void*>(HookDeviceCreateDepthStencilSurface);
-        hooked[37] = reinterpret_cast<void*>(HookDeviceSetRenderTarget);
-        hooked[39] = reinterpret_cast<void*>(HookDeviceSetDepthStencilSurface);
-        hooked[92] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
-        hooked[107] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
+        hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
+        hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
+        hooked[kDevicePresentSlot] = reinterpret_cast<void*>(HookDevicePresent);
+        hooked[kDeviceCreateRenderTargetSlot] = reinterpret_cast<void*>(HookDeviceCreateRenderTarget);
+        hooked[kDeviceCreateDepthStencilSurfaceSlot] = reinterpret_cast<void*>(HookDeviceCreateDepthStencilSurface);
+        hooked[kDeviceSetRenderTargetSlot] = reinterpret_cast<void*>(HookDeviceSetRenderTarget);
+        hooked[kDeviceSetDepthStencilSurfaceSlot] = reinterpret_cast<void*>(HookDeviceSetDepthStencilSurface);
+        hooked[kDeviceCreateVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
+        hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
 
         DWORD oldProtection = 0;
         if (!VirtualProtect(objectVTable, sizeof(void*), PAGE_READWRITE, &oldProtection))
@@ -957,7 +982,7 @@ namespace
             return d3d;
 
         void** original = *objectVTable;
-        if (original[16] == reinterpret_cast<void*>(HookD3D9CreateDevice))
+        if (original[kD3D9CreateDeviceSlot] == reinterpret_cast<void*>(HookD3D9CreateDevice))
             return d3d;
 
         void** hooked = static_cast<void**>(
@@ -970,21 +995,21 @@ namespace
 
         CopyMemory(hooked, original, sizeof(void*) * kD3D9InterfaceSlots);
         g_realD3D9GetAdapterIdentifier =
-            reinterpret_cast<D3D9GetAdapterIdentifierFn>(original[5]);
+            reinterpret_cast<D3D9GetAdapterIdentifierFn>(original[kD3D9GetAdapterIdentifierSlot]);
         g_realD3D9CheckDeviceFormat =
-            reinterpret_cast<D3D9CheckDeviceFormatFn>(original[10]);
+            reinterpret_cast<D3D9CheckDeviceFormatFn>(original[kD3D9CheckDeviceFormatSlot]);
         g_realD3D9CheckDepthStencilMatch =
-            reinterpret_cast<D3D9CheckDepthStencilMatchFn>(original[12]);
+            reinterpret_cast<D3D9CheckDepthStencilMatchFn>(original[kD3D9CheckDepthStencilMatchSlot]);
         g_realD3D9GetDeviceCaps =
-            reinterpret_cast<D3D9GetDeviceCapsFn>(original[14]);
+            reinterpret_cast<D3D9GetDeviceCapsFn>(original[kD3D9GetDeviceCapsSlot]);
         g_realD3D9CreateDevice =
-            reinterpret_cast<D3D9CreateDeviceFn>(original[16]);
+            reinterpret_cast<D3D9CreateDeviceFn>(original[kD3D9CreateDeviceSlot]);
 
-        hooked[5] = reinterpret_cast<void*>(HookD3D9GetAdapterIdentifier);
-        hooked[10] = reinterpret_cast<void*>(HookD3D9CheckDeviceFormat);
-        hooked[12] = reinterpret_cast<void*>(HookD3D9CheckDepthStencilMatch);
-        hooked[14] = reinterpret_cast<void*>(HookD3D9GetDeviceCaps);
-        hooked[16] = reinterpret_cast<void*>(HookD3D9CreateDevice);
+        hooked[kD3D9GetAdapterIdentifierSlot] = reinterpret_cast<void*>(HookD3D9GetAdapterIdentifier);
+        hooked[kD3D9CheckDeviceFormatSlot] = reinterpret_cast<void*>(HookD3D9CheckDeviceFormat);
+        hooked[kD3D9CheckDepthStencilMatchSlot] = reinterpret_cast<void*>(HookD3D9CheckDepthStencilMatch);
+        hooked[kD3D9GetDeviceCapsSlot] = reinterpret_cast<void*>(HookD3D9GetDeviceCaps);
+        hooked[kD3D9CreateDeviceSlot] = reinterpret_cast<void*>(HookD3D9CreateDevice);
 
         DWORD oldProtection = 0;
         if (!VirtualProtect(objectVTable, sizeof(void*), PAGE_READWRITE, &oldProtection))
