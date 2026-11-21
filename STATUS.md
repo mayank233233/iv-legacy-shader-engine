@@ -46,3 +46,15 @@
 ## Important boundary
 
 Prototype 0.3 now has a successful hosted Windows x86 compile. It is **not** yet a verified D3D9 runtime on the target computer and has not been run on the GMA 3100. CI success proves that the shader sources compile and the x86 probe links in the hosted environment. It does not prove GMA 3100 driver acceptance, hardware vertex processing, rendering correctness, GTA IV compatibility or performance.
+
+
+## Research and architecture work (2026-11-21)
+
+- Added [GMA 3100 / GTA IV compatibility and optimization research](docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md).
+- Confirmed from Intel documentation that GMA 3100 is D3D9.0c with PS 2.0 / VS 2.0, while GTA IV's DD3D60 requirement is documented as SM3.0 or higher.
+- Inspected the public GTA IV shader decompilation tree: 1,689 ASM listings (856 PS / 833 VS) and 102 FXC XML metadata files. Inspected representative default, deferred-lighting, water, tree and vehicle shaders; the samples use ps_3_0. The deferred-lighting sample uses six samplers, r31 and dynamic if/rep flow control.
+- Studied PS 2.0 vs PS 3.0 instruction, temporary-register and control-flow limits. A profile-token rename is not a valid conversion.
+- Compared Sodium, Lithium, ImmediatelyFast, FerriteCore, OptiFine, EntityCulling and ModernFix. Recorded transferable techniques and features that must not be copied directly.
+- Studied GTA IV community references including ZolikaPatch, FusionFix, GTA IV Shaders, the optimization guide and ASI loader.
+- Updated README: the next development gate is a GTA IV 1.0.0.0 game-loaded x86 plugin, not asking the user to run the standalone v0.3 probe.
+- Runtime caps from the actual GMA driver, shader-to-runtime permutation coverage, target formats and the attainable FPS remain unknown until a game-loaded build records/validates them.
