@@ -120,6 +120,9 @@ jobs:
           if (@($drawAnalysis.draw_calls[0].vertex_declaration.elements).Count -ne 2) { throw 'Expected two vertex declaration elements in the first draw.' }
           if (@($drawAnalysis.draw_calls[0].stream_bindings).Count -lt 1) { throw 'Expected stream source binding in the first draw.' }
           if ([string]::IsNullOrWhiteSpace($drawAnalysis.draw_calls[0].index_buffer_object)) { throw 'Expected index buffer binding in the first draw.' }
+          if ($drawAnalysis.buffer_objects_observed -lt 2) { throw 'Expected vertex and index buffer creation descriptors.' }
+          if ($drawAnalysis.draw_calls[0].stream_bindings[0].buffer_descriptor.length_bytes -ne 4096) { throw 'Expected 4096-byte synthetic vertex buffer descriptor.' }
+          if ($drawAnalysis.draw_calls[0].index_buffer.length_bytes -ne 1024 -or $drawAnalysis.draw_calls[0].index_buffer.format -ne 101) { throw 'Expected 1024-byte INDEX16 synthetic index buffer descriptor.' }
           if ($drawAnalysis.draw_calls[1].fvf -eq 0) { throw 'Expected FVF state on the second draw after SetFVF.' }
           python tools\analyze_asi_constants.py build\bin\IVLegacyConstants --log build\bin\IVLegacy.log --json build\bin\shader_constant_inventory.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
