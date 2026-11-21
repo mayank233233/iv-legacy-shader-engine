@@ -416,6 +416,30 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceSetTexture(
+        IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetSamplerState(
+        IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetVertexShaderConstantF(
+        IDirect3DDevice9*, UINT, const float*, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetPixelShaderConstantF(
+        IDirect3DDevice9*, UINT, const float*, UINT)
+    {
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeCreateDevice(
         IDirect3D9*,
         UINT,
@@ -470,6 +494,10 @@ namespace
         g_fakeDeviceVTable[92] = reinterpret_cast<void*>(FakeDeviceSetVertexShader);
         g_fakeDeviceVTable[106] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader);
         g_fakeDeviceVTable[107] = reinterpret_cast<void*>(FakeDeviceSetPixelShader);
+        g_fakeDeviceVTable[65] = reinterpret_cast<void*>(FakeDeviceSetTexture);
+        g_fakeDeviceVTable[69] = reinterpret_cast<void*>(FakeDeviceSetSamplerState);
+        g_fakeDeviceVTable[94] = reinterpret_cast<void*>(FakeDeviceSetVertexShaderConstantF);
+        g_fakeDeviceVTable[109] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantF);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
 
         g_fakeShaderVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
@@ -586,6 +614,10 @@ int main()
         L"General", L"CaptureDrawTelemetry", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"CaptureDrawMaxCalls", L"8", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"CaptureShaderConstants", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"CaptureShaderConstantMaxRecords", L"16", iniPath);
     WritePrivateProfileStringW(
         L"General", L"EnableShaderFallbacks", L"1", iniPath);
 
@@ -797,6 +829,16 @@ int main()
     const HRESULT setVertexShaderHr = device->SetVertexShader(vertexShader);
     const HRESULT setPixelShaderHr = device->SetPixelShader(pixelShader);
 
+    const float vertexConstants[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
+    const float pixelConstants[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
+    const HRESULT setTextureHr = device->SetTexture(0, NULL);
+    const HRESULT setSamplerStateHr = device->SetSamplerState(
+        0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+    const HRESULT setVertexConstantsHr = device->SetVertexShaderConstantF(
+        4, vertexConstants, 1);
+    const HRESULT setPixelConstantsHr = device->SetPixelShaderConstantF(
+        7, pixelConstants, 1);
+
     const HRESULT drawPrimitiveHr = device->DrawPrimitive(
         D3DPT_TRIANGLELIST, 0, 1);
     const HRESULT drawIndexedPrimitiveHr = device->DrawIndexedPrimitive(
@@ -867,6 +909,12 @@ int main()
         !HasText("kind=DrawPrimitiveUP") ||
         !HasText("kind=DrawIndexedPrimitiveUP"))
         return Fail("One or more D3D9 draw telemetry hooks or frame tags were not observed");
+    if (!HasText("SET_TEXTURE") || !HasText("SET_SAMPLER_STATE"))
+        return Fail("D3D9 texture or sampler-state hooks were not observed");
+    if (!HasText("SHADER_CONSTANT_CAPTURE_ENABLED") ||
+        !HasText("SHADER_CONSTANT_CAPTURED stage=VS") ||
+        !HasText("SHADER_CONSTANT_CAPTURED stage=PS"))
+        return Fail("Vertex/pixel shader constant sidecar capture was not observed");
     if (!HasText("SHADER_CAPTURE_ENABLED") ||
         !HasText("SHADER_CAPTURED stage=VS") ||
         !HasText("SHADER_CAPTURED stage=PS"))
@@ -891,7 +939,22 @@ int main()
     if (captureFiles < 2 || captureFiles > 16)
         return Fail("Shader capture file count is outside the configured bound");
 
-    std::printf("PASS: synthetic D3D9 interface/device hooks and SM2 capture executed.\n");
+    WIN32_FIND_DATAW constantFindData = {};
+    HANDLE constantFind = FindFirstFileW(
+        L"build\\bin\\IVLegacyConstants\\*.bin", &constantFindData);
+    if (constantFind == INVALID_HANDLE_VALUE)
+        return Fail("Shader constant sidecar directory contains no binary records");
+    unsigned constantFiles = 0;
+    do
+    {
+        if ((constantFindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+            ++constantFiles;
+    } while (FindNextFileW(constantFind, &constantFindData));
+    FindClose(constantFind);
+    if (constantFiles != 2)
+        return Fail("Expected exactly two bounded shader constant sidecar records");
+
+    std::printf("PASS: synthetic D3D9 interface/device hooks, shader capture and constant telemetry executed.\n");
     std::printf("Adapter: %s; vendor=0x%04lX device=0x%04lX\n",
         identifier.Description,
         static_cast<unsigned long>(identifier.VendorId),
@@ -919,6 +982,7 @@ int main()
         static_cast<unsigned long>(drawPrimitiveUPHr),
         static_cast<unsigned long>(drawIndexedPrimitiveUPHr));
     std::printf("Captured shader files: %u\n", captureFiles);
+    std::printf("Captured constant records: %u\n", constantFiles);
 
     (void)asi;
     return 0;
