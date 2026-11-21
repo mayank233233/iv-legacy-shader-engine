@@ -47,6 +47,7 @@ required_source_markers = (
     "ValidatePS20FallbackBytecode",
     "SHADER_FALLBACK_ATTEMPT",
     "SHADER_FALLBACK_APPLIED",
+    "SHADER_FALLBACK_OBJECT_MAP",
     "SHADER_FALLBACK_NOT_MAPPED",
     "SHADER_FALLBACK_CREATE_FAILED",
     "SHADER_FALLBACKS_DISABLED reason=strict_version_gate_disabled",
@@ -103,6 +104,8 @@ if "unmappedShaderVersion != 0xFFFF0300UL" not in smoke_source:
     fail("synthetic runtime test must verify unmapped PS3 bytecode passes through unchanged")
 if "EnableShaderFallbacks" not in smoke_source or "ShaderFallbacks" not in smoke_source:
     fail("synthetic runtime test must create an explicit opt-in fallback map")
+if "SHADER_FALLBACK_OBJECT_MAP" not in smoke_source or "profile=PS_2_0" not in smoke_source:
+    fail("synthetic runtime test must verify shader-object to actual fallback-bytecode correlation")
 
 if "wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath)" not in source:
     fail("path setup must preserve the full executable path for version validation")
@@ -145,6 +148,16 @@ if "g_fakeDeviceVTable[91] = reinterpret_cast<void*>(FakeDeviceCreateVertexShade
 if "g_fakeDeviceVTable[106] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader)" not in smoke_source:
     fail("synthetic IDirect3DDevice9 CreatePixelShader slot is incorrect")
 expected_draw_test_markers = (
+    "g_fakeDeviceVTable[65] = reinterpret_cast<void*>(FakeDeviceSetTexture)",
+    "g_fakeDeviceVTable[69] = reinterpret_cast<void*>(FakeDeviceSetSamplerState)",
+    "g_fakeDeviceVTable[94] = reinterpret_cast<void*>(FakeDeviceSetVertexShaderConstantF)",
+    "g_fakeDeviceVTable[109] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantF)",
+    "device->SetTexture(",
+    "device->SetSamplerState(",
+    "device->SetVertexShaderConstantF(",
+    "device->SetPixelShaderConstantF(",
+    'L"General", L"CaptureShaderConstants", L"1"',
+    "IVLegacyConstants",
     "g_fakeDeviceVTable[81] = reinterpret_cast<void*>(FakeDeviceDrawPrimitive)",
     "g_fakeDeviceVTable[82] = reinterpret_cast<void*>(FakeDeviceDrawIndexedPrimitive)",
     "g_fakeDeviceVTable[83] = reinterpret_cast<void*>(FakeDeviceDrawPrimitiveUP)",
