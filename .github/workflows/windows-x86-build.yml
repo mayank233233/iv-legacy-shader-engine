@@ -44,12 +44,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests\check_asi_sources.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools\analyze_d3d9_shaders.py --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests\check_shader_analyzer.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Compile Shader Model 2.0 shaders
         shell: pwsh
         run: |
           cmd.exe /d /c build\compile_shaders.bat
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Inventory compiled SM2 shaders
+        shell: pwsh
+        run: |
+          python tools\analyze_d3d9_shaders.py build\out --output build\out\shader_inventory.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $inventory = Get-Content build\out\shader_inventory.json -Raw | ConvertFrom-Json
+          if ($inventory.parsed_shader_count -ne 6) { throw "Expected six parsed SM2 shaders; found $($inventory.parsed_shader_count)." }
+          if ($inventory.failed_shader_count -ne 0) { throw 'One or more compiled SM2 shaders could not be parsed.' }
+          if ($inventory.profile_counts.'vs_2_0' -ne 2 -or $inventory.profile_counts.'ps_2_0' -ne 4) { throw 'Unexpected SM2 shader profile inventory.' }
 
       - name: Build x86 D3D9 probe
         shell: pwsh
@@ -92,6 +106,7 @@ jobs:
           Copy-Item build\out\*.vso artifact\build\out\
           Copy-Item build\out\*.pso artifact\build\out\
           Copy-Item build\out\*.asm artifact\build\out\
+          Copy-Item build\out\shader_inventory.json artifact\build\out\
           Copy-Item build\bin\D3D9ShaderProbe.exe artifact\build\bin\
           Copy-Item build\bin\IVLegacyASI.asi artifact\
           Copy-Item build\run_probe.bat artifact\build\
