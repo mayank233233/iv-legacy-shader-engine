@@ -42,6 +42,14 @@ required_source_markers = (
     "DEVICE_RESET_REQUEST",
     "CaptureShaderBytecode",
     "CaptureMaxFiles",
+    "CaptureDrawTelemetry",
+    "CaptureDrawMaxCalls",
+    "SHADER_OBJECT_CREATED",
+    "LogDrawTelemetry",
+    "HookDeviceDrawPrimitive",
+    "HookDeviceDrawIndexedPrimitive",
+    "HookDeviceDrawPrimitiveUP",
+    "HookDeviceDrawIndexedPrimitiveUP",
     "SHADER_CAPTURE_ENABLED",
     "SHADER_CAPTURED",
     "StrictGTAIV100",
@@ -74,12 +82,20 @@ required_vtable_bindings = (
     "kDeviceCreatePixelShaderSlot = 106",
     "kDeviceSetVertexShaderSlot = 92",
     "kDeviceSetPixelShaderSlot = 107",
+    "kDeviceDrawPrimitiveSlot = 81",
+    "kDeviceDrawIndexedPrimitiveSlot = 82",
+    "kDeviceDrawPrimitiveUPSlot = 83",
+    "kDeviceDrawIndexedPrimitiveUPSlot = 84",
     "original[kDeviceCreateVertexShaderSlot]",
     "original[kDeviceCreatePixelShaderSlot]",
     "hooked[kDeviceCreateVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceCreateVertexShader)",
     "hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader)",
     "hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader)",
     "hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader)",
+    "hooked[kDeviceDrawPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitive)",
+    "hooked[kDeviceDrawIndexedPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitive)",
+    "hooked[kDeviceDrawPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitiveUP)",
+    "hooked[kDeviceDrawIndexedPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP)",
 )
 for binding in required_vtable_bindings:
     if binding not in source:
@@ -90,6 +106,21 @@ if "g_fakeDeviceVTable[91] = reinterpret_cast<void*>(FakeDeviceCreateVertexShade
     fail("synthetic IDirect3DDevice9 CreateVertexShader slot is incorrect")
 if "g_fakeDeviceVTable[106] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader)" not in smoke_source:
     fail("synthetic IDirect3DDevice9 CreatePixelShader slot is incorrect")
+expected_draw_test_markers = (
+    "g_fakeDeviceVTable[81] = reinterpret_cast<void*>(FakeDeviceDrawPrimitive)",
+    "g_fakeDeviceVTable[82] = reinterpret_cast<void*>(FakeDeviceDrawIndexedPrimitive)",
+    "g_fakeDeviceVTable[83] = reinterpret_cast<void*>(FakeDeviceDrawPrimitiveUP)",
+    "g_fakeDeviceVTable[84] = reinterpret_cast<void*>(FakeDeviceDrawIndexedPrimitiveUP)",
+    "device->DrawPrimitive(",
+    "device->DrawIndexedPrimitive(",
+    "device->DrawPrimitiveUP(",
+    "device->DrawIndexedPrimitiveUP(",
+    'L"General", L"CaptureDrawTelemetry", L"1"',
+)
+for marker in expected_draw_test_markers:
+    if marker not in smoke_source:
+        fail(f"synthetic D3D9 draw telemetry coverage is missing: {marker}")
+
 
 if "caps->PixelShaderVersion =" in source or "caps->VertexShaderVersion =" in source:
     fail("telemetry plugin must not spoof shader-model capabilities")
