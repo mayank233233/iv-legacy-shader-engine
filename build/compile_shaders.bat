@@ -38,7 +38,7 @@ exit /b 0
 
 :compile
 echo Compiling %~1 as %~3...
-"%FXC%" /nologo /Ges /O3 /T %~3 /E %~2 /Fo %~4 /Fc %~5 %~1
+"%FXC%" /nologo /O3 /T %~3 /E %~2 /Fo %~4 /Fc %~5 %~1
 if errorlevel 1 exit /b 1
 if not exist "%~4" (
   echo ERROR: FXC returned success but bytecode was not created: %~4
