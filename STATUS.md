@@ -201,3 +201,28 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 | Render GTA IV scenes on Intel GMA 3100 | NOT TESTED |
 | Measure average / 1% low FPS against the 30 FPS objective | NOT TESTED |
 
+
+ 
+## Prototype 0.5.5-alpha verification — 2026-11-21
+
+- Exact target remains original PC GTA IV `GTAIV.exe` file version `1.0.0.0`; strict gate remains enabled by default.
+- Latest Windows x86 CI: [run #172](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44891303007), commit `fd0f9e9c4eeafb30a4aa7de2893b7ba4f551d589`; all steps passed.
+- Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44891303007/artifacts/14701424322), artifact ID `14701424322`; SHA-256 `bf39064f10d794d89c2ba04f96b6bc93b0be07a37a43a37fab897bea06dcf148`.
+- Added opt-in buffer creation hooks at D3D9 slots CreateVertexBuffer 26 and CreateIndexBuffer 27. They log buffer object address, byte length, usage flags, FVF or index format, and pool.
+- The offline draw analyzer resolves each bound vertex stream and index-buffer object to its creation descriptor. It exposes buffer lengths and formats alongside declaration/FVF, stream stride/offset/frequency, shader hashes and material-state fingerprints.
+- Synthetic test creates a managed 4096-byte vertex buffer and a managed 1024-byte INDEX16 index buffer, binds both, and verifies the first draw resolves each pointer to its correct descriptor.
+- Run #172 passed source sanity, six SM2 shader compiles, x86 probe/ASI builds, synthetic D3D9 runtime, log analysis, constant sidecar parsing, fallback audit, and artifact staging.
+- All buffer descriptors, shader captures, constants and adapter identifiers in this artifact are synthetic fake-COM test data. They are not GTA IV resources or observations from the physical GMA 3100.
+
+### Remaining integration gates
+
+| Gate | State |
+|---|---|
+| Inspect original GTAIV.exe file version and PE32 normal/delay imports | TOOL READY; FILE NOT INSPECTED |
+| Verify original game's D3D9 factory import path and ASI load timing | NOT VERIFIED |
+| Capture real GTA IV shader bytecode, constants, material state, vertex declarations and buffer descriptors | NOT RUN |
+| Map real game shader families and vertex input layouts to SM2-compatible fallbacks | NOT IMPLEMENTED |
+| Load a real compatibility renderer in original GTA IV 1.0.0.0 | NOT TESTED |
+| Render original GTA IV scenes on Intel GMA 3100 | NOT TESTED |
+| Measure average / 1% low FPS against the 30 FPS objective | NOT TESTED |
+
