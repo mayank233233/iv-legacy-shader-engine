@@ -44,6 +44,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests\check_asi_sources.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests\check_asi_log_analyzer.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools\analyze_d3d9_shaders.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests\check_shader_analyzer.py
