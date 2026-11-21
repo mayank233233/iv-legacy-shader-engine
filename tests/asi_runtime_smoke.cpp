@@ -301,6 +301,20 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceSetVertexShader(
+        IDirect3DDevice9*,
+        IDirect3DVertexShader9*)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetPixelShader(
+        IDirect3DDevice9*,
+        IDirect3DPixelShader9*)
+    {
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeCreateDevice(
         IDirect3D9*,
         UINT,
@@ -348,7 +362,9 @@ namespace
         g_fakeDeviceVTable[37] = reinterpret_cast<void*>(FakeDeviceSetRenderTarget);
         g_fakeDeviceVTable[39] = reinterpret_cast<void*>(FakeDeviceSetDepthStencilSurface);
         g_fakeDeviceVTable[91] = reinterpret_cast<void*>(FakeDeviceCreateVertexShader);
+        g_fakeDeviceVTable[92] = reinterpret_cast<void*>(FakeDeviceSetVertexShader);
         g_fakeDeviceVTable[106] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader);
+        g_fakeDeviceVTable[107] = reinterpret_cast<void*>(FakeDeviceSetPixelShader);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
     }
 
@@ -599,6 +615,9 @@ int main()
         pixelShaderHr = device->CreatePixelShader(
             reinterpret_cast<const DWORD*>(pixelBytecode), &pixelShader);
 
+    const HRESULT setVertexShaderHr = device->SetVertexShader(NULL);
+    const HRESULT setPixelShaderHr = device->SetPixelShader(NULL);
+
     if (vertexBytecode)
         HeapFree(GetProcessHeap(), 0, vertexBytecode);
     if (pixelBytecode)
@@ -638,6 +657,8 @@ int main()
         return Fail("Device render/depth surface creation hooks were not observed");
     if (!HasText("CREATE_VERTEX_SHADER") || !HasText("CREATE_PIXEL_SHADER"))
         return Fail("Device shader creation hooks were not observed");
+    if (!HasText("SET_VERTEX_SHADER") || !HasText("SET_PIXEL_SHADER"))
+        return Fail("Device shader binding hooks were not observed");
     if (!HasText("SHADER_CAPTURE_ENABLED") ||
         !HasText("SHADER_CAPTURED stage=VS") ||
         !HasText("SHADER_CAPTURED stage=PS"))
