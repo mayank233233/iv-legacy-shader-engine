@@ -49,12 +49,12 @@ namespace
         return false;
     }
 
-    bool HasEither(const char* first, const char* second)
+    bool HasText(const char* marker)
     {
         char buffer[32768] = {};
         if (!ReadLog(buffer, sizeof(buffer)))
             return false;
-        return strstr(buffer, first) != NULL || strstr(buffer, second) != NULL;
+        return strstr(buffer, marker) != NULL;
     }
 
     int Fail(const char* message)
@@ -103,13 +103,13 @@ int main()
 
     if (!WaitForLog("DIRECT3DCREATE9", 5000))
         return Fail("Direct3DCreate9 wrapper was not called");
-    if (!HasEither("D3D9_ADAPTER adapter=", "D3D9_ADAPTER_IDENTIFIER_FAILED"))
+    if (!HasText("D3D9_ADAPTER"))
         return Fail("IDirect3D9::GetAdapterIdentifier hook was not observed");
-    if (!HasEither("D3D9_GET_DEVICE_CAPS adapter=", "D3D9_GET_DEVICE_CAPS_FAILED"))
+    if (!HasText("D3D9_GET_DEVICE_CAPS"))
         return Fail("IDirect3D9::GetDeviceCaps hook was not observed");
-    if (!HasEither("D3D9_CHECK_DEVICE_FORMAT", "D3D9_CHECK_DEVICE_FORMAT"))
+    if (!HasText("D3D9_CHECK_DEVICE_FORMAT"))
         return Fail("IDirect3D9::CheckDeviceFormat hook was not observed");
-    if (!HasEither("D3D9_CHECK_DEPTH_MATCH", "D3D9_CHECK_DEPTH_MATCH"))
+    if (!HasText("D3D9_CHECK_DEPTH_MATCH"))
         return Fail("IDirect3D9::CheckDepthStencilMatch hook was not observed");
 
     char buffer[32768] = {};
