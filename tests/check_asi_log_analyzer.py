@@ -14,7 +14,10 @@ def main() -> None:
 [12:00:00.001] SHADER_OBJECT_CREATED stage=PS object=00002000 profile=PS_2_0 bytes=128 hash=bbb222 hr=0x00000000
 [12:00:00.0015] SHADER_FALLBACK_OBJECT_MAP object=00002000 source_hash=ccc333 target_hash=bbb222 target_profile=ps_2_0
 [12:00:00.0016] TEXTURE_OBJECT_CREATED type=2D object=00004000 width=64 height=32 levels=1 usage=0x00000000 format=21 pool=1 hr=0x00000000
-[12:00:00.002] DRAW_CALL seq=1 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=12 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=36 start_index=0 bound_vs=00001000 bound_ps=00002000 textures=0:00004000;1:00000000 sampler_hash=abcdef0123456789 hr=0x00000000
+[12:00:00.0017] SET_SAMPLER_STATE sampler=0 type=2 value=3 hr=0x00000000
+[12:00:00.0018] SET_RENDER_STATE state=15 value=1 hr=0x00000000
+[12:00:00.0019] SET_TEXTURE_STAGE_STATE stage=0 state=1 value=4 hr=0x00000000
+[12:00:00.002] DRAW_CALL seq=1 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=12 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=36 start_index=0 bound_vs=00001000 bound_ps=00002000 textures=0:00004000;1:00000000 sampler_hash=abcdef0123456789 sampler_count=1 render_state_hash=12345678 render_state_count=1 texture_stage_hash=87654321 texture_stage_count=1 hr=0x00000000
 [12:00:00.003] DRAW_CALL seq=2 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=4 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=12 start_index=36 bound_vs=00001000 bound_ps=00002000 textures=0:00004000;1:00000000 sampler_hash=abcdef0123456789 hr=0x00000000
 [12:00:00.004] DRAW_CALL seq=3 frame=5 kind=DrawPrimitive device=00003000 primitive=4 primitives=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=6 start_index=0 bound_vs=00001000 bound_ps=00009999 hr=0x80004005
 [12:00:00.0045] SHADER_OBJECT_CREATED stage=PS object=00002000 profile=PS_3_0 bytes=72 hash=ddd444 hr=0x00000000
@@ -54,6 +57,11 @@ def main() -> None:
     assert texture["descriptor"]["height"] == 32
     assert texture["draw_calls"] == 2
     assert report["draw_calls"][0]["sampler_state_hash"] == "abcdef0123456789"
+    assert report["draw_calls"][0]["sampler_state_count"] == 1
+    assert report["draw_calls"][0]["render_state_hash"] == "12345678"
+    assert report["draw_calls"][0]["render_state_count"] == 1
+    assert report["draw_calls"][0]["texture_stage_state_hash"] == "87654321"
+    assert report["draw_calls"][0]["texture_stage_state_count"] == 1
     assert report["draw_calls"][0]["texture_bindings"][0]["descriptor"]["format"] == 21
     assert report["draw_calls"][3]["pixel_shader_fallback"] is None
     assert report["draw_calls"][3]["pixel_shader_key"] == "PS:ddd444"
