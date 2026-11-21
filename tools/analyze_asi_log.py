@@ -62,6 +62,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
     shaders_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     fallback_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     textures_by_address: dict[str, dict[str, Any]] = {}
+    vertex_declarations: dict[str, dict[str, Any]] = {}
     draws: list[dict[str, Any]] = []
     present_failures = 0
     reset_failures = 0
@@ -122,6 +123,41 @@ def analyze_log(path: Path) -> dict[str, Any]:
             textures_by_address[address] = descriptor
             continue
 
+        if "VERTEX_DECL_OBJECT_CREATED " in raw_line:
+            fields = parse_fields(raw_line)
+            address = normalize_pointer(fields.get("object"))
+            if address is not None:
+                vertex_declarations[address] = {
+                    "object": address,
+                    "elements": [],
+                    "log_line": line_number,
+                }
+            continue
+
+        if "VERTEX_DECL_ELEMENT " in raw_line:
+            fields = parse_fields(raw_line)
+            address = normalize_pointer(fields.get("object"))
+            declaration = vertex_declarations.get(address) if address else None
+            if declaration is not None:
+                declaration["elements"].append({
+                    "index": int_field(fields, "index"),
+                    "stream": int_field(fields, "stream"),
+                    "offset": int_field(fields, "offset"),
+                    "type": int_field(fields, "type"),
+                    "method": int_field(fields, "method"),
+                    "usage": int_field(fields, "usage"),
+                    "usage_index": int_field(fields, "usage_index"),
+                })
+            continue
+
+        if "VERTEX_DECL_ELEMENTS_UNREADABLE " in raw_line:
+            fields = parse_fields(raw_line)
+            address = normalize_pointer(fields.get("object"))
+            declaration = vertex_declarations.get(address) if address else None
+            if declaration is not None:
+                declaration["unreadable"] = True
+            continue
+
         if "SHADER_FALLBACK_OBJECT_MAP " in raw_line:
             fields = parse_fields(raw_line)
             address = normalize_pointer(fields.get("object"))
@@ -151,6 +187,29 @@ def analyze_log(path: Path) -> dict[str, Any]:
 
             vs_pointer = normalize_pointer(fields.get("bound_vs"))
             ps_pointer = normalize_pointer(fields.get("bound_ps"))
+            declaration_pointer = normalize_pointer(fields.get("vertex_decl"))
+            index_buffer_pointer = normalize_pointer(fields.get("index_buffer"))
+            stream_bindings = []
+            for binding in fields.get("streams", "").split(";"):
+                if not binding:
+                    continue
+                parts = binding.split(":")
+                if len(parts) != 5:
+                    continue
+                try:
+                    stream_bindings.append({
+                        "stream": int(parts[0], 0),
+                        "buffer": normalize_pointer(parts[1]),
+                        "offset": int(parts[2], 0),
+                        "stride": int(parts[3], 0),
+                        "frequency": int(parts[4], 0),
+                    })
+                except ValueError:
+                    continue
+            declaration = (
+                vertex_declarations.get(declaration_pointer)
+                if declaration_pointer else None
+            )
             vs = shaders_by_address.get(("VS", vs_pointer)) if vs_pointer else None
             ps = shaders_by_address.get(("PS", ps_pointer)) if ps_pointer else None
             ps_fallback = fallback_by_address.get(("PS", ps_pointer)) if ps_pointer else None
@@ -190,6 +249,11 @@ def analyze_log(path: Path) -> dict[str, Any]:
                 "pixel_shader": ps,
                 "pixel_shader_fallback": ps_fallback,
                 "pixel_shader_source_hash": ps_fallback["source_hash"] if ps_fallback else None,
+                "vertex_declaration_object": declaration_pointer,
+                "vertex_declaration": declaration,
+                "fvf": int_field(fields, "fvf"),
+                "index_buffer_object": index_buffer_pointer,
+                "stream_bindings": stream_bindings,
                 "texture_bindings": texture_bindings,
                 "sampler_state_hash": fields.get("sampler_hash", "").lower() or None,
                 "sampler_state_count": int_field(fields, "sampler_count"),
@@ -225,6 +289,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
     unresolved_shader_references = 0
     fallback_usage: dict[tuple[str, str], dict[str, Any]] = {}
     texture_usage: dict[str, dict[str, Any]] = {}
+    vertex_input_usage: dict[str, dict[str, Any]] = {}
 
     for draw in draws:
         frame_counts[draw["frame"]] += 1
@@ -277,6 +342,29 @@ def analyze_log(path: Path) -> dict[str, Any]:
         pair["kinds"][draw["kind"]] += 1
         pair["primitive_types"][draw["primitive_name"]] += draw["primitive_count"]
         pair["frames"].add(draw["frame"])
+
+        input_key = (
+            f"DECL:{draw['vertex_declaration_object']}"
+            if draw["vertex_declaration_object"] else
+            f"FVF:0x{draw['fvf']:08X}"
+        )
+        input_item = vertex_input_usage.setdefault(input_key, {
+            "input_layout": input_key,
+            "vertex_declaration": draw["vertex_declaration"],
+            "fvf": draw["fvf"],
+            "draw_calls": 0,
+            "primitive_submissions": 0,
+            "index_buffers": set(),
+            "streams": set(),
+        })
+        input_item["draw_calls"] += 1
+        input_item["primitive_submissions"] += draw["primitive_count"]
+        if draw["index_buffer_object"]:
+            input_item["index_buffers"].add(draw["index_buffer_object"])
+        for stream in draw["stream_bindings"]:
+            input_item["streams"].add((
+                stream["stream"], stream["offset"], stream["stride"], stream["frequency"]
+            ))
 
         for binding in draw["texture_bindings"]:
             address = binding["object"]
@@ -364,6 +452,26 @@ def analyze_log(path: Path) -> dict[str, Any]:
         key=lambda x: (-x["draw_calls"], x["object"])
     )
 
+    normalized_vertex_input_usage = [
+        {
+            **item,
+            "index_buffers": sorted(item["index_buffers"]),
+            "streams": [
+                {
+                    "stream": stream[0],
+                    "offset": stream[1],
+                    "stride": stream[2],
+                    "frequency": stream[3],
+                }
+                for stream in sorted(item["streams"])
+            ],
+        }
+        for item in vertex_input_usage.values()
+    ]
+    normalized_vertex_input_usage.sort(
+        key=lambda x: (-x["draw_calls"], x["input_layout"])
+    )
+
     return {
         "schema_version": 1,
         "input_file": str(path),
@@ -387,6 +495,8 @@ def analyze_log(path: Path) -> dict[str, Any]:
         "shader_fallback_usage": normalized_fallback_usage,
         "texture_object_usage": normalized_texture_usage,
         "texture_objects_observed": len(textures_by_address),
+        "vertex_declarations_observed": len(vertex_declarations),
+        "vertex_input_usage": normalized_vertex_input_usage,
         "draw_calls": draws,
         "scope_note": (
             "Counts are log-observed D3D9 submissions, not GPU time, "
