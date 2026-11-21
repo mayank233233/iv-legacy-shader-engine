@@ -2,12 +2,15 @@
 
 ## Prototype 0.4-alpha — D3D9 telemetry ASI
 
-- Added a Win32/x86 ASI bootstrap with GTAIV.exe / 1.0.0.0 file-version gating, log and INI creation.
-- Added an IAT hook for the main executable's direct d3d9.dll!Direct3DCreate9 import.
-- Added per-object IDirect3D9 and IDirect3DDevice9 vtable instrumentation for adapter identity, caps, format checks, device creation, shader profile tokens, render/depth surfaces, Present failures and Reset.
-- The telemetry component deliberately does not spoof SM3 capabilities, translate or replace shader bytecode, or patch GTA IV executable instructions.
-- Added a synthetic GTAIV.exe host and D3D9 hook runtime smoke test to Windows x86 CI. This test validates the plugin hook mechanism; it is not a substitute for the actual GTA IV executable or GMA 3100 hardware.
-- Run #21 compiled and linked the initial x86 ASI; later CI is validating the expanded hook set and synthetic runtime test.
+- Added a Win32/x86 ASI bootstrap with a strict-by-default GTAIV.exe file-version gate for the original PC 1.0.0.0 release, plus log and INI creation.
+- Added the main executable's direct d3d9.dll!Direct3DCreate9 IAT hook and per-object IDirect3D9 / IDirect3DDevice9 vtable instrumentation.
+- Added adapter PCI identity, D3D9 caps and format checks, device creation, Reset, failed Present, colour/depth surface, shader creation and shader binding telemetry.
+- Added opt-in bounded SM2/SM3 bytecode capture with content hashing; capture is disabled by default.
+- Added the offline D3D9 SM2/SM3 token inventory tool and CI inventory of compiled and captured shader bytecode.
+- Added a synthetic GTAIV.exe host that exercises the factory/device hooks and two synthetic SM2 captures. Windows x86 CI run #61 passes all steps and uploads artifact 14698909429.
+- The synthetic PCI identity 8086:29C2 and reported SM2 caps are test data, not a measurement of the physical GMA 3100.
+- The all-loaded-module IAT scanning experiment failed its synthetic runtime test and was rolled back. Current hook scope is the main executable's direct IAT import only.
+- No SM3-to-SM2 translation, shader replacement, original-game execution, real GMA 3100 test, gameplay rendering or FPS result exists yet.
 
 
 ## Research update — 2026-11-21
