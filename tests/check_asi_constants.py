@@ -36,6 +36,17 @@ def write_v1_capture(path: Path) -> None:
     header = HEADER_V1.pack(b"IVCF", 1, 0, 2, 9, 1, 1, len(payload))
     path.write_bytes(header + payload)
 
+def write_typed_capture(path: Path, magic: bytes, stage: int, frame: int,
+                        sequence: int, start: int, values: tuple[int, ...],
+                        shader_object: int = 0x1234ABCD) -> None:
+    payload = struct.pack(f"<{len(values)}{'i' if magic == b'IVCI' else 'I'}", *values)
+    header = HEADER_V2.pack(
+        magic, 2, stage, frame, shader_object, sequence,
+        start, len(values) if magic == b"IVCB" else len(values) // 4,
+        len(payload)
+    )
+    path.write_bytes(header + payload)
+
 
 def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
@@ -46,6 +57,14 @@ def main() -> None:
         write_capture(ps_path, 1, 3, 2, 7, [(0.25, 0.5, 0.75, 1.0)], shader_object=0xABCDEF01)
         legacy_path = directory / "VS_legacy_v1.bin"
         write_v1_capture(legacy_path)
+        vs_int_path = directory / "VS_integer.bin"
+        ps_int_path = directory / "PS_integer.bin"
+        vs_bool_path = directory / "VS_boolean.bin"
+        ps_bool_path = directory / "PS_boolean.bin"
+        write_typed_capture(vs_int_path, b"IVCI", 0, 3, 3, 2, (1, -2, 3, -4))
+        write_typed_capture(ps_int_path, b"IVCI", 1, 3, 4, 1, (-5, 6, -7, 8), shader_object=0xABCDEF01)
+        write_typed_capture(vs_bool_path, b"IVCB", 0, 3, 5, 4, (0, 1))
+        write_typed_capture(ps_bool_path, b"IVCB", 1, 3, 6, 5, (1, 0), shader_object=0xABCDEF01)
 
         vs = parse_capture(vs_path)
         assert vs["stage"] == "VS"
@@ -60,6 +79,13 @@ def main() -> None:
         assert legacy["version"] == 1
         assert legacy["shader_object"] is None
         assert legacy["registers"][0]["xyzw"] == [9.0, 8.0, 7.0, 6.0]
+        vs_int = parse_capture(vs_int_path)
+        assert vs_int["data_kind"] == "int"
+        assert vs_int["registers"][0]["xyzw"] == [1, -2, 3, -4]
+        ps_bool = parse_capture(ps_bool_path)
+        assert ps_bool["data_kind"] == "bool"
+        assert ps_bool["registers"][0]["enabled"] is True
+        assert ps_bool["registers"][1]["enabled"] is False
 
         log_path = directory / "IVLegacy.log"
         log_path.write_text(
@@ -69,11 +95,11 @@ def main() -> None:
             encoding="utf-8",
         )
         report = analyze_directory(directory, log_path)
-        assert report["record_count"] == 3
+        assert report["record_count"] == 7
         assert report["invalid_record_count"] == 0
-        assert report["stage_counts"] == {"VS": 2, "PS": 1}
+        assert report["stage_counts"] == {"VS": 4, "PS": 3}
         assert report["frame_indices"] == [2, 3]
-        assert report["shader_objects_resolved"] == 2
+        assert report["shader_objects_resolved"] == 6
 
         vs_sidecar = next(record for record in report["records"] if record["stage"] == "VS" and record["version"] == 2)
         ps_sidecar = next(record for record in report["records"] if record["stage"] == "PS")
@@ -101,7 +127,7 @@ def main() -> None:
         else:
             raise AssertionError("register range past c255 must be rejected")
 
-    print("PASS: D3D9 shader constant sidecar parser validates headers, ranges and float values")
+    print("PASS: D3D9 float, integer and boolean constant sidecars validate and resolve to shader hashes")
 
 
 if __name__ == "__main__":
