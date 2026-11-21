@@ -393,13 +393,17 @@ def audit_and_lower_ps3(
         if opcode == OP_TEXKILL:
             source = ins.operands[0]
             source_type = reg_type(source)
+            source_number = reg_number(source)
             if source_type not in (REG_TEMP, REG_TEXTURE):
                 reasons.append(
-                    f"texkill at DWORD {ins.offset} requires a temp or texcoord source"
+                    f"texkill at DWORD {ins.offset} requires a temp or texcoord register"
                 )
+            if source_type == REG_TEMP and source_number > 11:
+                reasons.append(f"texkill at DWORD {ins.offset} reads r{source_number}; ps_2_0 has r0-r11")
+            if source_type == REG_TEXTURE and source_number > 7:
+                reasons.append(f"texkill at DWORD {ins.offset} reads t{source_number}; ps_2_0 has t0-t7")
             if _dest_mask(source) != 0xF or _dest_modifier(source) != DEST_MOD_NONE or _dest_shift(source) != 0:
                 reasons.append(f"texkill at DWORD {ins.offset} requires a full, unmodified coordinate operand")
-            _check_source(source, ins, reasons, input_remap, texture_coordinate=True)
             continue
 
         if opcode == OP_TEX:
