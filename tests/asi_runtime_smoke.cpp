@@ -17,6 +17,9 @@ namespace
     void* g_fakeDeviceVTable[119] = {};
     FakeComObject g_fakeD3D9 = {};
     FakeComObject g_fakeDevice = {};
+    FakeComObject g_fakeVertexShader = {};
+    FakeComObject g_fakePixelShader = {};
+    void* g_fakeShaderVTable[3] = {};
 
     bool ReadLog(char* buffer, DWORD capacity)
     {
@@ -286,8 +289,9 @@ namespace
         const DWORD*,
         IDirect3DVertexShader9** shader)
     {
-        if (shader)
-            *shader = NULL;
+        if (!shader)
+            return D3DERR_INVALIDCALL;
+        *shader = reinterpret_cast<IDirect3DVertexShader9*>(&g_fakeVertexShader);
         return D3D_OK;
     }
 
@@ -296,8 +300,34 @@ namespace
         const DWORD*,
         IDirect3DPixelShader9** shader)
     {
-        if (shader)
-            *shader = NULL;
+        if (!shader)
+            return D3DERR_INVALIDCALL;
+        *shader = reinterpret_cast<IDirect3DPixelShader9*>(&g_fakePixelShader);
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceDrawPrimitive(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceDrawIndexedPrimitive(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceDrawPrimitiveUP(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, const void*, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceDrawIndexedPrimitiveUP(
+        IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT,
+        const void*, D3DFORMAT, const void*, UINT)
+    {
         return D3D_OK;
     }
 
@@ -361,11 +391,21 @@ namespace
         g_fakeDeviceVTable[29] = reinterpret_cast<void*>(FakeDeviceCreateDepthStencilSurface);
         g_fakeDeviceVTable[37] = reinterpret_cast<void*>(FakeDeviceSetRenderTarget);
         g_fakeDeviceVTable[39] = reinterpret_cast<void*>(FakeDeviceSetDepthStencilSurface);
+        g_fakeDeviceVTable[81] = reinterpret_cast<void*>(FakeDeviceDrawPrimitive);
+        g_fakeDeviceVTable[82] = reinterpret_cast<void*>(FakeDeviceDrawIndexedPrimitive);
+        g_fakeDeviceVTable[83] = reinterpret_cast<void*>(FakeDeviceDrawPrimitiveUP);
+        g_fakeDeviceVTable[84] = reinterpret_cast<void*>(FakeDeviceDrawIndexedPrimitiveUP);
         g_fakeDeviceVTable[91] = reinterpret_cast<void*>(FakeDeviceCreateVertexShader);
         g_fakeDeviceVTable[92] = reinterpret_cast<void*>(FakeDeviceSetVertexShader);
         g_fakeDeviceVTable[106] = reinterpret_cast<void*>(FakeDeviceCreatePixelShader);
         g_fakeDeviceVTable[107] = reinterpret_cast<void*>(FakeDeviceSetPixelShader);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
+
+        g_fakeShaderVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
+        g_fakeShaderVTable[1] = reinterpret_cast<void*>(FakeAddRef);
+        g_fakeShaderVTable[2] = reinterpret_cast<void*>(FakeRelease);
+        g_fakeVertexShader.vtable = g_fakeShaderVTable;
+        g_fakePixelShader.vtable = g_fakeShaderVTable;
     }
 
     bool PatchImportToFakeCreate9()
@@ -470,6 +510,10 @@ int main()
         L"General", L"CaptureShaderBytecode", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"CaptureMaxFiles", L"16", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"CaptureDrawTelemetry", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"CaptureDrawMaxCalls", L"8", iniPath);
     DeleteFileW(L"build\\bin\\IVLegacy.log");
 
     SmokeMark("before-LoadLibrary");
@@ -626,8 +670,18 @@ int main()
         pixelShaderHr = device->CreatePixelShader(
             reinterpret_cast<const DWORD*>(pixelBytecode), &pixelShader);
 
-    const HRESULT setVertexShaderHr = device->SetVertexShader(NULL);
-    const HRESULT setPixelShaderHr = device->SetPixelShader(NULL);
+    const HRESULT setVertexShaderHr = device->SetVertexShader(vertexShader);
+    const HRESULT setPixelShaderHr = device->SetPixelShader(pixelShader);
+
+    const HRESULT drawPrimitiveHr = device->DrawPrimitive(
+        D3DPT_TRIANGLELIST, 0, 1);
+    const HRESULT drawIndexedPrimitiveHr = device->DrawIndexedPrimitive(
+        D3DPT_TRIANGLELIST, 0, 0, 3, 0, 1);
+    const HRESULT drawPrimitiveUPHr = device->DrawPrimitiveUP(
+        D3DPT_TRIANGLELIST, 1, NULL, sizeof(float) * 3);
+    const HRESULT drawIndexedPrimitiveUPHr = device->DrawIndexedPrimitiveUP(
+        D3DPT_TRIANGLELIST, 0, 3, 1, NULL, D3DFMT_INDEX16,
+        NULL, sizeof(float) * 3);
 
     if (vertexBytecode)
         HeapFree(GetProcessHeap(), 0, vertexBytecode);
@@ -670,6 +724,15 @@ int main()
         return Fail("Device shader creation hooks were not observed");
     if (!HasText("SET_VERTEX_SHADER") || !HasText("SET_PIXEL_SHADER"))
         return Fail("Device shader binding hooks were not observed");
+    if (!HasText("SHADER_OBJECT_CREATED stage=VS") ||
+        !HasText("SHADER_OBJECT_CREATED stage=PS"))
+        return Fail("Shader object-to-bytecode hash correlation was not logged");
+    if (!HasText("DRAW_TELEMETRY_ENABLED") ||
+        !HasText("kind=DrawPrimitive") ||
+        !HasText("kind=DrawIndexedPrimitive") ||
+        !HasText("kind=DrawPrimitiveUP") ||
+        !HasText("kind=DrawIndexedPrimitiveUP"))
+        return Fail("One or more D3D9 draw telemetry hooks were not observed");
     if (!HasText("SHADER_CAPTURE_ENABLED") ||
         !HasText("SHADER_CAPTURED stage=VS") ||
         !HasText("SHADER_CAPTURED stage=PS"))
@@ -715,6 +778,12 @@ int main()
     std::printf("CreateVS HRESULT: 0x%08lX; CreatePS HRESULT: 0x%08lX\n",
         static_cast<unsigned long>(vertexShaderHr),
         static_cast<unsigned long>(pixelShaderHr));
+    std::printf("DrawPrimitive HRESULT: 0x%08lX; DrawIndexedPrimitive HRESULT: 0x%08lX\n",
+        static_cast<unsigned long>(drawPrimitiveHr),
+        static_cast<unsigned long>(drawIndexedPrimitiveHr));
+    std::printf("DrawPrimitiveUP HRESULT: 0x%08lX; DrawIndexedPrimitiveUP HRESULT: 0x%08lX\n",
+        static_cast<unsigned long>(drawPrimitiveUPHr),
+        static_cast<unsigned long>(drawIndexedPrimitiveUPHr));
     std::printf("Captured shader files: %u\n", captureFiles);
 
     (void)asi;
