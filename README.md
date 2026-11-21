@@ -90,7 +90,7 @@ The adapter report separates fixed-function multitexture capability from the rep
 
 ## GitHub Actions boundary
 
-**Prototype 0.3 Windows x86 CI passed** in [run #8](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480). The workflow compiled all six HLSL files with FXC, built the 32-bit C++ executable with MSVC, and uploaded the 13-file build artifact ([download](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480/artifacts/14696800281)). The artifact contains six bytecode files, six FXC assembly listings and `D3D9ShaderProbe.exe`. It does **not** run the D3D9 windowed probe, validate a physical graphics driver, or prove hardware vertex-shader execution. Passing CI cannot replace running `build\\run_probe.bat` on the actual GMA 3100 machine.
+**Prototype 0.3 Windows x86 CI passed** in [run #10](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271). The workflow compiled all six HLSL files with FXC, built the 32-bit C++ executable with MSVC, staged the outputs under the repository-relative `build/` folder, and uploaded the 14-file artifact ([download](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44877200271/artifacts/14696049437)). Extract the artifact over the repository root; it supplies `build/bin/D3D9ShaderProbe.exe`, `build/out/` bytecode and assembly files, and `build/run_probe.bat`. CI does **not** run the D3D9 windowed probe, validate a physical graphics driver, or prove hardware vertex-shader execution. Passing CI cannot replace running `build\\run_probe.bat` on the actual GMA 3100 machine.
 
 ## Known limitations
 
