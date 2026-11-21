@@ -102,12 +102,18 @@ The adapter report separates fixed-function multitexture capability from the rep
 - A hosted Windows build does not emulate the target GMA 3100 driver.
 - No claim is made that GTA IV v1.0.0.0 will launch, render correctly, or achieve 30 FPS on GMA 3100.
 
-## Next validation gate
+## Research and next development direction
 
-1. Run the compiled probe on the actual Windows 8.1 x86 / GMA 3100 target.
-2. Preserve the complete `D3D9ProbeReport.txt` and the FXC `.asm` listings from the CI artifact.
-3. Compare SWVP and HWVP creation / render results independently.
-4. Inspect readback values and repeat tests for stability.
-5. Only after these results should the project move toward more representative geometry, state and material experiments.
+The full platform and rendering analysis is in [docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md](docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md). It covers the GMA 3100 SM2.0 limits, GTA IV shader evidence, the GTA IV and Minecraft optimization references, the proposed game-loaded ASI/D3D9 architecture, shader fallback strategy, risks and release gates.
 
-Do not begin GTA IV integration or make FPS claims before those gates are met.
+The next development work is a **GTA IV 1.0.0.0 game-loaded x86 plugin**, not another standalone shader demo:
+
+1. Create a version-aware ASI/plugin foundation with safe startup/shutdown, config and logs.
+2. Instrument the real D3D9 device without reporting fake capabilities.
+3. Inventory the game's shader creation, render-target and format requirements.
+4. Build selected SM2 fallback shaders while preserving the game's constant/vertex interfaces.
+5. Add conservative state caching, buffer/resource reuse, visible-only rendering and reduced-effects options after instrumentation identifies safe targets.
+
+The v0.3 standalone probe remains a developer reference for generic SM2 behavior. The next requested user test should be an installable GTA IV-loaded mod build, not the probe.
+
+No GTA IV launch, rendering or FPS claim is made until the game-loaded build has been tested on the target machine. 30 FPS remains a target, not a guarantee.
