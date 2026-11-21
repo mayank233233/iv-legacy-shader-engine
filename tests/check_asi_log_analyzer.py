@@ -20,6 +20,8 @@ def main() -> None:
 [12:00:00.00195] VERTEX_DECL_OBJECT_CREATED object=00006000 hr=0x00000000
 [12:00:00.00196] VERTEX_DECL_ELEMENT object=00006000 index=0 stream=0 offset=0 type=2 method=0 usage=0 usage_index=0
 [12:00:00.00197] VERTEX_DECL_ELEMENT object=00006000 index=1 stream=0 offset=12 type=1 method=0 usage=5 usage_index=0
+[12:00:00.00198] BUFFER_OBJECT_CREATED type=VB object=00005000 length=4096 usage=0x00000008 fvf=0x00000000 pool=1 hr=0x00000000
+[12:00:00.00199] BUFFER_OBJECT_CREATED type=IB object=00007000 length=1024 usage=0x00000008 format=101 pool=1 hr=0x00000000
 [12:00:00.002] DRAW_CALL seq=1 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=12 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=36 start_index=0 bound_vs=00001000 bound_ps=00002000 vertex_decl=00006000 fvf=0x00000000 index_buffer=00007000 streams=0:00005000:0:20:1 textures=0:00004000;1:00000000 sampler_hash=abcdef0123456789 sampler_count=1 render_state_hash=12345678 render_state_count=1 texture_stage_hash=87654321 texture_stage_count=1 hr=0x00000000
 [12:00:00.003] DRAW_CALL seq=2 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=4 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=12 start_index=36 bound_vs=00001000 bound_ps=00002000 textures=0:00004000;1:00000000 sampler_hash=abcdef0123456789 hr=0x00000000
 [12:00:00.004] DRAW_CALL seq=3 frame=5 kind=DrawPrimitive device=00003000 primitive=4 primitives=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=6 start_index=0 bound_vs=00001000 bound_ps=00009999 hr=0x80004005
@@ -72,6 +74,11 @@ def main() -> None:
     assert vertex_decl["elements"][0]["usage"] == 0
     assert vertex_decl["elements"][1]["offset"] == 12
     assert report["draw_calls"][0]["index_buffer_object"] == "7000"
+    assert report["buffer_objects_observed"] == 2
+    assert report["draw_calls"][0]["index_buffer"]["length_bytes"] == 1024
+    assert report["draw_calls"][0]["index_buffer"]["format"] == 101
+    assert report["draw_calls"][0]["stream_bindings"][0]["buffer_descriptor"]["length_bytes"] == 4096
+    assert report["draw_calls"][0]["stream_bindings"][0]["buffer_descriptor"]["type"] == "VB"
     assert report["draw_calls"][0]["stream_bindings"][0] == {
         "stream": 0, "buffer": "5000", "offset": 0, "stride": 20, "frequency": 1
     }
