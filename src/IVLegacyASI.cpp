@@ -1081,7 +1081,10 @@ namespace
 
     bool HookD3D9ImportsInModule(HMODULE module, const wchar_t* moduleName)
     {
-        if (!module || !Is32BitPE(module))
+        if (!module)
+            return false;
+
+        if (!Is32BitPE(module))
             return false;
 
         BYTE* base = reinterpret_cast<BYTE*>(module);
@@ -1258,6 +1261,8 @@ namespace
 
     bool HookD3D9Import()
     {
+        Log("D3D9_IAT_SCAN_BEGIN");
+
         HANDLE snapshot = CreateToolhelp32Snapshot(
             TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
             GetCurrentProcessId());
@@ -1268,6 +1273,8 @@ namespace
                 static_cast<unsigned long>(GetLastError()));
             return false;
         }
+
+        Log("D3D9_IAT_SCAN_SNAPSHOT_CREATED handle=%p", snapshot);
 
         MODULEENTRY32W entry = {};
         entry.dwSize = sizeof(entry);
@@ -1286,8 +1293,31 @@ namespace
         do
         {
             ++modulesScanned;
-            if (HookD3D9ImportsInModule(entry.hModule, entry.szModule))
+
+            DWORD exceptionCode = 0;
+            BOOL modulePatched = FALSE;
+            __try
+            {
+                modulePatched =
+                    HookD3D9ImportsInModule(entry.hModule, entry.szModule) ? TRUE : FALSE;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                exceptionCode = GetExceptionCode();
+            }
+
+            if (exceptionCode != 0)
+            {
+                Log(
+                    "D3D9_IAT_MODULE_SCAN_EXCEPTION module=%ls base=%p code=0x%08lX",
+                    entry.szModule,
+                    entry.modBaseAddr,
+                    static_cast<unsigned long>(exceptionCode));
+            }
+            else if (modulePatched)
+            {
                 ++modulesPatched;
+            }
         } while (Module32NextW(snapshot, &entry));
 
         CloseHandle(snapshot);
