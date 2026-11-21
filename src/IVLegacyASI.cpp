@@ -38,7 +38,9 @@ namespace
         kDeviceSetRenderTargetSlot = 37,
         kDeviceSetDepthStencilSurfaceSlot = 39,
         kDeviceCreateVertexShaderSlot = 91,
-        kDeviceCreatePixelShaderSlot = 106
+        kDeviceSetVertexShaderSlot = 92,
+        kDeviceCreatePixelShaderSlot = 106,
+        kDeviceSetPixelShaderSlot = 107
     };
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
@@ -55,6 +57,8 @@ namespace
     volatile LONG g_depthMatchLogCount = 0;
     volatile LONG g_vertexShaderLogCount = 0;
     volatile LONG g_pixelShaderLogCount = 0;
+    volatile LONG g_setVertexShaderLogCount = 0;
+    volatile LONG g_setPixelShaderLogCount = 0;
     volatile LONG g_renderTargetLogCount = 0;
     volatile LONG g_depthTargetCreateLogCount = 0;
     volatile LONG g_setRenderTargetLogCount = 0;
@@ -96,6 +100,10 @@ namespace
         IDirect3DDevice9*, const DWORD*, IDirect3DVertexShader9**);
     typedef HRESULT (WINAPI* DeviceCreatePixelShaderFn)(
         IDirect3DDevice9*, const DWORD*, IDirect3DPixelShader9**);
+    typedef HRESULT (WINAPI* DeviceSetVertexShaderFn)(
+        IDirect3DDevice9*, IDirect3DVertexShader9*);
+    typedef HRESULT (WINAPI* DeviceSetPixelShaderFn)(
+        IDirect3DDevice9*, IDirect3DPixelShader9*);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
     D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
@@ -112,7 +120,9 @@ namespace
     DeviceSetRenderTargetFn g_realDeviceSetRenderTarget = NULL;
     DeviceSetDepthStencilSurfaceFn g_realDeviceSetDepthStencilSurface = NULL;
     DeviceCreateVertexShaderFn g_realDeviceCreateVertexShader = NULL;
+    DeviceSetVertexShaderFn g_realDeviceSetVertexShader = NULL;
     DeviceCreatePixelShaderFn g_realDeviceCreatePixelShader = NULL;
+    DeviceSetPixelShaderFn g_realDeviceSetPixelShader = NULL;
 
     void Log(const char* format, ...)
     {
@@ -842,6 +852,40 @@ namespace
         return hr;
     }
 
+    HRESULT WINAPI HookDeviceSetVertexShader(
+        IDirect3DDevice9* self,
+        IDirect3DVertexShader9* shader)
+    {
+        const HRESULT hr = g_realDeviceSetVertexShader
+            ? g_realDeviceSetVertexShader(self, shader)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_setVertexShaderLogCount) <= 2048)
+        {
+            Log(
+                "SET_VERTEX_SHADER object=%p hr=0x%08lX",
+                shader, static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetPixelShader(
+        IDirect3DDevice9* self,
+        IDirect3DPixelShader9* shader)
+    {
+        const HRESULT hr = g_realDeviceSetPixelShader
+            ? g_realDeviceSetPixelShader(self, shader)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_setPixelShaderLogCount) <= 2048)
+        {
+            Log(
+                "SET_PIXEL_SHADER object=%p hr=0x%08lX",
+                shader, static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
     bool HookD3D9Device(IDirect3DDevice9* device)
     {
         if (!device)
@@ -903,6 +947,10 @@ namespace
             reinterpret_cast<DeviceCreateVertexShaderFn>(original[kDeviceCreateVertexShaderSlot]);
         g_realDeviceCreatePixelShader =
             reinterpret_cast<DeviceCreatePixelShaderFn>(original[kDeviceCreatePixelShaderSlot]);
+        g_realDeviceSetVertexShader =
+            reinterpret_cast<DeviceSetVertexShaderFn>(original[kDeviceSetVertexShaderSlot]);
+        g_realDeviceSetPixelShader =
+            reinterpret_cast<DeviceSetPixelShaderFn>(original[kDeviceSetPixelShaderSlot]);
 
         hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
@@ -913,6 +961,8 @@ namespace
         hooked[kDeviceSetDepthStencilSurfaceSlot] = reinterpret_cast<void*>(HookDeviceSetDepthStencilSurface);
         hooked[kDeviceCreateVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
         hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
+        hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
+        hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
 
         DWORD oldProtection = 0;
         if (!VirtualProtect(objectVTable, sizeof(void*), PAGE_READWRITE, &oldProtection))
