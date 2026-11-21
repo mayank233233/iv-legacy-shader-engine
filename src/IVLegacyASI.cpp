@@ -29,7 +29,9 @@ namespace
     volatile LONG g_vertexShaderLogCount = 0;
     volatile LONG g_pixelShaderLogCount = 0;
     volatile LONG g_renderTargetLogCount = 0;
+    volatile LONG g_depthTargetCreateLogCount = 0;
     volatile LONG g_setRenderTargetLogCount = 0;
+    volatile LONG g_setDepthTargetLogCount = 0;
     BOOL g_telemetryEnabled = TRUE;
 
     typedef IDirect3D9* (WINAPI* Direct3DCreate9Fn)(UINT);
@@ -529,7 +531,7 @@ namespace
                 quality, discard, surface, sharedHandle)
             : D3DERR_INVALIDCALL;
 
-        if (InterlockedIncrement(&g_renderTargetLogCount) <= 256)
+        if (InterlockedIncrement(&g_depthTargetCreateLogCount) <= 256)
         {
             Log(
                 "CREATE_DEPTH_STENCIL_SURFACE width=%u height=%u format=%u "
@@ -547,7 +549,7 @@ namespace
         IDirect3DDevice9* self,
         IDirect3DSurface9* surface)
     {
-        if (surface && InterlockedIncrement(&g_setRenderTargetLogCount) <= 512)
+        if (surface && InterlockedIncrement(&g_setDepthTargetLogCount) <= 512)
         {
             D3DSURFACE_DESC desc = {};
             const HRESULT descHr = surface->GetDesc(&desc);
