@@ -441,6 +441,18 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceSetRenderState(
+        IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetTextureStageState(
+        IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD)
+    {
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeDeviceSetTexture(
         IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*)
     {
@@ -524,6 +536,8 @@ namespace
         g_fakeDeviceVTable[94] = reinterpret_cast<void*>(FakeDeviceSetVertexShaderConstantF);
         g_fakeDeviceVTable[109] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantF);
         g_fakeDeviceVTable[23] = reinterpret_cast<void*>(FakeDeviceCreateTexture);
+        g_fakeDeviceVTable[57] = reinterpret_cast<void*>(FakeDeviceSetRenderState);
+        g_fakeDeviceVTable[67] = reinterpret_cast<void*>(FakeDeviceSetTextureStageState);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
 
         g_fakeShaderVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
@@ -874,6 +888,10 @@ int main()
         0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
     const HRESULT setSamplerStateHr = device->SetSamplerState(
         0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+    const HRESULT setRenderStateHr = device->SetRenderState(
+        D3DRS_ALPHABLENDENABLE, TRUE);
+    const HRESULT setTextureStageStateHr = device->SetTextureStageState(
+        0, D3DTSS_COLOROP, D3DTOP_MODULATE);
     const HRESULT setVertexConstantsHr = device->SetVertexShaderConstantF(
         4, vertexConstants, 1);
     const HRESULT setPixelConstantsHr = device->SetPixelShaderConstantF(
@@ -963,6 +981,11 @@ int main()
     if (!HasText("TEXTURE_OBJECT_CREATED type=2D") ||
         !HasText("SET_TEXTURE") || !HasText("SET_SAMPLER_STATE"))
         return Fail("D3D9 texture creation, binding or sampler-state hooks were not observed");
+    if (!HasText("SET_RENDER_STATE") ||
+        !HasText("SET_TEXTURE_STAGE_STATE") ||
+        !HasText("render_state_count=1") ||
+        !HasText("texture_stage_count=1"))
+        return Fail("D3D9 render-state or texture-stage snapshot hooks were not observed");
     if (!HasText("SHADER_CONSTANT_CAPTURE_ENABLED") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=VS") ||
         !HasText("SHADER_CONSTANT_CAPTURED stage=PS"))
