@@ -1155,6 +1155,7 @@ namespace
         DWORD sourceVersion = 0;
         DWORD sourceByteCount = 0;
         unsigned __int64 sourceHash = 0;
+        BOOL fallbackObjectLogged = FALSE;
         wchar_t fallbackPath[MAX_PATH] = {};
 
         const bool validSource = GetShaderBytecodeInfo(
@@ -1185,10 +1186,41 @@ namespace
             if (SUCCEEDED(hr))
             {
                 InterlockedIncrement(&g_shaderFallbackAppliedCount);
+
+                DWORD fallbackVersion = 0;
+                DWORD fallbackActualBytes = 0;
+                unsigned __int64 fallbackHash = 0;
+                const DWORD* actualBytecode =
+                    reinterpret_cast<const DWORD*>(fallbackBytes);
+                const bool validFallback = GetShaderBytecodeInfo(
+                    actualBytecode, TRUE,
+                    &fallbackVersion, &fallbackActualBytes, &fallbackHash);
+
                 Log(
-                    "SHADER_FALLBACK_APPLIED source_hash=%016llX target=ps_2_0 hr=0x%08lX",
+                    "SHADER_FALLBACK_APPLIED source_hash=%016llX target_hash=%016llX "
+                    "source_bytes=%lu target_bytes=%lu target_profile=ps_2_0 hr=0x%08lX",
                     sourceHash,
+                    validFallback ? fallbackHash : 0ULL,
+                    static_cast<unsigned long>(sourceByteCount),
+                    static_cast<unsigned long>(fallbackActualBytes),
                     static_cast<unsigned long>(hr));
+
+                if (shader && *shader)
+                {
+                    LogShaderObject(
+                        "PS", TRUE, actualBytecode, hr, *shader);
+                    Log(
+                        "SHADER_FALLBACK_OBJECT_MAP object=%p source_hash=%016llX "
+                        "target_hash=%016llX target_profile=ps_2_0",
+                        *shader,
+                        sourceHash,
+                        validFallback ? fallbackHash : 0ULL);
+                    fallbackObjectLogged = TRUE;
+                }
+
+                // Preserve both the submitted source shader and the actual
+                // replacement bytecode for offline inspection.
+                CaptureShaderBytecode(L"PS_FALLBACK", TRUE, actualBytecode);
             }
             else
             {
@@ -1212,7 +1244,7 @@ namespace
         }
 
         LogShaderProfile("PS", function, hr);
-        if (SUCCEEDED(hr) && shader && *shader)
+        if (SUCCEEDED(hr) && shader && *shader && !fallbackObjectLogged)
             LogShaderObject("PS", TRUE, function, hr, *shader);
         CaptureShaderBytecode(L"PS", TRUE, function);
         return hr;
