@@ -58,6 +58,7 @@ PS2_ARITHMETIC_SLOTS = {
     33: 2,  # crs
     35: 1,  # abs
     36: 3,  # nrm
+    37: 8,  # sincos (listed for complete PS 2.0 slot accounting; this lowerer rejects the SM3 form)
     88: 1,  # cmp
     90: 2,  # dp2add
 }
@@ -71,7 +72,7 @@ PARAMETER_COUNTS = {
     1: 2, 2: 3, 3: 3, 4: 4, 5: 3, 6: 2, 7: 2, 8: 3, 9: 3,
     10: 3, 11: 3, 12: 3, 13: 3, 14: 2, 15: 2,
     18: 4, 19: 2, 20: 3, 21: 3, 22: 3, 23: 3, 24: 3,
-    32: 3, 33: 3, 35: 2, 36: 2,
+    32: 3, 33: 3, 35: 2, 36: 2, 37: 4,
     65: 1, 66: 3,
     31: 2,
     81: 5,
@@ -328,9 +329,6 @@ def audit_and_lower_ps3(
         input_remap[source_register] = mapped
         occupied_ps2_inputs.add(mapped)
 
-    if not any(reason.startswith("input ") or "input v" in reason for reason in reasons):
-        pass
-
     # Second pass: prove every instruction/register/limit fits the PS 2.0 subset.
     for ins in instructions:
         opcode = ins.opcode
@@ -341,6 +339,9 @@ def audit_and_lower_ps3(
             reasons.append(
                 f"{name} at DWORD {ins.offset} is not in the ps_2_0 instruction set"
             )
+            continue
+        if opcode == OP_SINCOS:
+            reasons.append("sincos uses a version-sensitive operand form; bespoke rewrite required")
             continue
         if expected is None or len(ins.operands) != expected:
             reasons.append(
@@ -382,12 +383,6 @@ def audit_and_lower_ps3(
                 reasons.append(
                     f"DEF at DWORD {ins.offset} defines a constant outside c0-c31"
                 )
-            continue
-
-        if opcode == OP_SINCOS:
-            # The SM3 sincos form does not have the same operand contract as
-            # the older SM2 form. This first lowering pass refuses to guess.
-            reasons.append("sincos uses a version-sensitive operand form; bespoke rewrite required")
             continue
 
         if opcode == OP_TEXKILL:
