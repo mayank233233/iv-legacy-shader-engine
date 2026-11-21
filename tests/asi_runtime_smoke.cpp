@@ -57,6 +57,25 @@ namespace
         return strstr(buffer, marker) != NULL;
     }
 
+    void SmokeMark(const char* message)
+    {
+        std::fprintf(stderr, "SMOKE: %s\n", message);
+        std::fflush(stderr);
+    }
+
+    LONG WINAPI SmokeUnhandledExceptionFilter(EXCEPTION_POINTERS* exception)
+    {
+        const DWORD code = exception && exception->ExceptionRecord
+            ? exception->ExceptionRecord->ExceptionCode : 0;
+        const void* address = exception && exception->ExceptionRecord
+            ? exception->ExceptionRecord->ExceptionAddress : NULL;
+        std::fprintf(stderr,
+            "SMOKE_UNHANDLED_EXCEPTION code=0x%08lX address=%p\n",
+            static_cast<unsigned long>(code), address);
+        std::fflush(stderr);
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+
     int Fail(const char* message)
     {
         std::fprintf(stderr, "FAIL: %s\n", message);
