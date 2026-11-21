@@ -453,7 +453,7 @@ def _synthetic_pe32() -> bytes:
     struct.pack_into("<II", data, 0x240, 0x1080, 0)  # OriginalFirstThunk
     struct.pack_into("<II", data, 0x260, 0x1080, 0)  # FirstThunk
     struct.pack_into("<H", data, 0x280, 0)            # Hint
-    data[0x282:0x293] = b"Direct3DCreate9\0"
+    data[0x282:0x292] = b"Direct3DCreate9\0"
     return bytes(data)
 
 
