@@ -85,6 +85,7 @@ namespace
     BOOL g_captureShaderConstants = FALSE;
     DWORD g_captureShaderConstantMaxRecords = 2048;
     volatile LONG g_shaderConstantCaptureCount = 0;
+    unsigned __int64 g_shaderConstantCaptureSession = 0;
     wchar_t g_shaderConstantCaptureDirectory[MAX_PATH] = {};
     volatile LONG g_renderTargetLogCount = 0;
     volatile LONG g_depthTargetCreateLogCount = 0;
@@ -1366,9 +1367,10 @@ namespace
             filePath,
             _countof(filePath),
             _TRUNCATE,
-            L"%s\\%s_%06lu.bin",
+            L"%s\\%s_%016llX_%06lu.bin",
             g_shaderConstantCaptureDirectory,
             pixelStage ? L"PS" : L"VS",
+            g_shaderConstantCaptureSession,
             static_cast<unsigned long>(sequence));
 
         HANDLE file = CreateFileW(
@@ -2194,6 +2196,14 @@ namespace
 
         if (g_captureShaderConstants)
         {
+            FILETIME captureTime = {};
+            GetSystemTimeAsFileTime(&captureTime);
+            g_shaderConstantCaptureSession =
+                (static_cast<unsigned __int64>(captureTime.dwHighDateTime) << 32) |
+                captureTime.dwLowDateTime;
+            g_shaderConstantCaptureSession ^=
+                static_cast<unsigned __int64>(GetCurrentProcessId()) << 17;
+
             _snwprintf_s(
                 g_shaderConstantCaptureDirectory,
                 MAX_PATH,
