@@ -1259,6 +1259,12 @@ namespace
         return installed;
     }
 
+    bool HookMainExecutableD3D9Import()
+    {
+        return HookD3D9ImportsInModule(
+            GetModuleHandleW(NULL), L"GTAIV.exe");
+    }
+
     bool HookD3D9Import()
     {
         Log("D3D9_IAT_SCAN_BEGIN");
@@ -1268,10 +1274,11 @@ namespace
             GetCurrentProcessId());
         if (snapshot == INVALID_HANDLE_VALUE)
         {
+            const DWORD error = GetLastError();
             Log(
-                "D3D9_IAT_HOOK_NOT_INSTALLED reason=module_snapshot_failed error=%lu",
-                static_cast<unsigned long>(GetLastError()));
-            return false;
+                "D3D9_IAT_MODULE_SCAN_FALLBACK reason=snapshot_failed error=%lu",
+                static_cast<unsigned long>(error));
+            return HookMainExecutableD3D9Import();
         }
 
         Log("D3D9_IAT_SCAN_SNAPSHOT_CREATED handle=%p", snapshot);
@@ -1283,9 +1290,9 @@ namespace
             const DWORD error = GetLastError();
             CloseHandle(snapshot);
             Log(
-                "D3D9_IAT_HOOK_NOT_INSTALLED reason=module_enumeration_failed error=%lu",
+                "D3D9_IAT_MODULE_SCAN_FALLBACK reason=module_enumeration_failed error=%lu",
                 static_cast<unsigned long>(error));
-            return false;
+            return HookMainExecutableD3D9Import();
         }
 
         UINT modulesScanned = 0;
@@ -1324,7 +1331,13 @@ namespace
         Log(
             "D3D9_IAT_HOOK_SCAN_COMPLETE modules=%u patched_modules=%u",
             modulesScanned, modulesPatched);
-        return modulesPatched != 0;
+
+        if (modulesPatched == 0)
+        {
+            Log("D3D9_IAT_MODULE_SCAN_FALLBACK reason=no_loaded_module_hooked");
+            return HookMainExecutableD3D9Import();
+        }
+        return true;
     }
 
     DWORD WINAPI BootstrapThread(void*)
