@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <winver.h>
 #include <d3d9.h>
+#include <tlhelp32.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -1078,25 +1079,29 @@ namespace
         return d3d;
     }
 
-    bool HookD3D9Import()
+    bool HookD3D9ImportsInModule(HMODULE module, const wchar_t* moduleName)
     {
-        HMODULE exe = GetModuleHandleW(NULL);
-        if (!exe || !Is32BitPE(exe))
+        if (!module || !Is32BitPE(module))
             return false;
 
-        BYTE* base = reinterpret_cast<BYTE*>(exe);
+        BYTE* base = reinterpret_cast<BYTE*>(module);
         IMAGE_DOS_HEADER* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
         IMAGE_NT_HEADERS32* nt =
             reinterpret_cast<IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
-
+        const DWORD imageSize = nt->OptionalHeader.SizeOfImage;
         const IMAGE_DATA_DIRECTORY importDirectory =
             nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-        if (importDirectory.VirtualAddress == 0)
+
+        if (importDirectory.VirtualAddress == 0 ||
+            importDirectory.Size < sizeof(IMAGE_IMPORT_DESCRIPTOR) ||
+            importDirectory.VirtualAddress > imageSize ||
+            importDirectory.Size > imageSize - importDirectory.VirtualAddress)
         {
-            Log("D3D9_IAT_HOOK_NOT_INSTALLED reason=no_import_directory");
             return false;
         }
 
+        const DWORD descriptorCount =
+            importDirectory.Size / sizeof(IMAGE_IMPORT_DESCRIPTOR);
         IMAGE_IMPORT_DESCRIPTOR* descriptor =
             reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(
                 base + importDirectory.VirtualAddress);
@@ -1104,93 +1109,192 @@ namespace
         bool foundD3D9 = false;
         bool installed = false;
 
-        for (; descriptor->Name != 0; ++descriptor)
+        for (DWORD descriptorIndex = 0;
+             descriptorIndex < descriptorCount && descriptor[descriptorIndex].Name != 0;
+             ++descriptorIndex)
         {
-            const char* moduleName =
-                reinterpret_cast<const char*>(base + descriptor->Name);
+            IMAGE_IMPORT_DESCRIPTOR& currentDescriptor = descriptor[descriptorIndex];
+            if (currentDescriptor.Name >= imageSize)
+                continue;
 
-            if (_stricmp(moduleName, "d3d9.dll") != 0)
+            const char* importedModule =
+                reinterpret_cast<const char*>(base + currentDescriptor.Name);
+            const SIZE_T remainingForName = imageSize - currentDescriptor.Name;
+            if (memchr(importedModule, 0, remainingForName) == NULL)
+                continue;
+
+            if (_stricmp(importedModule, "d3d9.dll") != 0)
                 continue;
 
             foundD3D9 = true;
-            if (descriptor->OriginalFirstThunk == 0)
+            if (currentDescriptor.OriginalFirstThunk == 0 ||
+                currentDescriptor.FirstThunk == 0 ||
+                currentDescriptor.OriginalFirstThunk >= imageSize ||
+                currentDescriptor.FirstThunk >= imageSize)
             {
-                Log("D3D9_IAT_HOOK_SKIPPED reason=no_original_thunk");
+                Log(
+                    "D3D9_IAT_HOOK_SKIPPED module=%ls reason=invalid_or_missing_thunk_table",
+                    moduleName ? moduleName : L"(unknown)");
                 continue;
             }
 
             IMAGE_THUNK_DATA32* names =
                 reinterpret_cast<IMAGE_THUNK_DATA32*>(
-                    base + descriptor->OriginalFirstThunk);
+                    base + currentDescriptor.OriginalFirstThunk);
             IMAGE_THUNK_DATA32* addresses =
                 reinterpret_cast<IMAGE_THUNK_DATA32*>(
-                    base + descriptor->FirstThunk);
+                    base + currentDescriptor.FirstThunk);
 
-            for (; names->u1.AddressOfData != 0; ++names, ++addresses)
+            const DWORD namesRemaining =
+                (imageSize - currentDescriptor.OriginalFirstThunk) /
+                sizeof(IMAGE_THUNK_DATA32);
+            const DWORD addressesRemaining =
+                (imageSize - currentDescriptor.FirstThunk) /
+                sizeof(IMAGE_THUNK_DATA32);
+            const DWORD thunkCount =
+                namesRemaining < addressesRemaining ? namesRemaining : addressesRemaining;
+
+            for (DWORD thunkIndex = 0;
+                 thunkIndex < thunkCount && names[thunkIndex].u1.AddressOfData != 0;
+                 ++thunkIndex)
             {
-                if (IMAGE_SNAP_BY_ORDINAL32(names->u1.Ordinal))
+                if (IMAGE_SNAP_BY_ORDINAL32(names[thunkIndex].u1.Ordinal))
+                    continue;
+
+                const DWORD importByNameRva =
+                    names[thunkIndex].u1.AddressOfData;
+                if (importByNameRva >= imageSize ||
+                    imageSize - importByNameRva <= sizeof(WORD))
                     continue;
 
                 IMAGE_IMPORT_BY_NAME* importByName =
                     reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(
-                        base + names->u1.AddressOfData);
-
-                if (strcmp(
-                    reinterpret_cast<const char*>(importByName->Name),
-                    "Direct3DCreate9") != 0)
+                        base + importByNameRva);
+                const char* functionName =
+                    reinterpret_cast<const char*>(importByName->Name);
+                const SIZE_T nameRemaining =
+                    imageSize - importByNameRva - sizeof(WORD);
+                if (memchr(functionName, 0, nameRemaining) == NULL)
                     continue;
 
-                void* current = reinterpret_cast<void*>(
-                    static_cast<ULONG_PTR>(addresses->u1.Function));
+                if (strcmp(functionName, "Direct3DCreate9") != 0)
+                    continue;
+
+                volatile LONG* thunkAddress =
+                    reinterpret_cast<volatile LONG*>(
+                        &addresses[thunkIndex].u1.Function);
+                const ULONG_PTR currentAddress =
+                    static_cast<ULONG_PTR>(
+                        InterlockedCompareExchange(thunkAddress, 0, 0));
+                void* current = reinterpret_cast<void*>(currentAddress);
+
                 if (current == reinterpret_cast<void*>(HookDirect3DCreate9))
                 {
                     installed = true;
                     continue;
                 }
 
-                g_realDirect3DCreate9 =
-                    reinterpret_cast<Direct3DCreate9Fn>(current);
+                if (!g_realDirect3DCreate9)
+                {
+                    g_realDirect3DCreate9 =
+                        reinterpret_cast<Direct3DCreate9Fn>(current);
+                }
+                else if (current != reinterpret_cast<void*>(g_realDirect3DCreate9))
+                {
+                    Log(
+                        "D3D9_IAT_HOOK_SKIPPED module=%ls reason=nonmatching_original_export",
+                        moduleName ? moduleName : L"(unknown)");
+                    continue;
+                }
 
                 DWORD oldProtection = 0;
                 if (!VirtualProtect(
-                    &addresses->u1.Function,
-                    sizeof(addresses->u1.Function),
+                    const_cast<LONG*>(thunkAddress),
+                    sizeof(LONG),
                     PAGE_READWRITE,
                     &oldProtection))
                 {
-                    Log("D3D9_IAT_HOOK_FAILED reason=iat_protect");
+                    Log(
+                        "D3D9_IAT_HOOK_FAILED module=%ls reason=iat_protect",
+                        moduleName ? moduleName : L"(unknown)");
                     continue;
                 }
 
                 InterlockedExchange(
-                    reinterpret_cast<volatile LONG*>(&addresses->u1.Function),
+                    thunkAddress,
                     static_cast<LONG>(
                         reinterpret_cast<ULONG_PTR>(HookDirect3DCreate9)));
 
                 DWORD ignored = 0;
-                VirtualProtect(
-                    &addresses->u1.Function,
-                    sizeof(addresses->u1.Function),
+                const BOOL restored = VirtualProtect(
+                    const_cast<LONG*>(thunkAddress),
+                    sizeof(LONG),
                     oldProtection,
                     &ignored);
-
                 FlushInstructionCache(
-                    GetCurrentProcess(), &addresses->u1.Function,
-                    sizeof(addresses->u1.Function));
+                    GetCurrentProcess(),
+                    const_cast<LONG*>(thunkAddress),
+                    sizeof(LONG));
 
                 installed = true;
                 Log(
-                    "D3D9_IAT_HOOK_INSTALLED original=%p replacement=%p",
-                    current, reinterpret_cast<void*>(HookDirect3DCreate9));
+                    "D3D9_IAT_HOOK_INSTALLED module=%ls original=%p replacement=%p protection_restored=%u",
+                    moduleName ? moduleName : L"(unknown)",
+                    current,
+                    reinterpret_cast<void*>(HookDirect3DCreate9),
+                    restored ? 1 : 0);
             }
         }
 
         if (!foundD3D9)
-            Log("D3D9_IAT_HOOK_NOT_INSTALLED reason=d3d9_import_not_found");
-        else if (!installed)
-            Log("D3D9_IAT_HOOK_NOT_INSTALLED reason=direct3dcreate9_not_patched");
+        {
+            Log(
+                "D3D9_IAT_HOOK_NOT_FOUND module=%ls",
+                moduleName ? moduleName : L"(unknown)");
+        }
 
         return installed;
+    }
+
+    bool HookD3D9Import()
+    {
+        HANDLE snapshot = CreateToolhelp32Snapshot(
+            TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
+            GetCurrentProcessId());
+        if (snapshot == INVALID_HANDLE_VALUE)
+        {
+            Log(
+                "D3D9_IAT_HOOK_NOT_INSTALLED reason=module_snapshot_failed error=%lu",
+                static_cast<unsigned long>(GetLastError()));
+            return false;
+        }
+
+        MODULEENTRY32W entry = {};
+        entry.dwSize = sizeof(entry);
+        if (!Module32FirstW(snapshot, &entry))
+        {
+            const DWORD error = GetLastError();
+            CloseHandle(snapshot);
+            Log(
+                "D3D9_IAT_HOOK_NOT_INSTALLED reason=module_enumeration_failed error=%lu",
+                static_cast<unsigned long>(error));
+            return false;
+        }
+
+        UINT modulesScanned = 0;
+        UINT modulesPatched = 0;
+        do
+        {
+            ++modulesScanned;
+            if (HookD3D9ImportsInModule(entry.hModule, entry.szModule))
+                ++modulesPatched;
+        } while (Module32NextW(snapshot, &entry));
+
+        CloseHandle(snapshot);
+        Log(
+            "D3D9_IAT_HOOK_SCAN_COMPLETE modules=%u patched_modules=%u",
+            modulesScanned, modulesPatched);
+        return modulesPatched != 0;
     }
 
     DWORD WINAPI BootstrapThread(void*)
