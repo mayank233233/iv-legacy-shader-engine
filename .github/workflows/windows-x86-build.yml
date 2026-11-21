@@ -66,7 +66,7 @@ jobs:
           Copy-Item build\bin\D3D9ShaderProbe.exe artifact\build\bin\
           Copy-Item build\run_probe.bat artifact\build\
           if (-not (Test-Path artifact\build\bin\D3D9ShaderProbe.exe)) { throw 'Staged x86 probe executable is missing.' }
-          $bytecode = @(Get-ChildItem artifact\build\out -Include *.vso,*.pso -File)
+          $bytecode = @(Get-ChildItem artifact\build\out -File | Where-Object { $_.Extension -in @('.vso', '.pso') })
           if ($bytecode.Count -ne 6) { throw "Expected 6 shader bytecode files in staged artifact; found $($bytecode.Count)." }
 
       - name: Upload build outputs
