@@ -64,6 +64,7 @@ PS2_ARITHMETIC_SLOTS = {
 }
 PS2_TEXTURE_OPS = {OP_TEXKILL, OP_TEX}
 PS2_ZERO_SLOT_OPS = {OP_DCL, OP_DEF}
+MATRIX_OPCODES = {20, 21, 22, 23, 24}
 PS2_ALLOWED_OPS = set(PS2_ARITHMETIC_SLOTS) | PS2_TEXTURE_OPS | PS2_ZERO_SLOT_OPS
 
 # Instruction parameter-token counts for the subset supported here.
@@ -393,6 +394,15 @@ def audit_and_lower_ps3(
                     f"DEF at DWORD {ins.offset} defines a constant outside c0-c31"
                 )
             continue
+
+        if opcode in MATRIX_OPCODES:
+            # D3D9 PS 2.0 forbids source negation on the matrix operand (src1).
+            matrix_source = ins.operands[2]
+            if _source_modifier(matrix_source) != SOURCE_MOD_NONE:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses a modifier on its matrix source; "
+                    "ps_2_0 forbids this operand modifier"
+                )
 
         if opcode == OP_TEXKILL:
             source = ins.operands[0]
