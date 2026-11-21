@@ -79,9 +79,14 @@ def main() -> None:
     assert report["draw_calls"][0]["index_buffer"]["format"] == 101
     assert report["draw_calls"][0]["stream_bindings"][0]["buffer_descriptor"]["length_bytes"] == 4096
     assert report["draw_calls"][0]["stream_bindings"][0]["buffer_descriptor"]["type"] == "VB"
-    assert report["draw_calls"][0]["stream_bindings"][0] == {
-        "stream": 0, "buffer": "5000", "offset": 0, "stride": 20, "frequency": 1
-    }
+    stream_binding = report["draw_calls"][0]["stream_bindings"][0]
+    assert stream_binding["stream"] == 0
+    assert stream_binding["buffer"] == "5000"
+    assert stream_binding["offset"] == 0
+    assert stream_binding["stride"] == 20
+    assert stream_binding["frequency"] == 1
+    assert stream_binding["buffer_descriptor"]["type"] == "VB"
+    assert stream_binding["buffer_descriptor"]["length_bytes"] == 4096
     assert report["draw_calls"][3]["pixel_shader_fallback"] is None
     assert report["draw_calls"][3]["pixel_shader_key"] == "PS:ddd444"
 
