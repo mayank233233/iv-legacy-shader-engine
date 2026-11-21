@@ -18,6 +18,7 @@ namespace
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
     wchar_t g_gamePath[MAX_PATH] = {};
+    wchar_t g_gameDirectory[MAX_PATH] = {};
     wchar_t g_logPath[MAX_PATH] = {};
     wchar_t g_iniPath[MAX_PATH] = {};
     volatile LONG g_logLock = 0;
@@ -161,13 +162,14 @@ namespace
             return;
         }
 
-        wchar_t* slash = wcsrchr(g_gamePath, L'\\');
+        wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath);
+        wchar_t* slash = wcsrchr(g_gameDirectory, L'\\');
         if (!slash)
             return;
 
         *slash = L'\0';
-        _snwprintf_s(g_logPath, MAX_PATH, _TRUNCATE, L"%s\\IVLegacy.log", g_gamePath);
-        _snwprintf_s(g_iniPath, MAX_PATH, _TRUNCATE, L"%s\\IVLegacy.ini", g_gamePath);
+        _snwprintf_s(g_logPath, MAX_PATH, _TRUNCATE, L"%s\\IVLegacy.log", g_gameDirectory);
+        _snwprintf_s(g_iniPath, MAX_PATH, _TRUNCATE, L"%s\\IVLegacy.ini", g_gameDirectory);
 
         g_logFile = CreateFileW(
             g_logPath,
