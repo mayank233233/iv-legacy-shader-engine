@@ -48,7 +48,10 @@ namespace
         kDeviceSetTextureSlot = 65,
         kDeviceSetSamplerStateSlot = 69,
         kDeviceSetVertexShaderConstantFSlot = 94,
-        kDeviceSetPixelShaderConstantFSlot = 109
+        kDeviceSetPixelShaderConstantFSlot = 109,
+        kDeviceCreateTextureSlot = 23,
+        kDeviceCreateVolumeTextureSlot = 24,
+        kDeviceCreateCubeTextureSlot = 25
     };
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
@@ -72,6 +75,7 @@ namespace
     volatile LONG g_drawCallCount = 0;
     volatile LONG g_presentFrameIndex = 0;
     volatile LONG g_materialStateLogCount = 0;
+    volatile LONG g_textureCreateLogCount = 0;
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
     PVOID volatile g_currentTextures[16] = {};
@@ -146,6 +150,15 @@ namespace
         IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD);
     typedef HRESULT (WINAPI* DeviceSetShaderConstantFFn)(
         IDirect3DDevice9*, UINT, const float*, UINT);
+    typedef HRESULT (WINAPI* DeviceCreateTextureFn)(
+        IDirect3DDevice9*, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL,
+        IDirect3DTexture9**, HANDLE*);
+    typedef HRESULT (WINAPI* DeviceCreateVolumeTextureFn)(
+        IDirect3DDevice9*, UINT, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL,
+        IDirect3DVolumeTexture9**, HANDLE*);
+    typedef HRESULT (WINAPI* DeviceCreateCubeTextureFn)(
+        IDirect3DDevice9*, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL,
+        IDirect3DCubeTexture9**, HANDLE*);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
     D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
@@ -173,6 +186,9 @@ namespace
     DeviceSetSamplerStateFn g_realDeviceSetSamplerState = NULL;
     DeviceSetShaderConstantFFn g_realDeviceSetVertexShaderConstantF = NULL;
     DeviceSetShaderConstantFFn g_realDeviceSetPixelShaderConstantF = NULL;
+    DeviceCreateTextureFn g_realDeviceCreateTexture = NULL;
+    DeviceCreateVolumeTextureFn g_realDeviceCreateVolumeTexture = NULL;
+    DeviceCreateCubeTextureFn g_realDeviceCreateCubeTexture = NULL;
 
     void Log(const char* format, ...)
     {
@@ -1413,6 +1429,118 @@ namespace
             static_cast<unsigned long>(dataByteCount));
     }
 
+    HRESULT WINAPI HookDeviceCreateTexture(
+        IDirect3DDevice9* self,
+        UINT width,
+        UINT height,
+        UINT levels,
+        DWORD usage,
+        D3DFORMAT format,
+        D3DPOOL pool,
+        IDirect3DTexture9** texture,
+        HANDLE* sharedHandle)
+    {
+        const HRESULT hr = g_realDeviceCreateTexture
+            ? g_realDeviceCreateTexture(
+                self, width, height, levels, usage, format, pool,
+                texture, sharedHandle)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_textureCreateLogCount) <= 2048)
+        {
+            if (SUCCEEDED(hr) && texture && *texture)
+            {
+                Log(
+                    "TEXTURE_OBJECT_CREATED type=2D object=%p width=%u height=%u "
+                    "levels=%u usage=0x%08lX format=%u pool=%u hr=0x%08lX",
+                    *texture, width, height, levels,
+                    static_cast<unsigned long>(usage),
+                    static_cast<unsigned>(format),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+            else
+            {
+                Log(
+                    "TEXTURE_CREATE_FAILED type=2D width=%u height=%u "
+                    "levels=%u format=%u pool=%u hr=0x%08lX",
+                    width, height, levels,
+                    static_cast<unsigned>(format),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceCreateVolumeTexture(
+        IDirect3DDevice9* self,
+        UINT width,
+        UINT height,
+        UINT depth,
+        UINT levels,
+        DWORD usage,
+        D3DFORMAT format,
+        D3DPOOL pool,
+        IDirect3DVolumeTexture9** texture,
+        HANDLE* sharedHandle)
+    {
+        const HRESULT hr = g_realDeviceCreateVolumeTexture
+            ? g_realDeviceCreateVolumeTexture(
+                self, width, height, depth, levels, usage, format, pool,
+                texture, sharedHandle)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_textureCreateLogCount) <= 2048)
+        {
+            if (SUCCEEDED(hr) && texture && *texture)
+            {
+                Log(
+                    "TEXTURE_OBJECT_CREATED type=3D object=%p width=%u height=%u depth=%u "
+                    "levels=%u usage=0x%08lX format=%u pool=%u hr=0x%08lX",
+                    *texture, width, height, depth, levels,
+                    static_cast<unsigned long>(usage),
+                    static_cast<unsigned>(format),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceCreateCubeTexture(
+        IDirect3DDevice9* self,
+        UINT edgeLength,
+        UINT levels,
+        DWORD usage,
+        D3DFORMAT format,
+        D3DPOOL pool,
+        IDirect3DCubeTexture9** texture,
+        HANDLE* sharedHandle)
+    {
+        const HRESULT hr = g_realDeviceCreateCubeTexture
+            ? g_realDeviceCreateCubeTexture(
+                self, edgeLength, levels, usage, format, pool,
+                texture, sharedHandle)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_textureCreateLogCount) <= 2048)
+        {
+            if (SUCCEEDED(hr) && texture && *texture)
+            {
+                Log(
+                    "TEXTURE_OBJECT_CREATED type=CUBE object=%p edge=%u "
+                    "levels=%u usage=0x%08lX format=%u pool=%u hr=0x%08lX",
+                    *texture, edgeLength, levels,
+                    static_cast<unsigned long>(usage),
+                    static_cast<unsigned>(format),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+        }
+        return hr;
+    }
+
     HRESULT WINAPI HookDeviceSetTexture(
         IDirect3DDevice9* self,
         DWORD stage,
@@ -1745,6 +1873,12 @@ namespace
             reinterpret_cast<DeviceSetShaderConstantFFn>(original[kDeviceSetVertexShaderConstantFSlot]);
         g_realDeviceSetPixelShaderConstantF =
             reinterpret_cast<DeviceSetShaderConstantFFn>(original[kDeviceSetPixelShaderConstantFSlot]);
+        g_realDeviceCreateTexture =
+            reinterpret_cast<DeviceCreateTextureFn>(original[kDeviceCreateTextureSlot]);
+        g_realDeviceCreateVolumeTexture =
+            reinterpret_cast<DeviceCreateVolumeTextureFn>(original[kDeviceCreateVolumeTextureSlot]);
+        g_realDeviceCreateCubeTexture =
+            reinterpret_cast<DeviceCreateCubeTextureFn>(original[kDeviceCreateCubeTextureSlot]);
 
         hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
@@ -1765,6 +1899,9 @@ namespace
             hooked[kDeviceDrawIndexedPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
             hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
             hooked[kDeviceSetSamplerStateSlot] = reinterpret_cast<void*>(HookDeviceSetSamplerState);
+            hooked[kDeviceCreateTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateTexture);
+            hooked[kDeviceCreateVolumeTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateVolumeTexture);
+            hooked[kDeviceCreateCubeTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateCubeTexture);
         }
         if (g_captureShaderConstants)
         {
