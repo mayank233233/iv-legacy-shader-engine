@@ -1,8 +1,8 @@
-# IV Legacy Shader Engine — Prototype 0.5.4-alpha
+# IV Legacy Shader Engine — Prototype 0.5.5-alpha
 
 **Target:** 32-bit Windows, Direct3D 9, Shader Model `vs_2_0` / `ps_2_0`.
 
-Prototype 0.5.4-alpha combines the v0.3 standalone D3D9 probe with an experimental Win32/x86 telemetry ASI, shader inventory tools and a conservative offline pixel-shader downlevel audit. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This is still a development foundation, not a playable compatibility fix: it does not inject SM2 replacements into GTA IV, spoof capabilities, or establish that the game can launch on Intel GMA 3100.
+Prototype 0.5.5-alpha combines the v0.3 standalone D3D9 probe with an experimental Win32/x86 telemetry ASI, shader inventory tools and a conservative offline pixel-shader downlevel audit. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This is still a development foundation, not a playable compatibility fix: it does not inject SM2 replacements into GTA IV, spoof capabilities, or establish that the game can launch on Intel GMA 3100.
 
 ## Project contents
 
@@ -28,6 +28,16 @@ Prototype 0.5.4-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `.github/workflows/windows-x86-build.yml` | Windows x86 compile/build CI; does not run the GPU probe |
 
 All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs_2_0` and `ps_2_0`.
+
+## v0.5.5-alpha changes
+
+- Added opt-in D3D9 `CreateVertexBuffer` and `CreateIndexBuffer` hooks at slots 26 and 27.
+- Successful buffer creation logs object address, byte length, usage flags, FVF (vertex buffer) or index format (index buffer), and memory pool.
+- The draw analyzer now resolves stream and index-buffer pointers to those creation descriptors, so a draw report includes the bound buffer's size and format rather than an opaque address alone.
+- The synthetic host creates a 4,096-byte managed vertex buffer and a 1,024-byte managed INDEX16 buffer, binds them through stream 0 and SetIndices, and submits draws.
+- Windows x86 CI run #172 checks both buffer descriptors are present and correctly associated with the first draw. It also retains the declaration/FVF, stream, material-state and shader/constant correlation checks.
+
+These descriptors are synthetic test allocations. They do not describe GTA IV's actual vertex/index buffers.
 
 ## v0.5.4-alpha changes
 
@@ -139,13 +149,11 @@ The adapter report separates fixed-function multitexture capability from the rep
 
 ## GitHub Actions verification
 
-**Prototype 0.5.4-alpha Windows x86 CI passed** in [run #165](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44890714743), commit `0750df6203715f6e7986ef84ded862d6c9d8ec26`. All steps passed: six SM2 shaders compiled and inventoried; x86 probe and ASI built; synthetic host exercised the exported `InitializeASI`, D3D9 factory/device hooks, all four draw methods, PS3-to-PS2 fallback-object mapping, texture/material state, float/integer/boolean constants, vertex declarations, stream state, index buffers and FVF. The log analyzer, constant-sidecar parser, shader bytecode inventory, restricted downlevel audit and PE32 inspector self-tests passed.
+**Prototype 0.5.5-alpha Windows x86 CI passed** in [run #172](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44891303007), commit `fd0f9e9c4eeafb30a4aa7de2893b7ba4f551d589`. All workflow steps passed: six SM2 shaders compiled and inventoried; x86 probe and ASI built; synthetic D3D9 tests exercised the exported `InitializeASI`, shader fallback object mapping, all four draw methods, texture/material state, float/integer/boolean constants, vertex declarations, FVF, streams, index buffers, and both buffer-creation methods. Offline checks verified that draw-time VB/IB pointers resolve to creation descriptors.
 
-[Download the Windows x86 artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44890714743/artifacts/14700884610) — artifact ID `14700884610`, 35 files, SHA-256 `639671695847d8609ac9c9feb1790172dcd674b09359632faf85b1f701e21655`.
+[Download the Windows x86 artifact](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44891303007/artifacts/14701424322) — artifact ID `14701424322`, 35 files, SHA-256 `bf39064f10d794d89c2ba04f96b6bc93b0be07a37a43a37fab897bea06dcf148`.
 
-The runtime log and captures in this build are synthetic fake-COM test data. The synthetic adapter reports `VEN_8086&DEV_29C2`; that is a test fixture, not the physical GMA 3100. The five shader captures and six constant sidecars are not captures from GTA IV.
-
-CI does not inspect the user's original executable, load the ASI inside GTA IV, test the GMA 3100 driver, validate game rendering/gameplay, or measure FPS.
+All runtime captures and hardware values in CI are synthetic fake-COM test data, not captures from GTA IV or measurements from the physical GMA 3100. CI does not inspect the actual original executable, load the ASI inside GTA IV, verify rendering/gameplay, or measure FPS.
 
 ## Known limitations
 
