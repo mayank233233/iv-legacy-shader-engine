@@ -828,6 +828,17 @@ namespace
         {
             InterlockedExchangePointer(&g_currentVertexShader, NULL);
             InterlockedExchangePointer(&g_currentPixelShader, NULL);
+            InterlockedExchangePointer(&g_currentVertexDeclaration, NULL);
+            InterlockedExchangePointer(&g_currentIndexBuffer, NULL);
+            InterlockedExchange(&g_currentFVF, 0);
+            for (DWORD stream = 0; stream < 16; ++stream)
+            {
+                InterlockedExchangePointer(&g_streamBuffers[stream], NULL);
+                InterlockedExchange(&g_streamOffsets[stream], 0);
+                InterlockedExchange(&g_streamStrides[stream], 0);
+                InterlockedExchange(&g_streamFrequencies[stream], 0);
+                InterlockedExchange(&g_streamKnown[stream], 0);
+            }
             for (DWORD stage = 0; stage < 16; ++stage)
             {
                 InterlockedExchangePointer(&g_currentTextures[stage], NULL);
@@ -1507,6 +1518,155 @@ namespace
             static_cast<unsigned long>(dataByteCount));
     }
 
+
+    HRESULT WINAPI HookDeviceCreateVertexDeclaration(
+        IDirect3DDevice9* self,
+        const D3DVERTEXELEMENT9* elements,
+        IDirect3DVertexDeclaration9** declaration)
+    {
+        const HRESULT hr = g_realDeviceCreateVertexDeclaration
+            ? g_realDeviceCreateVertexDeclaration(self, elements, declaration)
+            : D3DERR_INVALIDCALL;
+
+        if (SUCCEEDED(hr) && declaration && *declaration)
+        {
+            Log("VERTEX_DECL_OBJECT_CREATED object=%p hr=0x%08lX",
+                *declaration, static_cast<unsigned long>(hr));
+            if (g_drawTelemetryEnabled && elements)
+            {
+                __try
+                {
+                    for (UINT index = 0; index < 64; ++index)
+                    {
+                        D3DVERTEXELEMENT9 element = elements[index];
+                        if (element.Stream == 0xFF)
+                            break;
+                        Log(
+                            "VERTEX_DECL_ELEMENT object=%p index=%u stream=%u offset=%u type=%u method=%u usage=%u usage_index=%u",
+                            *declaration,
+                            index,
+                            static_cast<unsigned>(element.Stream),
+                            static_cast<unsigned>(element.Offset),
+                            static_cast<unsigned>(element.Type),
+                            static_cast<unsigned>(element.Method),
+                            static_cast<unsigned>(element.Usage),
+                            static_cast<unsigned>(element.UsageIndex));
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log("VERTEX_DECL_ELEMENTS_UNREADABLE object=%p", *declaration);
+                }
+            }
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetVertexDeclaration(
+        IDirect3DDevice9* self,
+        IDirect3DVertexDeclaration9* declaration)
+    {
+        const HRESULT hr = g_realDeviceSetVertexDeclaration
+            ? g_realDeviceSetVertexDeclaration(self, declaration)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+        {
+            InterlockedExchangePointer(&g_currentVertexDeclaration, declaration);
+            InterlockedExchange(&g_currentFVF, 0);
+        }
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log("SET_VERTEX_DECLARATION object=%p hr=0x%08lX",
+                declaration, static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetFVF(IDirect3DDevice9* self, DWORD fvf)
+    {
+        const HRESULT hr = g_realDeviceSetFVF
+            ? g_realDeviceSetFVF(self, fvf)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+        {
+            InterlockedExchangePointer(&g_currentVertexDeclaration, NULL);
+            InterlockedExchange(&g_currentFVF, static_cast<LONG>(fvf));
+        }
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log("SET_FVF value=0x%08lX hr=0x%08lX",
+                static_cast<unsigned long>(fvf),
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetStreamSource(
+        IDirect3DDevice9* self,
+        UINT stream,
+        IDirect3DVertexBuffer9* buffer,
+        UINT offset,
+        UINT stride)
+    {
+        const HRESULT hr = g_realDeviceSetStreamSource
+            ? g_realDeviceSetStreamSource(self, stream, buffer, offset, stride)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr) && stream < 16)
+        {
+            InterlockedExchangePointer(&g_streamBuffers[stream], buffer);
+            InterlockedExchange(&g_streamOffsets[stream], static_cast<LONG>(offset));
+            InterlockedExchange(&g_streamStrides[stream], static_cast<LONG>(stride));
+            InterlockedExchange(&g_streamKnown[stream], 1);
+        }
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log(
+                "SET_STREAM_SOURCE stream=%u buffer=%p offset=%u stride=%u hr=0x%08lX",
+                stream, buffer, offset, stride, static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetStreamSourceFreq(
+        IDirect3DDevice9* self,
+        UINT stream,
+        UINT divider)
+    {
+        const HRESULT hr = g_realDeviceSetStreamSourceFreq
+            ? g_realDeviceSetStreamSourceFreq(self, stream, divider)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr) && stream < 16)
+            InterlockedExchange(&g_streamFrequencies[stream], static_cast<LONG>(divider));
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log("SET_STREAM_SOURCE_FREQ stream=%u divider=%u hr=0x%08lX",
+                stream, divider, static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetIndices(
+        IDirect3DDevice9* self,
+        IDirect3DIndexBuffer9* indices)
+    {
+        const HRESULT hr = g_realDeviceSetIndices
+            ? g_realDeviceSetIndices(self, indices)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+            InterlockedExchangePointer(&g_currentIndexBuffer, indices);
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log("SET_INDICES object=%p hr=0x%08lX",
+                indices, static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
     HRESULT WINAPI HookDeviceSetRenderState(
         IDirect3DDevice9* self,
         D3DRENDERSTATETYPE state,
@@ -2008,6 +2168,37 @@ namespace
                 break;
         }
 
+        char streamBindings[768] = {};
+        size_t streamOffset = 0;
+        for (UINT stream = 0; stream < 16; ++stream)
+        {
+            if (InterlockedCompareExchange(&g_streamKnown[stream], 0, 0) == 0)
+                continue;
+            PVOID buffer = InterlockedCompareExchangePointer(
+                &g_streamBuffers[stream], NULL, NULL);
+            const int appended = _snprintf_s(
+                streamBindings + streamOffset,
+                _countof(streamBindings) - streamOffset,
+                _TRUNCATE,
+                "%u:%p:%lu:%lu:%lu;",
+                stream,
+                buffer,
+                static_cast<unsigned long>(InterlockedCompareExchange(&g_streamOffsets[stream], 0, 0)),
+                static_cast<unsigned long>(InterlockedCompareExchange(&g_streamStrides[stream], 0, 0)),
+                static_cast<unsigned long>(InterlockedCompareExchange(&g_streamFrequencies[stream], 0, 0)));
+            if (appended < 0)
+                break;
+            streamOffset += static_cast<size_t>(appended);
+            if (streamOffset >= _countof(streamBindings) - 1)
+                break;
+        }
+        PVOID vertexDeclaration =
+            InterlockedCompareExchangePointer(&g_currentVertexDeclaration, NULL, NULL);
+        PVOID indexBuffer =
+            InterlockedCompareExchangePointer(&g_currentIndexBuffer, NULL, NULL);
+        const DWORD currentFVF = static_cast<DWORD>(
+            InterlockedCompareExchange(&g_currentFVF, 0, 0));
+
         unsigned __int64 samplerHash = 14695981039346656037ULL;
         DWORD samplerStateCount = 0;
         for (DWORD sampler = 0; sampler < 16; ++sampler)
@@ -2070,7 +2261,8 @@ namespace
         Log(
             "DRAW_CALL seq=%ld frame=%ld kind=%s device=%p primitive=%u primitives=%u "
             "start_vertex=%u base_vertex=%ld min_vertex=%u num_vertices=%u "
-            "start_index=%u bound_vs=%p bound_ps=%p textures=%s sampler_hash=%016llX "
+            "start_index=%u bound_vs=%p bound_ps=%p vertex_decl=%p fvf=0x%08lX "
+            "index_buffer=%p streams=%s textures=%s sampler_hash=%016llX "
             "sampler_count=%lu render_state_hash=%016llX render_state_count=%lu "
             "texture_stage_hash=%016llX texture_stage_count=%lu hr=0x%08lX",
             sequence,
@@ -2086,6 +2278,10 @@ namespace
             startIndex,
             vertexShader,
             pixelShader,
+            vertexDeclaration,
+            static_cast<unsigned long>(currentFVF),
+            indexBuffer,
+            streamBindings,
             textureBindings,
             samplerHash,
             static_cast<unsigned long>(samplerStateCount),
