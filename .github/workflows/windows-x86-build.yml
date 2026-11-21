@@ -109,6 +109,12 @@ jobs:
       - name: Inventory captured runtime shader bytecode
         shell: pwsh
         run: |
+          python tools\analyze_asi_log.py build\bin\IVLegacy.log --json build\bin\synthetic_draw_analysis.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $drawAnalysis = Get-Content build\bin\synthetic_draw_analysis.json -Raw | ConvertFrom-Json
+          if ($drawAnalysis.draw_calls_observed -ne 4) { throw "Expected 4 synthetic draw calls; found $($drawAnalysis.draw_calls_observed)." }
+          if ($drawAnalysis.texture_objects_observed -lt 1) { throw 'Expected texture creation/binding correlation in the synthetic log.' }
+          if ($drawAnalysis.shader_fallback_usage.Count -lt 1) { throw 'Expected a source-to-PS2 fallback shader pair in the synthetic draw log.' }
           python tools\analyze_asi_constants.py build\bin\IVLegacyConstants --json build\bin\shader_constant_inventory.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $constantInventory = Get-Content build\bin\shader_constant_inventory.json -Raw | ConvertFrom-Json
@@ -134,6 +140,8 @@ jobs:
           Copy-Item build\out\shader_inventory.json artifact\build\out\
           Copy-Item build\bin\captured_shader_inventory.json artifact\build\bin\
           Copy-Item build\bin\captured_shader_downlevel_audit.json artifact\build\bin\
+          Copy-Item build\bin\synthetic_draw_analysis.json artifact\build\bin\
+          Copy-Item build\bin\IVLegacy.log artifact\build\bin\
           Copy-Item build\bin\shader_constant_inventory.json artifact\build\bin\
           Copy-Item build\bin\IVLegacyConstants artifact\build\bin\ -Recurse
           Copy-Item build\bin\IVLegacyCaptures artifact\build\bin\ -Recurse
