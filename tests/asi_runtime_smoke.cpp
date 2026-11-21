@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 namespace
 {
@@ -20,6 +21,74 @@ namespace
     FakeComObject g_fakeVertexShader = {};
     FakeComObject g_fakePixelShader = {};
     void* g_fakeShaderVTable[3] = {};
+    DWORD g_fakeLastPixelShaderVersion = 0;
+    volatile LONG g_fakePixelShaderCreateCount = 0;
+    DWORD g_syntheticPs3PixelShader[18] = {};
+    DWORD g_syntheticPs3PixelShaderAlt[18] = {};
+
+    DWORD MakeShaderRegisterToken(DWORD registerType, DWORD registerIndex)
+    {
+        return 0x80000000UL
+            | ((registerIndex & 0x7FFUL))
+            | (0xFUL << 16)
+            | ((registerType & 0x7UL) << 28)
+            | ((registerType & 0x18UL) << 8);
+    }
+
+    DWORD MakeShaderSourceToken(
+        DWORD registerType,
+        DWORD registerIndex,
+        DWORD swizzle = 0xE4)
+    {
+        return 0x80000000UL
+            | ((registerIndex & 0x7FFUL))
+            | ((swizzle & 0xFFUL) << 16)
+            | ((registerType & 0x7UL) << 28)
+            | ((registerType & 0x18UL) << 8);
+    }
+
+    void BuildSyntheticPs3Shader()
+    {
+        DWORD index = 0;
+        g_syntheticPs3PixelShader[index++] = 0xFFFF0300UL;
+        g_syntheticPs3PixelShader[index++] = (2UL << 24) | 31UL;
+        g_syntheticPs3PixelShader[index++] = 5UL;
+        g_syntheticPs3PixelShader[index++] = MakeShaderRegisterToken(1, 0);
+        g_syntheticPs3PixelShader[index++] = (2UL << 24) | 31UL;
+        g_syntheticPs3PixelShader[index++] = (2UL << 27);
+        g_syntheticPs3PixelShader[index++] = MakeShaderRegisterToken(10, 0);
+        g_syntheticPs3PixelShader[index++] = (2UL << 24) | 1UL;
+        g_syntheticPs3PixelShader[index++] = MakeShaderRegisterToken(0, 0);
+        g_syntheticPs3PixelShader[index++] = MakeShaderSourceToken(1, 0);
+        g_syntheticPs3PixelShader[index++] = (3UL << 24) | 66UL;
+        g_syntheticPs3PixelShader[index++] = MakeShaderRegisterToken(0, 1);
+        g_syntheticPs3PixelShader[index++] = MakeShaderSourceToken(0, 0);
+        g_syntheticPs3PixelShader[index++] = MakeShaderSourceToken(10, 0);
+        g_syntheticPs3PixelShader[index++] = (2UL << 24) | 1UL;
+        g_syntheticPs3PixelShader[index++] = MakeShaderRegisterToken(8, 0);
+        g_syntheticPs3PixelShader[index++] = MakeShaderSourceToken(0, 1);
+        g_syntheticPs3PixelShader[index++] = 0x0000FFFFUL;
+
+        if (index != _countof(g_syntheticPs3PixelShader))
+            std::abort();
+
+        CopyMemory(
+            g_syntheticPs3PixelShaderAlt,
+            g_syntheticPs3PixelShader,
+            sizeof(g_syntheticPs3PixelShader));
+        g_syntheticPs3PixelShaderAlt[16] = MakeShaderSourceToken(0, 1, 0x55);
+    }
+
+    unsigned __int64 HashShaderBytes(const BYTE* bytes, DWORD byteCount)
+    {
+        unsigned __int64 hash = 14695981039346656037ULL;
+        for (DWORD i = 0; i < byteCount; ++i)
+        {
+            hash ^= bytes[i];
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
 
     bool ReadLog(char* buffer, DWORD capacity)
     {
@@ -297,11 +366,13 @@ namespace
 
     HRESULT WINAPI FakeDeviceCreatePixelShader(
         IDirect3DDevice9*,
-        const DWORD*,
+        const DWORD* function,
         IDirect3DPixelShader9** shader)
     {
-        if (!shader)
+        if (!shader || !function)
             return D3DERR_INVALIDCALL;
+        g_fakeLastPixelShaderVersion = function[0];
+        InterlockedIncrement(&g_fakePixelShaderCreateCount);
         *shader = reinterpret_cast<IDirect3DPixelShader9*>(&g_fakePixelShader);
         return D3D_OK;
     }
@@ -490,6 +561,7 @@ int main()
 {
     SetUnhandledExceptionFilter(SmokeUnhandledExceptionFilter);
     InitializeFakeObjects();
+    BuildSyntheticPs3Shader();
 
     // First touch the real export so the executable has a normal d3d9.dll
     // import and its IAT points to the system export before we replace it.
@@ -514,6 +586,45 @@ int main()
         L"General", L"CaptureDrawTelemetry", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"CaptureDrawMaxCalls", L"8", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"EnableShaderFallbacks", L"1", iniPath);
+
+    const wchar_t* fallbackFolder = L"build\\bin\\IVLegacyFallbacks";
+    if (!CreateDirectoryW(fallbackFolder, NULL) &&
+        GetLastError() != ERROR_ALREADY_EXISTS)
+    {
+        return Fail("Could not create synthetic shader fallback directory");
+    }
+
+    if (!CopyFileW(
+        L"build\\out\\basic_ps20.pso",
+        L"build\\bin\\IVLegacyFallbacks\\smoke.ps20.pso",
+        FALSE))
+    {
+        return Fail("Could not stage synthetic PS2 fallback bytecode");
+    }
+
+    const unsigned __int64 syntheticHash = HashShaderBytes(
+        reinterpret_cast<const BYTE*>(g_syntheticPs3PixelShader),
+        sizeof(g_syntheticPs3PixelShader));
+    wchar_t syntheticHashKey[32] = {};
+    _snwprintf_s(
+        syntheticHashKey,
+        _countof(syntheticHashKey),
+        _TRUNCATE,
+        L"%016llX",
+        syntheticHash);
+    const wchar_t* fallbackIniPath = L"build\\bin\\IVLegacyShaderFallbacks.ini";
+    DeleteFileW(fallbackIniPath);
+    if (!WritePrivateProfileStringW(
+        L"ShaderFallbacks",
+        syntheticHashKey,
+        L"IVLegacyFallbacks\\smoke.ps20.pso",
+        fallbackIniPath))
+    {
+        return Fail("Could not write synthetic hash-to-PS2 fallback mapping");
+    }
+
     DeleteFileW(L"build\\bin\\IVLegacy.log");
 
     SmokeMark("before-LoadLibrary");
@@ -662,10 +773,23 @@ int main()
     IDirect3DPixelShader9* pixelShader = NULL;
     HRESULT vertexShaderHr = D3DERR_INVALIDCALL;
     HRESULT pixelShaderHr = D3DERR_INVALIDCALL;
+    HRESULT fallbackShaderHr = D3DERR_INVALIDCALL;
+    HRESULT unmappedShaderHr = D3DERR_INVALIDCALL;
+    DWORD mappedShaderVersion = 0;
+    DWORD unmappedShaderVersion = 0;
 
     if (vertexBytecode)
         vertexShaderHr = device->CreateVertexShader(
             reinterpret_cast<const DWORD*>(vertexBytecode), &vertexShader);
+
+    fallbackShaderHr = device->CreatePixelShader(
+        g_syntheticPs3PixelShader, &pixelShader);
+    mappedShaderVersion = g_fakeLastPixelShaderVersion;
+
+    unmappedShaderHr = device->CreatePixelShader(
+        g_syntheticPs3PixelShaderAlt, &pixelShader);
+    unmappedShaderVersion = g_fakeLastPixelShaderVersion;
+
     if (pixelBytecode)
         pixelShaderHr = device->CreatePixelShader(
             reinterpret_cast<const DWORD*>(pixelBytecode), &pixelShader);
@@ -722,6 +846,15 @@ int main()
         return Fail("Device render/depth surface creation hooks were not observed");
     if (!HasText("CREATE_VERTEX_SHADER") || !HasText("CREATE_PIXEL_SHADER"))
         return Fail("Device shader creation hooks were not observed");
+    if (!HasText("SHADER_FALLBACKS_ENABLED") ||
+        !HasText("SHADER_FALLBACK_APPLIED"))
+        return Fail("Configured PS2 fallback was not applied to the matching PS3 shader");
+    if (!HasText("SHADER_FALLBACK_NOT_MAPPED"))
+        return Fail("Unmapped PS3 shader did not pass through unchanged");
+    if (FAILED(fallbackShaderHr) || FAILED(unmappedShaderHr) ||
+        mappedShaderVersion != 0xFFFF0200UL ||
+        unmappedShaderVersion != 0xFFFF0300UL)
+        return Fail("Hash-mapped shader substitution did not preserve fallback/pass-through profiles");
     if (!HasText("SET_VERTEX_SHADER") || !HasText("SET_PIXEL_SHADER"))
         return Fail("Device shader binding hooks were not observed");
     if (!HasText("SHADER_OBJECT_CREATED stage=VS") ||
