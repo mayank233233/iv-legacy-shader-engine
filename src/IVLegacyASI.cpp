@@ -547,8 +547,9 @@ namespace
             Log(
                 "D3D9_GET_DEVICE_CAPS adapter=%u type=%u VS=0x%08lX PS=0x%08lX "
                 "MaxSimTextures=%u MaxTextureStages=%u MaxRTs=%u MaxVSConst=%u "
-                "VS20Temps=%u VS20DynamicFlow=%u PS20Temps=%u PS20Slots=%u "
-                "PS20DynamicFlow=%u",
+                "VS20Temps=%u VS20DynamicFlow=%u VS20StaticFlow=%u "
+                "PS20Caps=0x%08lX PS20Temps=%u PS20Slots=%u "
+                "PS20DynamicFlow=%u PS20StaticFlow=%u",
                 adapter,
                 static_cast<unsigned>(deviceType),
                 static_cast<unsigned long>(caps->VertexShaderVersion),
@@ -559,9 +560,12 @@ namespace
                 caps->MaxVertexShaderConst,
                 caps->VS20Caps.NumTemps,
                 caps->VS20Caps.DynamicFlowControlDepth,
+                caps->VS20Caps.StaticFlowControlDepth,
+                static_cast<unsigned long>(caps->PS20Caps.Caps),
                 caps->PS20Caps.NumTemps,
                 caps->PS20Caps.NumInstructionSlots,
-                caps->PS20Caps.DynamicFlowControlDepth);
+                caps->PS20Caps.DynamicFlowControlDepth,
+                caps->PS20Caps.StaticFlowControlDepth);
         }
         else if (FAILED(hr))
         {
@@ -680,12 +684,16 @@ namespace
         {
             Log(
                 "DEVICE_GET_DEVICE_CAPS VS=0x%08lX PS=0x%08lX MaxRTs=%u "
-                "PS20Temps=%u PS20Slots=%u",
+                "PS20Caps=0x%08lX PS20Temps=%u PS20Slots=%u "
+                "PS20DynamicFlow=%u PS20StaticFlow=%u",
                 static_cast<unsigned long>(caps->VertexShaderVersion),
                 static_cast<unsigned long>(caps->PixelShaderVersion),
                 caps->NumSimultaneousRTs,
+                static_cast<unsigned long>(caps->PS20Caps.Caps),
                 caps->PS20Caps.NumTemps,
-                caps->PS20Caps.NumInstructionSlots);
+                caps->PS20Caps.NumInstructionSlots,
+                caps->PS20Caps.DynamicFlowControlDepth,
+                caps->PS20Caps.StaticFlowControlDepth);
         }
         return hr;
     }
