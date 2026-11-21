@@ -44,7 +44,11 @@ namespace
         kDeviceDrawPrimitiveSlot = 81,
         kDeviceDrawIndexedPrimitiveSlot = 82,
         kDeviceDrawPrimitiveUPSlot = 83,
-        kDeviceDrawIndexedPrimitiveUPSlot = 84
+        kDeviceDrawIndexedPrimitiveUPSlot = 84,
+        kDeviceSetTextureSlot = 65,
+        kDeviceSetSamplerStateSlot = 69,
+        kDeviceSetVertexShaderConstantFSlot = 94,
+        kDeviceSetPixelShaderConstantFSlot = 109
     };
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
@@ -69,8 +73,14 @@ namespace
     volatile LONG g_presentFrameIndex = 0;
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
+    PVOID volatile g_currentTextures[16] = {};
+    volatile LONG g_samplerStates[16][14] = {};
     BOOL g_drawTelemetryEnabled = FALSE;
     DWORD g_drawTelemetryMaxCalls = 4096;
+    BOOL g_captureShaderConstants = FALSE;
+    DWORD g_captureShaderConstantMaxRecords = 2048;
+    volatile LONG g_shaderConstantCaptureCount = 0;
+    wchar_t g_shaderConstantCaptureDirectory[MAX_PATH] = {};
     volatile LONG g_renderTargetLogCount = 0;
     volatile LONG g_depthTargetCreateLogCount = 0;
     volatile LONG g_setRenderTargetLogCount = 0;
@@ -129,6 +139,12 @@ namespace
     typedef HRESULT (WINAPI* DeviceDrawIndexedPrimitiveUPFn)(
         IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT,
         const void*, D3DFORMAT, const void*, UINT);
+    typedef HRESULT (WINAPI* DeviceSetTextureFn)(
+        IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
+    typedef HRESULT (WINAPI* DeviceSetSamplerStateFn)(
+        IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD);
+    typedef HRESULT (WINAPI* DeviceSetShaderConstantFFn)(
+        IDirect3DDevice9*, UINT, const float*, UINT);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
     D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
@@ -152,6 +168,10 @@ namespace
     DeviceDrawIndexedPrimitiveFn g_realDeviceDrawIndexedPrimitive = NULL;
     DeviceDrawPrimitiveUPFn g_realDeviceDrawPrimitiveUP = NULL;
     DeviceDrawIndexedPrimitiveUPFn g_realDeviceDrawIndexedPrimitiveUP = NULL;
+    DeviceSetTextureFn g_realDeviceSetTexture = NULL;
+    DeviceSetSamplerStateFn g_realDeviceSetSamplerState = NULL;
+    DeviceSetShaderConstantFFn g_realDeviceSetVertexShaderConstantF = NULL;
+    DeviceSetShaderConstantFFn g_realDeviceSetPixelShaderConstantF = NULL;
 
     void Log(const char* format, ...)
     {
