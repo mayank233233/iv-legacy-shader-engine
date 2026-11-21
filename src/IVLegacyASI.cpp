@@ -816,20 +816,40 @@ namespace
             return false;
 
         void** original = *objectVTable;
+        Log("D3D9_DEVICE_HOOK_BEGIN device=%p vtable=%p", device, original);
         if (original[7] == reinterpret_cast<void*>(HookDeviceGetDeviceCaps))
             return true;
 
+        const SIZE_T vtableBytes =
+            sizeof(void*) * kD3D9DeviceInterfaceSlots;
+        MEMORY_BASIC_INFORMATION vtableMemory = {};
+        if (VirtualQuery(original, &vtableMemory, sizeof(vtableMemory)) != sizeof(vtableMemory) ||
+            vtableMemory.State != MEM_COMMIT ||
+            (vtableMemory.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0)
+        {
+            Log("D3D9_DEVICE_HOOK_FAILED reason=invalid_vtable_memory");
+            return false;
+        }
+
+        const BYTE* vtableEnd =
+            static_cast<const BYTE*>(vtableMemory.BaseAddress) + vtableMemory.RegionSize;
+        if (reinterpret_cast<const BYTE*>(original) + vtableBytes > vtableEnd)
+        {
+            Log("D3D9_DEVICE_HOOK_FAILED reason=vtable_region_too_small required=%lu",
+                static_cast<unsigned long>(vtableBytes));
+            return false;
+        }
+
         void** hooked = static_cast<void**>(
-            HeapAlloc(GetProcessHeap(), 0, sizeof(void*) * kD3D9DeviceInterfaceSlots));
+            HeapAlloc(GetProcessHeap(), 0, vtableBytes));
         if (!hooked)
         {
             Log("D3D9_DEVICE_HOOK_FAILED reason=out_of_memory");
             return false;
         }
 
-        CopyMemory(
-            hooked, original,
-            sizeof(void*) * kD3D9DeviceInterfaceSlots);
+        CopyMemory(hooked, original, vtableBytes);
+        Log("D3D9_DEVICE_VTABLE_COPIED bytes=%lu", static_cast<unsigned long>(vtableBytes));
 
         g_realDeviceGetDeviceCaps =
             reinterpret_cast<DeviceGetDeviceCapsFn>(original[7]);
@@ -868,10 +888,13 @@ namespace
 
         *objectVTable = hooked;
         DWORD ignored = 0;
-        VirtualProtect(objectVTable, sizeof(void*), oldProtection, &ignored);
+        const BOOL restoreProtection =
+            VirtualProtect(objectVTable, sizeof(void*), oldProtection, &ignored);
         FlushInstructionCache(GetCurrentProcess(), NULL, 0);
 
-        Log("D3D9_DEVICE_HOOK_INSTALLED device=%p", device);
+        Log(
+            "D3D9_DEVICE_HOOK_INSTALLED device=%p vtable=%p restore_protection=%u",
+            device, hooked, restoreProtection ? 1 : 0);
         return true;
     }
 
