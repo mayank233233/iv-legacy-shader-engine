@@ -1521,7 +1521,7 @@ namespace
     }
 }
 
-extern "C" void InitializeASI()
+extern "C" __declspec(dllexport) void InitializeASI()
 {
     // Official Ultimate ASI Loader entry point; called outside the loader lock.
     InitializePluginOnce();
