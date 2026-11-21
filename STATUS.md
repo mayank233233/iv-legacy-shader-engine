@@ -172,3 +172,32 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 | Render original GTA IV scenes on Intel GMA 3100 | NOT TESTED |
 | Measure FPS / 30 FPS objective | NOT TESTED |
 
+
+ 
+## Prototype 0.5.4-alpha verification — 2026-11-21
+
+- Exact target remains original PC GTA IV `GTAIV.exe` file version `1.0.0.0`; strict gate remains enabled by default.
+- Latest Windows x86 CI: [run #165](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44890714743), commit `0750df6203715f6e7986ef84ded862d6c9d8ec26`; all workflow steps passed.
+- Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44890714743/artifacts/14700884610), artifact ID `14700884610`; SHA-256 `639671695847d8609ac9c9feb1790172dcd674b09359632faf85b1f701e21655`.
+- Added opt-in vertex-input hooks at D3D9 slots: CreateVertexDeclaration 86, SetVertexDeclaration 87, SetFVF 89, SetStreamSource 100, SetStreamSourceFreq 102, SetIndices 104.
+- Declaration creation records each element's stream, offset, type, method, usage and usage index. It is guarded against unreadable input and capped at 64 declaration elements.
+- Each opt-in draw record now carries active declaration/FVF, index-buffer pointer and per-stream vertex-buffer pointer/offset/stride/frequency.
+- Successful Reset clears the cached declaration, FVF, index-buffer and stream state.
+- Synthetic test creates a POSITION float3 + TEXCOORD float2 declaration, sets a stream with offset 0/stride 20/frequency 1, binds a fake index buffer and draws. It then switches to FVF `0x00000102` and exercises later draw calls.
+- Offline `tools/analyze_asi_log.py` reconstructs the declaration elements and groups draw submissions by declaration/FVF layout, stream layout and index-buffer object. Its deterministic parser fixture passes.
+- Run #165 passed source sanity, six SM2 shader compiles, x86 probe/ASI builds, synthetic D3D9 runtime, captured shader inventory, constant-sidecar parsing, fallback audit and artifact staging.
+- Artifact runtime evidence remains synthetic. It contains five fake-COM shader captures, six synthetic constant sidecars and a synthetic `IVLegacy.log`; none are proprietary GTA IV shader/material captures.
+- Actual original GTA IV 1.0.0.0, real ASI-loader session, physical GMA 3100, real game rendering, mission/gameplay integrity and FPS remain untested.
+
+### Remaining integration gates
+
+| Gate | State |
+|---|---|
+| Inspect original GTAIV.exe file version and PE32 normal/delay imports | TOOL READY; FILE NOT INSPECTED |
+| Verify original game's D3D9 factory import path and ASI load timing | NOT VERIFIED |
+| Capture real GTA IV shader bytecode, constants, declarations, streams and material state | NOT RUN |
+| Map real shader families to SM2 fallbacks and prove material equivalence | NOT IMPLEMENTED |
+| Load a real compatibility renderer in original GTA IV 1.0.0.0 | NOT TESTED |
+| Render GTA IV scenes on Intel GMA 3100 | NOT TESTED |
+| Measure average / 1% low FPS against the 30 FPS objective | NOT TESTED |
+
