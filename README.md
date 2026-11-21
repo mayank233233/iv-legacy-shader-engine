@@ -90,7 +90,7 @@ The adapter report separates fixed-function multitexture capability from the rep
 
 ## GitHub Actions boundary
 
-The Windows x86 workflow compiles the six HLSL files with FXC and builds the 32-bit C++ executable. It does **not** run the D3D9 windowed probe, validate a physical graphics driver, or prove hardware vertex-shader execution. Passing CI cannot replace running `build\\run_probe.bat` on the actual GMA 3100 machine.
+**Prototype 0.3 Windows x86 CI passed** in [run #8](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480). The workflow compiled all six HLSL files with FXC, built the 32-bit C++ executable with MSVC, and uploaded the 13-file build artifact ([download](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44876832480/artifacts/14696800281)). The artifact contains six bytecode files, six FXC assembly listings and `D3D9ShaderProbe.exe`. It does **not** run the D3D9 windowed probe, validate a physical graphics driver, or prove hardware vertex-shader execution. Passing CI cannot replace running `build\\run_probe.bat` on the actual GMA 3100 machine.
 
 ## Known limitations
 
@@ -104,10 +104,10 @@ The Windows x86 workflow compiles the six HLSL files with FXC and builds the 32-
 
 ## Next validation gate
 
-1. Obtain a green Windows x86 CI build (FXC + MSVC).
-2. Run the probe on the actual Windows 8.1 x86 / GMA 3100 target.
-3. Preserve the complete `D3D9ProbeReport.txt` and all FXC `.asm` listings.
-4. Compare SWVP and HWVP creation / render results independently.
+1. Run the compiled probe on the actual Windows 8.1 x86 / GMA 3100 target.
+2. Preserve the complete `D3D9ProbeReport.txt` and the FXC `.asm` listings from the CI artifact.
+3. Compare SWVP and HWVP creation / render results independently.
+4. Inspect readback values and repeat tests for stability.
 5. Only after these results should the project move toward more representative geometry, state and material experiments.
 
 Do not begin GTA IV integration or make FPS claims before those gates are met.
