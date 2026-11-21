@@ -94,8 +94,11 @@ def analyze_log(path: Path) -> dict[str, Any]:
                 "log_line": line_number,
             }
             # A later object creation at a reused address supersedes the
-            # previous lifetime in this chronological log.
+            # previous lifetime in this chronological log. It also clears
+            # any fallback lineage from the previous object at that address.
             shaders_by_address[(stage, address)] = shader
+            if stage == "PS":
+                fallback_by_address.pop(("PS", address), None)
             continue
 
         if "TEXTURE_OBJECT_CREATED " in raw_line:
