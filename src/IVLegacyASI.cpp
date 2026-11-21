@@ -1784,7 +1784,11 @@ namespace
                 const DWORD value = static_cast<DWORD>(
                     InterlockedCompareExchange(
                         &g_samplerStates[sampler][state], 0, 0));
-                samplerHash ^= (sampler << 24) | (state << 16) | (value & 0xFFFF);
+                samplerHash ^= sampler;
+                samplerHash *= 1099511628211ULL;
+                samplerHash ^= state;
+                samplerHash *= 1099511628211ULL;
+                samplerHash ^= value;
                 samplerHash *= 1099511628211ULL;
                 ++samplerStateCount;
             }
@@ -1798,7 +1802,9 @@ namespace
                 continue;
             const DWORD value = static_cast<DWORD>(
                 InterlockedCompareExchange(&g_renderStates[state], 0, 0));
-            renderStateHash ^= (state << 16) | (value & 0xFFFF);
+            renderStateHash ^= state;
+            renderStateHash *= 1099511628211ULL;
+            renderStateHash ^= value;
             renderStateHash *= 1099511628211ULL;
             ++renderStateCount;
         }
@@ -1815,7 +1821,11 @@ namespace
                 const DWORD value = static_cast<DWORD>(
                     InterlockedCompareExchange(
                         &g_textureStageStates[stage][state], 0, 0));
-                textureStageHash ^= (stage << 24) | (state << 16) | (value & 0xFFFF);
+                textureStageHash ^= stage;
+                textureStageHash *= 1099511628211ULL;
+                textureStageHash ^= state;
+                textureStageHash *= 1099511628211ULL;
+                textureStageHash ^= value;
                 textureStageHash *= 1099511628211ULL;
                 ++textureStageStateCount;
             }
