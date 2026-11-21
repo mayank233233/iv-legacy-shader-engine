@@ -66,6 +66,7 @@ namespace
     volatile LONG g_setVertexShaderLogCount = 0;
     volatile LONG g_setPixelShaderLogCount = 0;
     volatile LONG g_drawCallCount = 0;
+    volatile LONG g_presentFrameIndex = 0;
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
     BOOL g_drawTelemetryEnabled = FALSE;
@@ -726,6 +727,8 @@ namespace
 
         if (FAILED(hr))
             Log("DEVICE_PRESENT_FAILED hr=0x%08lX", static_cast<unsigned long>(hr));
+        else if (g_drawTelemetryEnabled)
+            InterlockedIncrement(&g_presentFrameIndex);
 
         return hr;
     }
@@ -991,12 +994,15 @@ namespace
             InterlockedCompareExchangePointer(&g_currentVertexShader, NULL, NULL);
         PVOID pixelShader =
             InterlockedCompareExchangePointer(&g_currentPixelShader, NULL, NULL);
+        const LONG frameIndex =
+            InterlockedCompareExchange(&g_presentFrameIndex, 0, 0);
 
         Log(
-            "DRAW_CALL seq=%ld kind=%s device=%p primitive=%u primitives=%u "
+            "DRAW_CALL seq=%ld frame=%ld kind=%s device=%p primitive=%u primitives=%u "
             "start_vertex=%u base_vertex=%ld min_vertex=%u num_vertices=%u "
             "start_index=%u bound_vs=%p bound_ps=%p hr=0x%08lX",
             sequence,
+            frameIndex,
             kind,
             device,
             static_cast<unsigned>(primitiveType),
