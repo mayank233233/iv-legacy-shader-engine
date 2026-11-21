@@ -1,6 +1,6 @@
 // IVLR basic vertex shader — Shader Model 2.0.
 // Generic test interface only; not a GTA IV shader replacement.
-// Matrices use row-vector mul convention.
+// Matrices use row-vector mul convention. Keep the test matrices identity.
 
 row_major float4x4 WorldViewProjection       : register(c0);
 row_major float4x4 World                     : register(c4);
