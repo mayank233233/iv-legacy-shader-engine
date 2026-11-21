@@ -3,6 +3,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src" / "IVLegacyASI.cpp"
 BUILD = ROOT / "build" / "build_asi.bat"
+SMOKE_SOURCE = ROOT / "tests" / "asi_runtime_smoke.cpp"
+SMOKE_RESOURCE = ROOT / "tests" / "test_gtaiv_version.rc"
 
 def fail(message: str) -> None:
     print(f"FAIL: {message}")
@@ -12,6 +14,8 @@ if not SOURCE.is_file():
     fail("missing game-loaded ASI source")
 if not BUILD.is_file():
     fail("missing x86 ASI build script")
+if not SMOKE_SOURCE.is_file() or not SMOKE_RESOURCE.is_file():
+    fail("missing D3D9 ASI runtime smoke-test source or version resource")
 
 source = SOURCE.read_text(encoding="utf-8")
 build = BUILD.read_text(encoding="utf-8")
@@ -37,6 +41,8 @@ required_source_markers = (
     "HookD3D9Import",
     "D3D9_INTERFACE_HOOK_INSTALLED",
     "D3D9_DEVICE_HOOK_INSTALLED",
+    "D3D9_CHECK_DEVICE_FORMAT",
+    "D3D9_CHECK_DEPTH_MATCH",
 )
 
 for marker in required_source_markers:
