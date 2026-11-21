@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Validate and summarize IV Legacy D3D9 float shader-constant sidecars.
 
-Binary format v1:
+Binary format v2 adds the currently bound shader-object address after the frame index.
+Version-1 records without that field remain supported.
+
+Common header:
   4s magic 'IVCF'
-  H  version (1)
+  H  version (1 or 2)
   H  stage (0=VS, 1=PS)
   I  Present-frame index
+  [v2 only] I bound shader-object address (0 means no shader bound)
   I  capture sequence
   I  first float-constant register
   I  vector-register count
@@ -22,9 +26,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-HEADER = struct.Struct("<4sHHIIIII")
+HEADER_V1 = struct.Struct("<4sHHIIIII")
+HEADER_V2 = struct.Struct("<4sHHIIIIII")
 MAGIC = b"IVCF"
-VERSION = 1
+VERSION = 2
 STAGES = {0: "VS", 1: "PS"}
 MAX_VECTOR_COUNT = 256
 MAX_FILES = 8192
@@ -44,16 +49,32 @@ def _json_float(value: float) -> float | str:
 
 def parse_capture(path: Path) -> dict[str, Any]:
     data = path.read_bytes()
-    if len(data) < HEADER.size:
+    if len(data) < 8:
         raise ConstantCaptureError("truncated header")
 
-    magic, version, stage_code, frame, sequence, start, count, data_bytes = (
-        HEADER.unpack_from(data, 0)
-    )
+    magic, version, stage_code = struct.unpack_from("<4sHH", data, 0)
     if magic != MAGIC:
         raise ConstantCaptureError(f"bad magic {magic!r}")
-    if version != VERSION:
+
+    if version == 1:
+        if len(data) < HEADER_V1.size:
+            raise ConstantCaptureError("truncated version-1 header")
+        (_magic, _version, _stage, frame, sequence, start, count, data_bytes) = (
+            HEADER_V1.unpack_from(data, 0)
+        )
+        shader_object = None
+        header_size = HEADER_V1.size
+    elif version == 2:
+        if len(data) < HEADER_V2.size:
+            raise ConstantCaptureError("truncated version-2 header")
+        (_magic, _version, _stage, frame, shader_object, sequence,
+         start, count, data_bytes) = HEADER_V2.unpack_from(data, 0)
+        header_size = HEADER_V2.size
+        if shader_object == 0:
+            shader_object = None
+    else:
         raise ConstantCaptureError(f"unsupported version {version}")
+
     if stage_code not in STAGES:
         raise ConstantCaptureError(f"invalid shader stage {stage_code}")
     if count < 1 or count > MAX_VECTOR_COUNT:
@@ -65,14 +86,14 @@ def parse_capture(path: Path) -> dict[str, Any]:
         raise ConstantCaptureError(
             f"data byte count {data_bytes} does not match expected {expected_data_bytes}"
         )
-    expected_file_bytes = HEADER.size + expected_data_bytes
+    expected_file_bytes = header_size + expected_data_bytes
     if len(data) != expected_file_bytes:
         raise ConstantCaptureError(
             f"file length {len(data)} does not match expected {expected_file_bytes}"
         )
 
     float_count = count * 4
-    values = struct.unpack_from(f"<{float_count}f", data, HEADER.size)
+    values = struct.unpack_from(f"<{float_count}f", data, header_size)
     vectors = [
         [_json_float(values[index + offset]) for offset in range(4)]
         for index in range(0, len(values), 4)
@@ -82,6 +103,7 @@ def parse_capture(path: Path) -> dict[str, Any]:
         "version": version,
         "stage": STAGES[stage_code],
         "frame_index": frame,
+        "shader_object": f"{shader_object:08X}" if shader_object is not None else None,
         "sequence": sequence,
         "start_register": start,
         "vector_count": count,
@@ -91,7 +113,6 @@ def parse_capture(path: Path) -> dict[str, Any]:
             for index, vector in enumerate(vectors)
         ],
     }
-
 
 def analyze_directory(directory: Path) -> dict[str, Any]:
     files = sorted(directory.glob("*.bin"))
