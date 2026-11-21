@@ -89,9 +89,9 @@ def main() -> None:
 
         log_path = directory / "IVLegacy.log"
         log_path.write_text(
-            "[12:00:00.000] SHADER_OBJECT_CREATED stage=VS object=1234ABCD profile=VS_3_0 bytes=96 hash=aaa111 hr=0x00000000\\n"
-            "[12:00:00.001] SHADER_OBJECT_CREATED stage=PS object=ABCDEF01 profile=PS_2_0 bytes=64 hash=bbb222 hr=0x00000000\\n"
-            "[12:00:00.002] SHADER_FALLBACK_OBJECT_MAP object=ABCDEF01 source_hash=ccc333 target_hash=bbb222 target_profile=ps_2_0\\n",
+            "[12:00:00.000] SHADER_OBJECT_CREATED stage=VS object=1234ABCD profile=VS_3_0 bytes=96 hash=aaa111 hr=0x00000000\n"
+            "[12:00:00.001] SHADER_OBJECT_CREATED stage=PS object=ABCDEF01 profile=PS_2_0 bytes=64 hash=bbb222 hr=0x00000000\n"
+            "[12:00:00.002] SHADER_FALLBACK_OBJECT_MAP object=ABCDEF01 source_hash=ccc333 target_hash=bbb222 target_profile=ps_2_0\n",
             encoding="utf-8",
         )
         report = analyze_directory(directory, log_path)
