@@ -3,7 +3,6 @@
 #include <windows.h>
 #include <winver.h>
 #include <d3d9.h>
-#include <tlhelp32.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -1079,12 +1078,13 @@ namespace
         return d3d;
     }
 
-    bool HookD3D9ImportsInModule(HMODULE module, const wchar_t* moduleName)
+    bool HookD3D9Import()
     {
-        if (!module || !Is32BitPE(module))
+        HMODULE exe = GetModuleHandleW(NULL);
+        if (!exe || !Is32BitPE(exe))
             return false;
 
-        BYTE* base = reinterpret_cast<BYTE*>(module);
+        BYTE* base = reinterpret_cast<BYTE*>(exe);
         IMAGE_DOS_HEADER* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
         IMAGE_NT_HEADERS32* nt =
             reinterpret_cast<IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
@@ -1092,7 +1092,10 @@ namespace
         const IMAGE_DATA_DIRECTORY importDirectory =
             nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
         if (importDirectory.VirtualAddress == 0)
+        {
+            Log("D3D9_IAT_HOOK_NOT_INSTALLED reason=no_import_directory");
             return false;
+        }
 
         IMAGE_IMPORT_DESCRIPTOR* descriptor =
             reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(
@@ -1103,18 +1106,16 @@ namespace
 
         for (; descriptor->Name != 0; ++descriptor)
         {
-            const char* importedModule =
+            const char* moduleName =
                 reinterpret_cast<const char*>(base + descriptor->Name);
 
-            if (_stricmp(importedModule, "d3d9.dll") != 0)
+            if (_stricmp(moduleName, "d3d9.dll") != 0)
                 continue;
 
             foundD3D9 = true;
             if (descriptor->OriginalFirstThunk == 0)
             {
-                Log(
-                    "D3D9_IAT_HOOK_SKIPPED module=%ls reason=no_original_thunk",
-                    moduleName ? moduleName : L"(unknown)");
+                Log("D3D9_IAT_HOOK_SKIPPED reason=no_original_thunk");
                 continue;
             }
 
@@ -1147,18 +1148,8 @@ namespace
                     continue;
                 }
 
-                if (!g_realDirect3DCreate9)
-                {
-                    g_realDirect3DCreate9 =
-                        reinterpret_cast<Direct3DCreate9Fn>(current);
-                }
-                else if (current != reinterpret_cast<void*>(g_realDirect3DCreate9))
-                {
-                    Log(
-                        "D3D9_IAT_HOOK_SKIPPED module=%ls reason=nonmatching_original_export",
-                        moduleName ? moduleName : L"(unknown)");
-                    continue;
-                }
+                g_realDirect3DCreate9 =
+                    reinterpret_cast<Direct3DCreate9Fn>(current);
 
                 DWORD oldProtection = 0;
                 if (!VirtualProtect(
@@ -1167,9 +1158,7 @@ namespace
                     PAGE_READWRITE,
                     &oldProtection))
                 {
-                    Log(
-                        "D3D9_IAT_HOOK_FAILED module=%ls reason=iat_protect",
-                        moduleName ? moduleName : L"(unknown)");
+                    Log("D3D9_IAT_HOOK_FAILED reason=iat_protect");
                     continue;
                 }
 
@@ -1184,6 +1173,7 @@ namespace
                     sizeof(addresses->u1.Function),
                     oldProtection,
                     &ignored);
+
                 FlushInstructionCache(
                     GetCurrentProcess(),
                     &addresses->u1.Function,
@@ -1191,102 +1181,17 @@ namespace
 
                 installed = true;
                 Log(
-                    "D3D9_IAT_HOOK_INSTALLED module=%ls original=%p replacement=%p",
-                    moduleName ? moduleName : L"(unknown)",
-                    current,
-                    reinterpret_cast<void*>(HookDirect3DCreate9));
+                    "D3D9_IAT_HOOK_INSTALLED original=%p replacement=%p",
+                    current, reinterpret_cast<void*>(HookDirect3DCreate9));
             }
         }
 
-        if (foundD3D9 && !installed)
-        {
-            Log(
-                "D3D9_IAT_HOOK_NOT_INSTALLED module=%ls reason=direct3dcreate9_not_patched",
-                moduleName ? moduleName : L"(unknown)");
-        }
+        if (!foundD3D9)
+            Log("D3D9_IAT_HOOK_NOT_INSTALLED reason=d3d9_import_not_found");
+        else if (!installed)
+            Log("D3D9_IAT_HOOK_NOT_INSTALLED reason=direct3dcreate9_not_patched");
 
         return installed;
-    }
-
-    bool HookMainExecutableD3D9Import()
-    {
-        return HookD3D9ImportsInModule(
-            GetModuleHandleW(NULL), L"GTAIV.exe");
-    }
-
-    bool HookD3D9Import()
-    {
-        Log("D3D9_IAT_SCAN_BEGIN");
-
-        HANDLE snapshot = CreateToolhelp32Snapshot(
-            TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
-            GetCurrentProcessId());
-        if (snapshot == INVALID_HANDLE_VALUE)
-        {
-            const DWORD error = GetLastError();
-            Log(
-                "D3D9_IAT_MODULE_SCAN_FALLBACK reason=snapshot_failed error=%lu",
-                static_cast<unsigned long>(error));
-            return HookMainExecutableD3D9Import();
-        }
-
-        Log("D3D9_IAT_SCAN_SNAPSHOT_CREATED handle=%p", snapshot);
-
-        MODULEENTRY32W entry = {};
-        entry.dwSize = sizeof(entry);
-        if (!Module32FirstW(snapshot, &entry))
-        {
-            const DWORD error = GetLastError();
-            CloseHandle(snapshot);
-            Log(
-                "D3D9_IAT_MODULE_SCAN_FALLBACK reason=module_enumeration_failed error=%lu",
-                static_cast<unsigned long>(error));
-            return HookMainExecutableD3D9Import();
-        }
-
-        UINT modulesScanned = 0;
-        UINT modulesPatched = 0;
-        do
-        {
-            ++modulesScanned;
-
-            DWORD exceptionCode = 0;
-            BOOL modulePatched = FALSE;
-            __try
-            {
-                modulePatched =
-                    HookD3D9ImportsInModule(entry.hModule, entry.szModule) ? TRUE : FALSE;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                exceptionCode = GetExceptionCode();
-            }
-
-            if (exceptionCode != 0)
-            {
-                Log(
-                    "D3D9_IAT_MODULE_SCAN_EXCEPTION module=%ls base=%p code=0x%08lX",
-                    entry.szModule,
-                    entry.modBaseAddr,
-                    static_cast<unsigned long>(exceptionCode));
-            }
-            else if (modulePatched)
-            {
-                ++modulesPatched;
-            }
-        } while (Module32NextW(snapshot, &entry));
-
-        CloseHandle(snapshot);
-        Log(
-            "D3D9_IAT_HOOK_SCAN_COMPLETE modules=%u patched_modules=%u",
-            modulesScanned, modulesPatched);
-
-        if (modulesPatched == 0)
-        {
-            Log("D3D9_IAT_MODULE_SCAN_FALLBACK reason=no_loaded_module_hooked");
-            return HookMainExecutableD3D9Import();
-        }
-        return true;
     }
 
     DWORD WINAPI BootstrapThread(void*)
@@ -1350,27 +1255,8 @@ namespace
             return 0;
         }
 
-        BOOL d3d9HookInstalled = FALSE;
-        DWORD d3d9HookException = 0;
-        __try
-        {
-            d3d9HookInstalled = HookD3D9Import() ? TRUE : FALSE;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            d3d9HookException = GetExceptionCode();
-        }
-
-        if (d3d9HookException != 0)
-        {
-            Log(
-                "BOOTSTRAP_WARNING D3D9 import scan raised SEH exception=0x%08lX",
-                static_cast<unsigned long>(d3d9HookException));
-        }
-        else if (!d3d9HookInstalled)
-        {
+        if (!HookD3D9Import())
             Log("BOOTSTRAP_WARNING D3D9 import hook could not be installed");
-        }
 
         Log(
             "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=%u",
