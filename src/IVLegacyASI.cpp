@@ -63,7 +63,9 @@ namespace
         kDeviceSetFVFSlot = 89,
         kDeviceSetStreamSourceSlot = 100,
         kDeviceSetStreamSourceFreqSlot = 102,
-        kDeviceSetIndicesSlot = 104
+        kDeviceSetIndicesSlot = 104,
+        kDeviceCreateVertexBufferSlot = 26,
+        kDeviceCreateIndexBufferSlot = 27
     };
 
     HANDLE g_logFile = INVALID_HANDLE_VALUE;
@@ -88,6 +90,7 @@ namespace
     volatile LONG g_presentFrameIndex = 0;
     volatile LONG g_materialStateLogCount = 0;
     volatile LONG g_textureCreateLogCount = 0;
+    volatile LONG g_bufferCreateLogCount = 0;
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
     PVOID volatile g_currentTextures[16] = {};
@@ -204,6 +207,12 @@ namespace
         IDirect3DDevice9*, UINT, UINT);
     typedef HRESULT (WINAPI* DeviceSetIndicesFn)(
         IDirect3DDevice9*, IDirect3DIndexBuffer9*);
+    typedef HRESULT (WINAPI* DeviceCreateVertexBufferFn)(
+        IDirect3DDevice9*, UINT, DWORD, DWORD, D3DPOOL,
+        IDirect3DVertexBuffer9**, HANDLE*);
+    typedef HRESULT (WINAPI* DeviceCreateIndexBufferFn)(
+        IDirect3DDevice9*, UINT, DWORD, D3DFORMAT, D3DPOOL,
+        IDirect3DIndexBuffer9**, HANDLE*);
 
     Direct3DCreate9Fn g_realDirect3DCreate9 = NULL;
     D3D9GetAdapterIdentifierFn g_realD3D9GetAdapterIdentifier = NULL;
@@ -246,6 +255,8 @@ namespace
     DeviceSetStreamSourceFn g_realDeviceSetStreamSource = NULL;
     DeviceSetStreamSourceFreqFn g_realDeviceSetStreamSourceFreq = NULL;
     DeviceSetIndicesFn g_realDeviceSetIndices = NULL;
+    DeviceCreateVertexBufferFn g_realDeviceCreateVertexBuffer = NULL;
+    DeviceCreateIndexBufferFn g_realDeviceCreateIndexBuffer = NULL;
 
     void Log(const char* format, ...)
     {
@@ -1519,6 +1530,90 @@ namespace
     }
 
 
+    HRESULT WINAPI HookDeviceCreateVertexBuffer(
+        IDirect3DDevice9* self,
+        UINT length,
+        DWORD usage,
+        DWORD fvf,
+        D3DPOOL pool,
+        IDirect3DVertexBuffer9** buffer,
+        HANDLE* sharedHandle)
+    {
+        const HRESULT hr = g_realDeviceCreateVertexBuffer
+            ? g_realDeviceCreateVertexBuffer(
+                self, length, usage, fvf, pool, buffer, sharedHandle)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_bufferCreateLogCount) <= 2048)
+        {
+            if (SUCCEEDED(hr) && buffer && *buffer)
+            {
+                Log(
+                    "BUFFER_OBJECT_CREATED type=VB object=%p length=%u usage=0x%08lX "
+                    "fvf=0x%08lX pool=%u hr=0x%08lX",
+                    *buffer, length,
+                    static_cast<unsigned long>(usage),
+                    static_cast<unsigned long>(fvf),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+            else
+            {
+                Log(
+                    "BUFFER_CREATE_FAILED type=VB length=%u usage=0x%08lX "
+                    "fvf=0x%08lX pool=%u hr=0x%08lX",
+                    length,
+                    static_cast<unsigned long>(usage),
+                    static_cast<unsigned long>(fvf),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceCreateIndexBuffer(
+        IDirect3DDevice9* self,
+        UINT length,
+        DWORD usage,
+        D3DFORMAT format,
+        D3DPOOL pool,
+        IDirect3DIndexBuffer9** buffer,
+        HANDLE* sharedHandle)
+    {
+        const HRESULT hr = g_realDeviceCreateIndexBuffer
+            ? g_realDeviceCreateIndexBuffer(
+                self, length, usage, format, pool, buffer, sharedHandle)
+            : D3DERR_INVALIDCALL;
+
+        if (InterlockedIncrement(&g_bufferCreateLogCount) <= 2048)
+        {
+            if (SUCCEEDED(hr) && buffer && *buffer)
+            {
+                Log(
+                    "BUFFER_OBJECT_CREATED type=IB object=%p length=%u usage=0x%08lX "
+                    "format=%u pool=%u hr=0x%08lX",
+                    *buffer, length,
+                    static_cast<unsigned long>(usage),
+                    static_cast<unsigned>(format),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+            else
+            {
+                Log(
+                    "BUFFER_CREATE_FAILED type=IB length=%u usage=0x%08lX "
+                    "format=%u pool=%u hr=0x%08lX",
+                    length,
+                    static_cast<unsigned long>(usage),
+                    static_cast<unsigned>(format),
+                    static_cast<unsigned>(pool),
+                    static_cast<unsigned long>(hr));
+            }
+        }
+        return hr;
+    }
+
     HRESULT WINAPI HookDeviceCreateVertexDeclaration(
         IDirect3DDevice9* self,
         const D3DVERTEXELEMENT9* elements,
@@ -2483,6 +2578,10 @@ namespace
             reinterpret_cast<DeviceSetStreamSourceFreqFn>(original[kDeviceSetStreamSourceFreqSlot]);
         g_realDeviceSetIndices =
             reinterpret_cast<DeviceSetIndicesFn>(original[kDeviceSetIndicesSlot]);
+        g_realDeviceCreateVertexBuffer =
+            reinterpret_cast<DeviceCreateVertexBufferFn>(original[kDeviceCreateVertexBufferSlot]);
+        g_realDeviceCreateIndexBuffer =
+            reinterpret_cast<DeviceCreateIndexBufferFn>(original[kDeviceCreateIndexBufferSlot]);
 
         hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
@@ -2517,6 +2616,10 @@ namespace
             hooked[kDeviceSetStreamSourceFreqSlot] =
                 reinterpret_cast<void*>(HookDeviceSetStreamSourceFreq);
             hooked[kDeviceSetIndicesSlot] = reinterpret_cast<void*>(HookDeviceSetIndices);
+            hooked[kDeviceCreateVertexBufferSlot] =
+                reinterpret_cast<void*>(HookDeviceCreateVertexBuffer);
+            hooked[kDeviceCreateIndexBufferSlot] =
+                reinterpret_cast<void*>(HookDeviceCreateIndexBuffer);
         }
         if (g_captureShaderConstants)
         {
