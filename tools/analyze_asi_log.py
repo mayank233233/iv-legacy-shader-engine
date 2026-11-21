@@ -60,6 +60,7 @@ def shader_key(shader: dict[str, Any] | None, pointer: str | None) -> str:
 
 def analyze_log(path: Path) -> dict[str, Any]:
     shaders_by_address: dict[tuple[str, str], dict[str, Any]] = {}
+    fallback_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     draws: list[dict[str, Any]] = []
     present_failures = 0
     reset_failures = 0
@@ -96,6 +97,21 @@ def analyze_log(path: Path) -> dict[str, Any]:
             shaders_by_address[(stage, address)] = shader
             continue
 
+        if "SHADER_FALLBACK_OBJECT_MAP " in raw_line:
+            fields = parse_fields(raw_line)
+            address = normalize_pointer(fields.get("object"))
+            source_hash = fields.get("source_hash", "").lower()
+            target_hash = fields.get("target_hash", "").lower()
+            if address is None or not source_hash or not target_hash:
+                continue
+            fallback_by_address[("PS", address)] = {
+                "source_hash": source_hash,
+                "target_hash": target_hash,
+                "target_profile": fields.get("target_profile", "unknown").lower(),
+                "log_line": line_number,
+            }
+            continue
+
         if "DRAW_CALL " in raw_line:
             fields = parse_fields(raw_line)
             try:
@@ -112,6 +128,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
             ps_pointer = normalize_pointer(fields.get("bound_ps"))
             vs = shaders_by_address.get(("VS", vs_pointer)) if vs_pointer else None
             ps = shaders_by_address.get(("PS", ps_pointer)) if ps_pointer else None
+            ps_fallback = fallback_by_address.get(("PS", ps_pointer)) if ps_pointer else None
             draws.append({
                 "seq": sequence,
                 "frame": frame,
@@ -131,6 +148,8 @@ def analyze_log(path: Path) -> dict[str, Any]:
                 "bound_ps_object": ps_pointer,
                 "vertex_shader": vs,
                 "pixel_shader": ps,
+                "pixel_shader_fallback": ps_fallback,
+                "pixel_shader_source_hash": ps_fallback["source_hash"] if ps_fallback else None,
                 "vertex_shader_key": shader_key(vs, vs_pointer),
                 "pixel_shader_key": shader_key(ps, ps_pointer),
                 "hr": f"0x{result_hr & 0xFFFFFFFF:08X}",
@@ -157,6 +176,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
     primitive_counts: Counter[str] = Counter()
     failed_draws = 0
     unresolved_shader_references = 0
+    fallback_usage: dict[tuple[str, str], dict[str, Any]] = {}
 
     for draw in draws:
         frame_counts[draw["frame"]] += 1
@@ -210,6 +230,23 @@ def analyze_log(path: Path) -> dict[str, Any]:
         pair["primitive_types"][draw["primitive_name"]] += draw["primitive_count"]
         pair["frames"].add(draw["frame"])
 
+        fallback = draw["pixel_shader_fallback"]
+        if fallback:
+            fallback_key = (
+                fallback["source_hash"], fallback["target_hash"]
+            )
+            item = fallback_usage.setdefault(fallback_key, {
+                "source_shader_hash": fallback["source_hash"],
+                "replacement_shader_hash": fallback["target_hash"],
+                "replacement_profile": fallback["target_profile"],
+                "draw_calls": 0,
+                "primitive_submissions": 0,
+                "frames": set(),
+            })
+            item["draw_calls"] += 1
+            item["primitive_submissions"] += draw["primitive_count"]
+            item["frames"].add(draw["frame"])
+
     normalized_shader_usage = []
     for key, item in shader_usage.items():
         normalized_shader_usage.append({
@@ -240,6 +277,17 @@ def analyze_log(path: Path) -> dict[str, Any]:
         key=lambda x: (-x["draw_calls"], x["shader_pair"])
     )
 
+    normalized_fallback_usage = [
+        {
+            **item,
+            "frames": sorted(item["frames"]),
+        }
+        for item in fallback_usage.values()
+    ]
+    normalized_fallback_usage.sort(
+        key=lambda x: (-x["draw_calls"], x["source_shader_hash"])
+    )
+
     return {
         "schema_version": 1,
         "input_file": str(path),
@@ -260,6 +308,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
         "primitive_submissions_by_type": dict(sorted(primitive_counts.items())),
         "shader_usage": normalized_shader_usage,
         "shader_pair_usage": normalized_pair_usage,
+        "shader_fallback_usage": normalized_fallback_usage,
         "draw_calls": draws,
         "scope_note": (
             "Counts are log-observed D3D9 submissions, not GPU time, "
