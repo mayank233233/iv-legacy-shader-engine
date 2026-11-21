@@ -1,5 +1,15 @@
 # Changelog
 
+## Prototype 0.4-alpha — D3D9 telemetry ASI
+
+- Added a Win32/x86 ASI bootstrap with GTAIV.exe / 1.0.0.0 file-version gating, log and INI creation.
+- Added an IAT hook for the main executable's direct d3d9.dll!Direct3DCreate9 import.
+- Added per-object IDirect3D9 and IDirect3DDevice9 vtable instrumentation for adapter identity, caps, format checks, device creation, shader profile tokens, render/depth surfaces, Present failures and Reset.
+- The telemetry component deliberately does not spoof SM3 capabilities, translate or replace shader bytecode, or patch GTA IV executable instructions.
+- Added a synthetic GTAIV.exe host and D3D9 hook runtime smoke test to Windows x86 CI. This test validates the plugin hook mechanism; it is not a substitute for the actual GTA IV executable or GMA 3100 hardware.
+- Run #21 compiled and linked the initial x86 ASI; later CI is validating the expanded hook set and synthetic runtime test.
+
+
 ## Research update — 2026-11-21
 
 - Added `docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md` with hardware capability findings, sampled GTA IV SM3 shader analysis, Minecraft optimization technique mapping, GTA IV community-mod compatibility notes, and a game-loaded ASI/D3D9 development architecture.
