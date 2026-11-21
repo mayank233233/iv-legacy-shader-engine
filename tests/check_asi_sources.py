@@ -42,6 +42,14 @@ required_source_markers = (
     "DEVICE_RESET_REQUEST",
     "CaptureShaderBytecode",
     "CaptureMaxFiles",
+    "EnableShaderFallbacks",
+    "LoadConfiguredPS2Fallback",
+    "ValidatePS20FallbackBytecode",
+    "SHADER_FALLBACK_ATTEMPT",
+    "SHADER_FALLBACK_APPLIED",
+    "SHADER_FALLBACK_NOT_MAPPED",
+    "SHADER_FALLBACK_CREATE_FAILED",
+    "SHADER_FALLBACKS_DISABLED reason=strict_version_gate_disabled",
     "CaptureDrawTelemetry",
     "CaptureDrawMaxCalls",
     "SHADER_OBJECT_CREATED",
@@ -75,6 +83,16 @@ if 'extern "C" __declspec(dllexport) void InitializeASI()' not in source:
     fail("ASI must directly export the C-linkage InitializeASI entry point")
 if 'GetProcAddress(asi, "InitializeASI")' not in SMOKE_SOURCE.read_text(encoding="utf-8"):
     fail("synthetic runtime smoke test must resolve InitializeASI by its public export name")
+
+smoke_source = SMOKE_SOURCE.read_text(encoding="utf-8")
+if "BuildSyntheticPs3Shader();" not in smoke_source:
+    fail("synthetic runtime test must construct a PS3 pixel shader source")
+if "mappedShaderVersion != 0xFFFF0200UL" not in smoke_source:
+    fail("synthetic runtime test must verify PS2 bytecode was substituted")
+if "unmappedShaderVersion != 0xFFFF0300UL" not in smoke_source:
+    fail("synthetic runtime test must verify unmapped PS3 bytecode passes through unchanged")
+if "EnableShaderFallbacks" not in smoke_source or "ShaderFallbacks" not in smoke_source:
+    fail("synthetic runtime test must create an explicit opt-in fallback map")
 
 if "wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath)" not in source:
     fail("path setup must preserve the full executable path for version validation")
