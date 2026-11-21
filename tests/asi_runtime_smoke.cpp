@@ -73,6 +73,13 @@ namespace
             "SMOKE_UNHANDLED_EXCEPTION code=0x%08lX address=%p\n",
             static_cast<unsigned long>(code), address);
         std::fflush(stderr);
+        char logBuffer[32768] = {};
+        if (ReadLog(logBuffer, sizeof(logBuffer)))
+        {
+            std::fprintf(stderr, "SMOKE_LOG_DUMP_BEGIN\\n%s\\nSMOKE_LOG_DUMP_END\\n",
+                logBuffer);
+            std::fflush(stderr);
+        }
         return EXCEPTION_EXECUTE_HANDLER;
     }
 
