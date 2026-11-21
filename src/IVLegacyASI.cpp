@@ -283,7 +283,7 @@ namespace
             Log(
                 "D3D9_GET_DEVICE_CAPS adapter=%u type=%u VS=0x%08lX PS=0x%08lX "
                 "MaxSimTextures=%u MaxTextureStages=%u MaxRTs=%u MaxVSConst=%u "
-                "VS20Temps=%u VS20Slots=%u PS20Temps=%u PS20Slots=%u "
+                "VS20Temps=%u VS20DynamicFlow=%u PS20Temps=%u PS20Slots=%u "
                 "PS20DynamicFlow=%u",
                 adapter,
                 static_cast<unsigned>(deviceType),
@@ -294,7 +294,7 @@ namespace
                 caps->NumSimultaneousRTs,
                 caps->MaxVertexShaderConst,
                 caps->VS20Caps.NumTemps,
-                caps->VS20Caps.NumInstructionSlots,
+                caps->VS20Caps.DynamicFlowControlDepth,
                 caps->PS20Caps.NumTemps,
                 caps->PS20Caps.NumInstructionSlots,
                 caps->PS20Caps.DynamicFlowControlDepth);
