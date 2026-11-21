@@ -145,3 +145,30 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 | Render original GTA IV scenes on GMA 3100 | NOT TESTED |
 | Measure average / 1% low FPS against the 30 FPS objective | NOT TESTED |
 
+
+ 
+## Prototype 0.5.1-alpha verification — 2026-11-21
+
+- Exact game target remains the original PC GTA IV `GTAIV.exe` file version `1.0.0.0`; the ASI version gate is strict by default.
+- Latest Windows x86 CI: [run #93](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44886129718), commit `272d9d44ac83e08007510bc60beafdb50b39680f`; all workflow steps passed.
+- Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44886129718/artifacts/14700107779), artifact ID `14700107779`; SHA-256 `967a6c752d4c88d6aaf0760850ada91a6da3c5a36ede1468e41f89ecb6b1e6c2`.
+- Exported C-linkage `InitializeASI` is resolved by exact name and invoked by the synthetic host. The one-time initialization guard prevents duplicate bootstrap between the ASI-loader entry point and the LoadLibrary fallback.
+- Opt-in draw telemetry now records successful-Present frame index, draw method, primitive type/count, active VS/PS object addresses and HRESULT. It covers DrawPrimitive, DrawIndexedPrimitive, DrawPrimitiveUP and DrawIndexedPrimitiveUP at D3D9 slots 81–84. It remains disabled by default and is bounded by CaptureDrawMaxCalls.
+- Shader object creation is logged with stage, object address, profile, byte count and bytecode hash. The new offline `tools/analyze_asi_log.py` correlates those records with draw submissions and aggregates by shader pair, method, primitive type and frame. Its deterministic log fixture test passes in CI.
+- Added `tools/inspect_gtaiv_executable.py`, a read-only PE32 x86 inspector for normal/delay imports, D3D9 factory import presence, file version and SHA-256. Its synthetic PE self-test passes. **It has not yet been run against the user's original GTAIV.exe.**
+- The captured files remain synthetic SM2 test shaders: one VS2.0 and one PS2.0. The offline downlevel audit reports zero eligible conversions for these captures (the PS is already PS2; the VS is outside the pixel-only audit tool's scope). The audit's separate synthetic PS3.0 self-test exercises a restricted candidate path, not a real GTA IV shader.
+- CI success does not verify original-game ASI loading, the Intel GMA 3100 driver, visual correctness, gameplay, or FPS.
+
+### Remaining integration gates
+
+| Gate | State |
+|---|---|
+| Inspect actual original GTAIV.exe file version and PE32 import tables | TOOL READY; FILE NOT INSPECTED |
+| Verify direct or delay-loaded d3d9.dll!Direct3DCreate9 import in original GTAIV.exe | NOT VERIFIED |
+| Load ASI through actual loader in original GTA IV 1.0.0.0 | NOT TESTED |
+| Capture real game PS3.0/VS3.0 bytecode and correlate with draws | NOT RUN |
+| Map real runtime shaders to GTA IV shader disassembly/metadata | NOT RUN |
+| Implement and integrate real SM2 replacement shaders | NOT IMPLEMENTED |
+| Render original GTA IV scenes on Intel GMA 3100 | NOT TESTED |
+| Measure FPS / 30 FPS objective | NOT TESTED |
+
