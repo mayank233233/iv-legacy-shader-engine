@@ -109,6 +109,9 @@ jobs:
           if ($captured.parsed_shader_count -lt 2) { throw "Expected at least two captured runtime shaders; found $($captured.parsed_shader_count)." }
           if ($captured.failed_shader_count -ne 0) { throw 'One or more captured runtime shaders failed token parsing.' }
           if ($captured.profile_counts.'vs_2_0' -lt 1 -or $captured.profile_counts.'ps_2_0' -lt 1) { throw 'Expected both vertex and pixel SM2 captures.' }
+          New-Item -ItemType Directory -Force build\bin\SM2Candidates | Out-Null
+          python tools\audit_sm3_to_sm2.py build\bin\IVLegacyCaptures --emit-dir build\bin\SM2Candidates --report build\bin\captured_shader_downlevel_audit.json --max-samplers 16 --dependent-read-limit 3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage build outputs with repository-relative paths
         shell: pwsh
@@ -120,7 +123,9 @@ jobs:
           Copy-Item build\out\*.asm artifact\build\out\
           Copy-Item build\out\shader_inventory.json artifact\build\out\
           Copy-Item build\bin\captured_shader_inventory.json artifact\build\bin\
+          Copy-Item build\bin\captured_shader_downlevel_audit.json artifact\build\bin\
           Copy-Item build\bin\IVLegacyCaptures artifact\build\bin\ -Recurse
+          Copy-Item build\bin\SM2Candidates artifact\build\bin\ -Recurse
           Copy-Item build\bin\D3D9ShaderProbe.exe artifact\build\bin\
           Copy-Item build\bin\IVLegacyASI.asi artifact\
           Copy-Item build\run_probe.bat artifact\build\
