@@ -25,7 +25,7 @@
 | Local source sanity tests | PASS |
 | FXC compilation | NOT RUN in this environment |
 | MSVC x86 compilation | NOT RUN in this environment |
-| GitHub Actions Windows x86 build | PENDING workflow execution |
+| GitHub Actions Windows x86 build | IN PROGRESS — latest run `44876439909` is installing the June 2010 DirectX SDK; FXC compile and MSVC build steps have not run yet |
 | D3D9 runtime shader creation | NOT RUN |
 | HAL software-VP rendering on GMA 3100 | NOT RUN |
 | HAL hardware-VP rendering on GMA 3100 | NOT RUN |
