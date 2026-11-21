@@ -21,6 +21,9 @@ namespace
     FakeComObject g_fakeVertexShader = {};
     FakeComObject g_fakePixelShaderObjects[4] = {};
     FakeComObject g_fakeTexture = {};
+    FakeComObject g_fakeVertexDeclaration = {};
+    FakeComObject g_fakeVertexBuffer = {};
+    FakeComObject g_fakeIndexBuffer = {};
     void* g_fakeShaderVTable[3] = {};
     void* g_fakeTextureVTable[3] = {};
     DWORD g_fakeLastPixelShaderVersion = 0;
@@ -424,6 +427,44 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceCreateVertexDeclaration(
+        IDirect3DDevice9*,
+        const D3DVERTEXELEMENT9*,
+        IDirect3DVertexDeclaration9** declaration)
+    {
+        if (!declaration)
+            return D3DERR_INVALIDCALL;
+        *declaration = reinterpret_cast<IDirect3DVertexDeclaration9*>(&g_fakeVertexDeclaration);
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetVertexDeclaration(
+        IDirect3DDevice9*, IDirect3DVertexDeclaration9*)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetFVF(IDirect3DDevice9*, DWORD)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetStreamSource(
+        IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9*, UINT, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetStreamSourceFreq(IDirect3DDevice9*, UINT, UINT)
+    {
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceSetIndices(IDirect3DDevice9*, IDirect3DIndexBuffer9*)
+    {
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeDeviceCreateTexture(
         IDirect3DDevice9*,
         UINT,
@@ -566,6 +607,12 @@ namespace
         g_fakeDeviceVTable[23] = reinterpret_cast<void*>(FakeDeviceCreateTexture);
         g_fakeDeviceVTable[57] = reinterpret_cast<void*>(FakeDeviceSetRenderState);
         g_fakeDeviceVTable[67] = reinterpret_cast<void*>(FakeDeviceSetTextureStageState);
+        g_fakeDeviceVTable[86] = reinterpret_cast<void*>(FakeDeviceCreateVertexDeclaration);
+        g_fakeDeviceVTable[87] = reinterpret_cast<void*>(FakeDeviceSetVertexDeclaration);
+        g_fakeDeviceVTable[89] = reinterpret_cast<void*>(FakeDeviceSetFVF);
+        g_fakeDeviceVTable[100] = reinterpret_cast<void*>(FakeDeviceSetStreamSource);
+        g_fakeDeviceVTable[102] = reinterpret_cast<void*>(FakeDeviceSetStreamSourceFreq);
+        g_fakeDeviceVTable[104] = reinterpret_cast<void*>(FakeDeviceSetIndices);
         g_fakeDevice.vtable = g_fakeDeviceVTable;
 
         g_fakeShaderVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
@@ -579,6 +626,9 @@ namespace
         g_fakeTextureVTable[1] = reinterpret_cast<void*>(FakeAddRef);
         g_fakeTextureVTable[2] = reinterpret_cast<void*>(FakeRelease);
         g_fakeTexture.vtable = g_fakeTextureVTable;
+        g_fakeVertexDeclaration.vtable = g_fakeShaderVTable;
+        g_fakeVertexBuffer.vtable = g_fakeTextureVTable;
+        g_fakeIndexBuffer.vtable = g_fakeTextureVTable;
     }
 
     bool PatchImportToFakeCreate9()
