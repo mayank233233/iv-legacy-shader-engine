@@ -185,6 +185,15 @@ def make_instruction(opcode: int, *operands: int, controls: int = 0,
     return token
 
 
+def emit_instruction(words: list[int], opcode: int, *operands: int,
+                     controls: int = 0, predicated: bool = False) -> None:
+    """Append a complete instruction token followed by its parameter tokens."""
+    words.append(make_instruction(
+        opcode, *operands, controls=controls, predicated=predicated
+    ))
+    words.extend(operands)
+
+
 def parse_ps3(data: bytes) -> tuple[list[int], list[Instruction]]:
     if len(data) < 8 or len(data) % 4:
         raise AuditError("bytecode must be DWORD-aligned and contain a version plus END")
@@ -738,32 +747,31 @@ def _self_test() -> None:
     # A small valid SM3 shader using only ps_2_0 operations. Inputs:
     # v0 = TEXCOORD0 -> t0, v1 = COLOR0 -> v0.
     words = [PS3_VERSION]
-    words += [
-        make_instruction(OP_DCL,
-            (USAGE_TEXCOORD | (0 << 16)),
-            make_register(REG_INPUT, 0)),
-        make_instruction(OP_DCL,
-            (USAGE_COLOR | (0 << 16)),
-            make_register(REG_INPUT, 1)),
-        make_instruction(OP_DCL,
-            (2 << 27),
-            make_register(REG_SAMPLER, 0)),
-        make_instruction(OP_MOV,
-            make_register(REG_TEMP, 0),
-            make_source(REG_INPUT, 0)),
-        make_instruction(OP_TEX,
-            make_register(REG_TEMP, 1),
-            make_source(REG_TEMP, 0),
-            make_source(REG_SAMPLER, 0)),
-        make_instruction(2,
-            make_register(REG_TEMP, 2),
-            make_source(REG_TEMP, 1),
-            make_source(REG_INPUT, 1)),
-        make_instruction(OP_MOV,
-            make_register(REG_COLOROUT, 0),
-            make_source(REG_TEMP, 2)),
-        OP_END,
-    ]
+    emit_instruction(words, OP_DCL,
+        (USAGE_TEXCOORD | (0 << 16)),
+        make_register(REG_INPUT, 0))
+    emit_instruction(words, OP_DCL,
+        (USAGE_COLOR | (0 << 16)),
+        make_register(REG_INPUT, 1))
+    emit_instruction(words, OP_DCL,
+        (2 << 27),
+        make_register(REG_SAMPLER, 0))
+    emit_instruction(words, OP_MOV,
+        make_register(REG_TEMP, 0),
+        make_source(REG_INPUT, 0))
+    emit_instruction(words, OP_TEX,
+        make_register(REG_TEMP, 1),
+        make_source(REG_TEMP, 0),
+        make_source(REG_SAMPLER, 0))
+    emit_instruction(words, 2,
+        make_register(REG_TEMP, 2),
+        make_source(REG_TEMP, 1),
+        make_source(REG_INPUT, 1))
+    emit_instruction(words, OP_MOV,
+        make_register(REG_COLOROUT, 0),
+        make_source(REG_TEMP, 2))
+    words.append(OP_END)
+
     source = struct.pack("<" + "I" * len(words), *words)
     audit = audit_and_lower_ps3(source)
     assert audit["eligible"], audit["reasons"]
@@ -783,45 +791,56 @@ def _self_test() -> None:
     add_source = lowered_words[20]
     assert reg_type(add_source) == REG_INPUT and reg_number(add_source) == 0
 
-    def build(*items: int) -> bytes:
+    def pack_words(*items: int) -> bytes:
         return struct.pack("<" + "I" * len(items), *items)
 
+    def one_shader(opcode: int, *operands: int) -> bytes:
+        stream = [PS3_VERSION]
+        emit_instruction(stream, opcode, *operands)
+        stream.append(OP_END)
+        return pack_words(*stream)
+
     # Reject SM3-only dynamic flow and gradient instructions.
-    flow_shader = build(
-        PS3_VERSION,
-        make_instruction(41, make_source(REG_TEMP, 0), make_source(REG_TEMP, 1)),
-        OP_END,
+    flow_shader = one_shader(
+        41, make_source(REG_TEMP, 0), make_source(REG_TEMP, 1)
     )
     flow_result = audit_and_lower_ps3(flow_shader)
-    assert not flow_result["eligible"] and any("not in the ps_2_0 instruction set" in x for x in flow_result["reasons"])
+    assert not flow_result["eligible"] and any(
+        "not in the ps_2_0 instruction set" in x for x in flow_result["reasons"]
+    )
 
-    dsx_shader = build(PS3_VERSION, make_instruction(91, make_register(REG_TEMP, 0), make_source(REG_TEMP, 1)), OP_END)
+    dsx_shader = one_shader(
+        91, make_register(REG_TEMP, 0), make_source(REG_TEMP, 1)
+    )
     dsx_result = audit_and_lower_ps3(dsx_shader)
-    assert not dsx_result["eligible"] and any("not in the ps_2_0 instruction set" in x for x in dsx_result["reasons"])
-
-    # Reject r12, arbitrary swizzles and a repeated/masked oC0 write.
-    high_temp = build(
-        PS3_VERSION,
-        make_instruction(OP_MOV, make_register(REG_TEMP, 12), make_source(REG_CONST, 0)),
-        make_instruction(OP_MOV, make_register(REG_COLOROUT, 0), make_source(REG_TEMP, 12)),
-        OP_END,
+    assert not dsx_result["eligible"] and any(
+        "not in the ps_2_0 instruction set" in x for x in dsx_result["reasons"]
     )
-    assert not audit_and_lower_ps3(high_temp)["eligible"]
 
-    arbitrary_swizzle = build(
-        PS3_VERSION,
-        make_instruction(OP_MOV, make_register(REG_TEMP, 0), make_source(REG_CONST, 0, swizzle=0xE1)),
-        make_instruction(OP_MOV, make_register(REG_COLOROUT, 0), make_source(REG_TEMP, 0)),
-        OP_END,
-    )
-    assert not audit_and_lower_ps3(arbitrary_swizzle)["eligible"]
+    # Reject r12, arbitrary swizzles and a masked oC0 write.
+    high_temp_words = [PS3_VERSION]
+    emit_instruction(high_temp_words, OP_MOV,
+        make_register(REG_TEMP, 12), make_source(REG_CONST, 0))
+    emit_instruction(high_temp_words, OP_MOV,
+        make_register(REG_COLOROUT, 0), make_source(REG_TEMP, 12))
+    high_temp_words.append(OP_END)
+    assert not audit_and_lower_ps3(pack_words(*high_temp_words))["eligible"]
 
-    masked_output = build(
-        PS3_VERSION,
-        make_instruction(OP_MOV, make_register(REG_COLOROUT, 0, mask=0x7), make_source(REG_CONST, 0)),
-        OP_END,
-    )
-    assert not audit_and_lower_ps3(masked_output)["eligible"]
+    arbitrary_swizzle = [PS3_VERSION]
+    emit_instruction(arbitrary_swizzle, OP_MOV,
+        make_register(REG_TEMP, 0),
+        make_source(REG_CONST, 0, swizzle=0xE1))
+    emit_instruction(arbitrary_swizzle, OP_MOV,
+        make_register(REG_COLOROUT, 0), make_source(REG_TEMP, 0))
+    arbitrary_swizzle.append(OP_END)
+    assert not audit_and_lower_ps3(pack_words(*arbitrary_swizzle))["eligible"]
+
+    masked_output = [PS3_VERSION]
+    emit_instruction(masked_output, OP_MOV,
+        make_register(REG_COLOROUT, 0, mask=0x7),
+        make_source(REG_CONST, 0))
+    masked_output.append(OP_END)
+    assert not audit_and_lower_ps3(pack_words(*masked_output))["eligible"]
 
     print("PASS: conservative ps_3_0 to ps_2_0 downlevel audit self-tests")
 
