@@ -62,6 +62,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
     shaders_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     fallback_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     textures_by_address: dict[str, dict[str, Any]] = {}
+    buffers_by_address: dict[str, dict[str, Any]] = {}
     vertex_declarations: dict[str, dict[str, Any]] = {}
     draws: list[dict[str, Any]] = []
     present_failures = 0
@@ -121,6 +122,23 @@ def analyze_log(path: Path) -> dict[str, Any]:
                 "log_line": line_number,
             }
             textures_by_address[address] = descriptor
+            continue
+
+        if "BUFFER_OBJECT_CREATED " in raw_line:
+            fields = parse_fields(raw_line)
+            address = normalize_pointer(fields.get("object"))
+            if address is not None:
+                buffer_type = fields.get("type", "unknown").upper()
+                buffers_by_address[address] = {
+                    "object": address,
+                    "type": buffer_type,
+                    "length_bytes": int_field(fields, "length"),
+                    "usage": fields.get("usage", "0"),
+                    "fvf": int_field(fields, "fvf"),
+                    "format": int_field(fields, "format"),
+                    "pool": int_field(fields, "pool"),
+                    "log_line": line_number,
+                }
             continue
 
         if "VERTEX_DECL_OBJECT_CREATED " in raw_line:
@@ -253,7 +271,17 @@ def analyze_log(path: Path) -> dict[str, Any]:
                 "vertex_declaration": declaration,
                 "fvf": int_field(fields, "fvf"),
                 "index_buffer_object": index_buffer_pointer,
-                "stream_bindings": stream_bindings,
+                "index_buffer": buffers_by_address.get(index_buffer_pointer) if index_buffer_pointer else None,
+                "stream_bindings": [
+                    {
+                        **stream,
+                        "buffer_descriptor": (
+                            buffers_by_address.get(stream["buffer"])
+                            if stream["buffer"] else None
+                        ),
+                    }
+                    for stream in stream_bindings
+                ],
                 "texture_bindings": texture_bindings,
                 "sampler_state_hash": fields.get("sampler_hash", "").lower() or None,
                 "sampler_state_count": int_field(fields, "sampler_count"),
@@ -497,6 +525,11 @@ def analyze_log(path: Path) -> dict[str, Any]:
         "texture_objects_observed": len(textures_by_address),
         "vertex_declarations_observed": len(vertex_declarations),
         "vertex_input_usage": normalized_vertex_input_usage,
+        "buffer_objects_observed": len(buffers_by_address),
+        "buffer_object_usage": sorted(
+            list(buffers_by_address.values()),
+            key=lambda item: (item["type"], item["object"]),
+        ),
         "draw_calls": draws,
         "scope_note": (
             "Counts are log-observed D3D9 submissions, not GPU time, "
