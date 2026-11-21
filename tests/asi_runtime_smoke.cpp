@@ -728,11 +728,12 @@ int main()
         !HasText("SHADER_OBJECT_CREATED stage=PS"))
         return Fail("Shader object-to-bytecode hash correlation was not logged");
     if (!HasText("DRAW_TELEMETRY_ENABLED") ||
+        !HasText("frame=1") ||
         !HasText("kind=DrawPrimitive") ||
         !HasText("kind=DrawIndexedPrimitive") ||
         !HasText("kind=DrawPrimitiveUP") ||
         !HasText("kind=DrawIndexedPrimitiveUP"))
-        return Fail("One or more D3D9 draw telemetry hooks were not observed");
+        return Fail("One or more D3D9 draw telemetry hooks or frame tags were not observed");
     if (!HasText("SHADER_CAPTURE_ENABLED") ||
         !HasText("SHADER_CAPTURED stage=VS") ||
         !HasText("SHADER_CAPTURED stage=PS"))
