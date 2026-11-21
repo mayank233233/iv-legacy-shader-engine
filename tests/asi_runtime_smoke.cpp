@@ -19,12 +19,13 @@ namespace
     FakeComObject g_fakeD3D9 = {};
     FakeComObject g_fakeDevice = {};
     FakeComObject g_fakeVertexShader = {};
-    FakeComObject g_fakePixelShader = {};
+    FakeComObject g_fakePixelShaderObjects[4] = {};
     FakeComObject g_fakeTexture = {};
     void* g_fakeShaderVTable[3] = {};
     void* g_fakeTextureVTable[3] = {};
     DWORD g_fakeLastPixelShaderVersion = 0;
     volatile LONG g_fakePixelShaderCreateCount = 0;
+    volatile LONG g_fakePixelShaderObjectCount = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
 
@@ -375,7 +376,12 @@ namespace
             return D3DERR_INVALIDCALL;
         g_fakeLastPixelShaderVersion = function[0];
         InterlockedIncrement(&g_fakePixelShaderCreateCount);
-        *shader = reinterpret_cast<IDirect3DPixelShader9*>(&g_fakePixelShader);
+        const LONG objectIndex =
+            InterlockedIncrement(&g_fakePixelShaderObjectCount) - 1;
+        if (objectIndex < 0 || objectIndex >= 4)
+            return D3DERR_OUTOFVIDEOMEMORY;
+        *shader = reinterpret_cast<IDirect3DPixelShader9*>(
+            &g_fakePixelShaderObjects[objectIndex]);
         return D3D_OK;
     }
 
@@ -524,7 +530,8 @@ namespace
         g_fakeShaderVTable[1] = reinterpret_cast<void*>(FakeAddRef);
         g_fakeShaderVTable[2] = reinterpret_cast<void*>(FakeRelease);
         g_fakeVertexShader.vtable = g_fakeShaderVTable;
-        g_fakePixelShader.vtable = g_fakeShaderVTable;
+        for (unsigned i = 0; i < 4; ++i)
+            g_fakePixelShaderObjects[i].vtable = g_fakeShaderVTable;
 
         g_fakeTextureVTable[0] = reinterpret_cast<void*>(FakeQueryInterface);
         g_fakeTextureVTable[1] = reinterpret_cast<void*>(FakeAddRef);
@@ -827,6 +834,8 @@ int main()
     }
 
     IDirect3DVertexShader9* vertexShader = NULL;
+    IDirect3DPixelShader9* fallbackPixelShader = NULL;
+    IDirect3DPixelShader9* unmappedPixelShader = NULL;
     IDirect3DPixelShader9* pixelShader = NULL;
     HRESULT vertexShaderHr = D3DERR_INVALIDCALL;
     HRESULT pixelShaderHr = D3DERR_INVALIDCALL;
@@ -840,11 +849,11 @@ int main()
             reinterpret_cast<const DWORD*>(vertexBytecode), &vertexShader);
 
     fallbackShaderHr = device->CreatePixelShader(
-        g_syntheticPs3PixelShader, &pixelShader);
+        g_syntheticPs3PixelShader, &fallbackPixelShader);
     mappedShaderVersion = g_fakeLastPixelShaderVersion;
 
     unmappedShaderHr = device->CreatePixelShader(
-        g_syntheticPs3PixelShaderAlt, &pixelShader);
+        g_syntheticPs3PixelShaderAlt, &unmappedPixelShader);
     unmappedShaderVersion = g_fakeLastPixelShaderVersion;
 
     if (pixelBytecode)
@@ -852,7 +861,8 @@ int main()
             reinterpret_cast<const DWORD*>(pixelBytecode), &pixelShader);
 
     const HRESULT setVertexShaderHr = device->SetVertexShader(vertexShader);
-    const HRESULT setPixelShaderHr = device->SetPixelShader(pixelShader);
+    // Draw with the actual PS2 replacement object to test end-to-end correlation.
+    const HRESULT setPixelShaderHr = device->SetPixelShader(fallbackPixelShader);
 
     const float vertexConstants[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
     const float pixelConstants[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
@@ -892,6 +902,10 @@ int main()
         vertexShader->Release();
     if (pixelShader)
         pixelShader->Release();
+    if (unmappedPixelShader)
+        unmappedPixelShader->Release();
+    if (fallbackPixelShader)
+        fallbackPixelShader->Release();
     if (fakeTexture)
         fakeTexture->Release();
     device->Release();
