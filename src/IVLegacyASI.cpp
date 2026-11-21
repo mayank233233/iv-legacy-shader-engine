@@ -71,6 +71,7 @@ namespace
     volatile LONG g_setPixelShaderLogCount = 0;
     volatile LONG g_drawCallCount = 0;
     volatile LONG g_presentFrameIndex = 0;
+    volatile LONG g_materialStateLogCount = 0;
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
     PVOID volatile g_currentTextures[16] = {};
@@ -1247,6 +1248,218 @@ namespace
         return hr;
     }
 
+
+
+#pragma pack(push, 1)
+    struct ShaderConstantCaptureHeader
+    {
+        char magic[4];
+        WORD version;
+        WORD stage; // 0 = vertex shader, 1 = pixel shader
+        DWORD frameIndex;
+        DWORD sequence;
+        DWORD startRegister;
+        DWORD vectorCount;
+        DWORD dataByteCount;
+    };
+#pragma pack(pop)
+
+    void CaptureShaderConstantRange(
+        BOOL pixelStage,
+        UINT startRegister,
+        const float* values,
+        UINT vectorCount)
+    {
+        if (!g_captureShaderConstants || !values || vectorCount == 0)
+            return;
+
+        // D3D9 float shader constants are four floats per register.
+        // A single call is bounded to 256 vector registers.
+        if (vectorCount > 256 || startRegister > 255 ||
+            vectorCount > 256 - startRegister)
+        {
+            Log(
+                "SHADER_CONSTANT_CAPTURE_SKIPPED stage=%s start=%u vectors=%u reason=range_limit",
+                pixelStage ? "PS" : "VS", startRegister, vectorCount);
+            return;
+        }
+
+        const LONG sequence = InterlockedIncrement(&g_shaderConstantCaptureCount);
+        if (sequence > static_cast<LONG>(g_captureShaderConstantMaxRecords))
+        {
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            return;
+        }
+
+        const DWORD dataByteCount = vectorCount * 4 * sizeof(float);
+        ShaderConstantCaptureHeader header = {};
+        memcpy(header.magic, "IVCF", 4);
+        header.version = 1;
+        header.stage = pixelStage ? 1 : 0;
+        header.frameIndex = static_cast<DWORD>(
+            InterlockedCompareExchange(&g_presentFrameIndex, 0, 0));
+        header.sequence = static_cast<DWORD>(sequence);
+        header.startRegister = startRegister;
+        header.vectorCount = vectorCount;
+        header.dataByteCount = dataByteCount;
+
+        wchar_t filePath[MAX_PATH] = {};
+        _snwprintf_s(
+            filePath,
+            _countof(filePath),
+            _TRUNCATE,
+            L"%s\\%s_%06lu.bin",
+            g_shaderConstantCaptureDirectory,
+            pixelStage ? L"PS" : L"VS",
+            static_cast<unsigned long>(sequence));
+
+        HANDLE file = CreateFileW(
+            filePath,
+            GENERIC_WRITE,
+            FILE_SHARE_READ,
+            NULL,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            Log(
+                "SHADER_CONSTANT_CAPTURE_FAILED stage=%s sequence=%ld reason=create_file error=%lu",
+                pixelStage ? "PS" : "VS",
+                sequence,
+                static_cast<unsigned long>(GetLastError()));
+            return;
+        }
+
+        DWORD headerWritten = 0;
+        DWORD dataWritten = 0;
+        BOOL writeSucceeded = FALSE;
+        __try
+        {
+            const BOOL headerOk = WriteFile(
+                file, &header, sizeof(header), &headerWritten, NULL);
+            const BOOL dataOk = headerOk && WriteFile(
+                file, values, dataByteCount, &dataWritten, NULL);
+            writeSucceeded = headerOk && dataOk &&
+                headerWritten == sizeof(header) &&
+                dataWritten == dataByteCount;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            writeSucceeded = FALSE;
+        }
+        CloseHandle(file);
+
+        if (!writeSucceeded)
+        {
+            DeleteFileW(filePath);
+            InterlockedDecrement(&g_shaderConstantCaptureCount);
+            Log(
+                "SHADER_CONSTANT_CAPTURE_FAILED stage=%s sequence=%ld reason=write",
+                pixelStage ? "PS" : "VS", sequence);
+            return;
+        }
+
+        Log(
+            "SHADER_CONSTANT_CAPTURED stage=%s sequence=%ld frame=%lu start=%u vectors=%u bytes=%lu",
+            pixelStage ? "PS" : "VS",
+            sequence,
+            static_cast<unsigned long>(header.frameIndex),
+            startRegister,
+            vectorCount,
+            static_cast<unsigned long>(dataByteCount));
+    }
+
+    HRESULT WINAPI HookDeviceSetTexture(
+        IDirect3DDevice9* self,
+        DWORD stage,
+        IDirect3DBaseTexture9* texture)
+    {
+        const HRESULT hr = g_realDeviceSetTexture
+            ? g_realDeviceSetTexture(self, stage, texture)
+            : D3DERR_INVALIDCALL;
+
+        if (SUCCEEDED(hr) && stage < 16)
+        {
+            InterlockedExchangePointer(
+                &g_currentTextures[stage], texture);
+        }
+
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log(
+                "SET_TEXTURE stage=%lu object=%p hr=0x%08lX",
+                static_cast<unsigned long>(stage),
+                texture,
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetSamplerState(
+        IDirect3DDevice9* self,
+        DWORD sampler,
+        D3DSAMPLERSTATETYPE type,
+        DWORD value)
+    {
+        const HRESULT hr = g_realDeviceSetSamplerState
+            ? g_realDeviceSetSamplerState(self, sampler, type, value)
+            : D3DERR_INVALIDCALL;
+
+        const DWORD stateIndex = static_cast<DWORD>(type);
+        if (SUCCEEDED(hr) && sampler < 16 && stateIndex < 14)
+        {
+            InterlockedExchange(
+                &g_samplerStates[sampler][stateIndex],
+                static_cast<LONG>(value));
+        }
+
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_materialStateLogCount) <= 4096)
+        {
+            Log(
+                "SET_SAMPLER_STATE sampler=%lu type=%u value=%lu hr=0x%08lX",
+                static_cast<unsigned long>(sampler),
+                stateIndex,
+                static_cast<unsigned long>(value),
+                static_cast<unsigned long>(hr));
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetVertexShaderConstantF(
+        IDirect3DDevice9* self,
+        UINT startRegister,
+        const float* data,
+        UINT vectorCount)
+    {
+        const HRESULT hr = g_realDeviceSetVertexShaderConstantF
+            ? g_realDeviceSetVertexShaderConstantF(
+                self, startRegister, data, vectorCount)
+            : D3DERR_INVALIDCALL;
+
+        if (SUCCEEDED(hr))
+            CaptureShaderConstantRange(FALSE, startRegister, data, vectorCount);
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetPixelShaderConstantF(
+        IDirect3DDevice9* self,
+        UINT startRegister,
+        const float* data,
+        UINT vectorCount)
+    {
+        const HRESULT hr = g_realDeviceSetPixelShaderConstantF
+            ? g_realDeviceSetPixelShaderConstantF(
+                self, startRegister, data, vectorCount)
+            : D3DERR_INVALIDCALL;
+
+        if (SUCCEEDED(hr))
+            CaptureShaderConstantRange(TRUE, startRegister, data, vectorCount);
+        return hr;
+    }
 
     void LogDrawTelemetry(
         const char* kind,
