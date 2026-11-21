@@ -50,6 +50,8 @@ namespace
     wchar_t g_iniPath[MAX_PATH] = {};
     wchar_t g_captureDirectory[MAX_PATH] = {};
     volatile LONG g_logLock = 0;
+    volatile LONG g_bootstrapStarted = 0;
+    volatile LONG g_bootstrapCompleted = 0;
     volatile LONG g_captureUniqueCount = 0;
     volatile LONG g_capsLogCount = 0;
     volatile LONG g_adapterLogCount = 0;
@@ -1263,6 +1265,33 @@ namespace
             g_telemetryEnabled ? 1 : 0);
         return 0;
     }
+
+    void InitializePluginOnce()
+    {
+        if (InterlockedCompareExchange(&g_bootstrapStarted, 1, 0) == 0)
+        {
+            BootstrapThread(NULL);
+            InterlockedExchange(&g_bootstrapCompleted, 1);
+            return;
+        }
+
+        // Ultimate ASI Loader calls InitializeASI immediately after LoadLibrary.
+        // Another loader may already have started the DllMain fallback worker.
+        while (InterlockedCompareExchange(&g_bootstrapCompleted, 0, 0) == 0)
+            Sleep(0);
+    }
+
+    DWORD WINAPI BootstrapWorkerThread(void*)
+    {
+        InitializePluginOnce();
+        return 0;
+    }
+}
+
+extern "C" void InitializeASI()
+{
+    // Official Ultimate ASI Loader entry point; called outside the loader lock.
+    InitializePluginOnce();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
@@ -1271,7 +1300,9 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
     {
         DisableThreadLibraryCalls(instance);
 
-        HANDLE thread = CreateThread(NULL, 0, BootstrapThread, NULL, 0, NULL);
+        // Compatibility fallback for ASI loaders that only call LoadLibrary.
+        // Keep DllMain limited to creating the worker; initialization runs later.
+        HANDLE thread = CreateThread(NULL, 0, BootstrapWorkerThread, NULL, 0, NULL);
         if (thread)
             CloseHandle(thread);
         else
