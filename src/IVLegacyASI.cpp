@@ -980,7 +980,8 @@ namespace
         DWORD resolvedPathCount)
     {
         if (!g_shaderFallbacksEnabled || !fallbackBytes ||
-            !fallbackByteCount || !resolvedPath || resolvedPathCount == 0)
+            !fallbackByteCount || !resolvedPath || resolvedPathCount == 0 ||
+            g_shaderFallbackIniPath[0] == L'\\0')
         {
             return false;
         }
@@ -1007,6 +1008,13 @@ namespace
             const LONG misses = InterlockedIncrement(&g_shaderFallbackMissCount);
             if (misses <= 128)
                 Log("SHADER_FALLBACK_NOT_MAPPED source_hash=%016llX", sourceHash);
+            return false;
+        }
+        if (copied >= _countof(relativePath) - 1)
+        {
+            Log(
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=map_path_too_long",
+                sourceHash);
             return false;
         }
 
@@ -1120,12 +1128,10 @@ namespace
 
         const bool validSource = GetShaderBytecodeInfo(
             function, TRUE, &sourceVersion, &sourceByteCount, &sourceHash);
-        const DWORD sourceMajor = validSource ? ((sourceVersion >> 8) & 0xFF) : 0;
-
         if (g_realDeviceCreatePixelShader &&
             g_shaderFallbacksEnabled &&
             validSource &&
-            sourceMajor == 3 &&
+            sourceVersion == 0xFFFF0300UL &&
             LoadConfiguredPS2Fallback(
                 sourceHash,
                 &fallbackBytes,
@@ -1738,6 +1744,12 @@ namespace
         const BOOL strictVersion =
             GetPrivateProfileIntW(
                 L"General", L"StrictGTAIV100", 1, g_iniPath) != 0;
+
+        if (!strictVersion && g_shaderFallbacksEnabled)
+        {
+            g_shaderFallbacksEnabled = FALSE;
+            Log("SHADER_FALLBACKS_DISABLED reason=strict_version_gate_disabled");
+        }
 
         if (!ValidateTargetExecutable(strictVersion))
         {
