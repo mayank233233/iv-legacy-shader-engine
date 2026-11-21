@@ -859,6 +859,44 @@ namespace
             : D3DERR_INVALIDCALL;
     }
 
+    void LogShaderObject(
+        const char* stage,
+        BOOL pixelStage,
+        const DWORD* function,
+        HRESULT result,
+        const void* shaderObject)
+    {
+        if (!g_drawTelemetryEnabled && !g_captureShaderBytecode)
+            return;
+
+        DWORD versionToken = 0;
+        DWORD byteCount = 0;
+        unsigned __int64 hash = 0;
+        if (GetShaderBytecodeInfo(
+            function, pixelStage, &versionToken, &byteCount, &hash))
+        {
+            const unsigned major = (versionToken >> 8) & 0xFF;
+            const unsigned minor = versionToken & 0xFF;
+            Log(
+                "SHADER_OBJECT_CREATED stage=%s object=%p profile=%s_%u_%u "
+                "bytes=%lu hash=%016llX hr=0x%08lX",
+                stage,
+                shaderObject,
+                stage,
+                major,
+                minor,
+                static_cast<unsigned long>(byteCount),
+                hash,
+                static_cast<unsigned long>(result));
+        }
+        else
+        {
+            Log(
+                "SHADER_OBJECT_CREATED stage=%s object=%p profile=unparsed hr=0x%08lX",
+                stage, shaderObject, static_cast<unsigned long>(result));
+        }
+    }
+
     HRESULT WINAPI HookDeviceCreateVertexShader(
         IDirect3DDevice9* self,
         const DWORD* function,
@@ -868,6 +906,8 @@ namespace
             ? g_realDeviceCreateVertexShader(self, function, shader)
             : D3DERR_INVALIDCALL;
         LogShaderProfile("VS", function, hr);
+        if (SUCCEEDED(hr) && shader && *shader)
+            LogShaderObject("VS", FALSE, function, hr, *shader);
         CaptureShaderBytecode(L"VS", FALSE, function);
         return hr;
     }
@@ -881,6 +921,8 @@ namespace
             ? g_realDeviceCreatePixelShader(self, function, shader)
             : D3DERR_INVALIDCALL;
         LogShaderProfile("PS", function, hr);
+        if (SUCCEEDED(hr) && shader && *shader)
+            LogShaderObject("PS", TRUE, function, hr, *shader);
         CaptureShaderBytecode(L"PS", TRUE, function);
         return hr;
     }
@@ -1132,12 +1174,15 @@ namespace
         hooked[kDeviceSetDepthStencilSurfaceSlot] = reinterpret_cast<void*>(HookDeviceSetDepthStencilSurface);
         hooked[kDeviceCreateVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
         hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
-        hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
-        hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
-        hooked[kDeviceDrawPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitive);
-        hooked[kDeviceDrawIndexedPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitive);
-        hooked[kDeviceDrawPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitiveUP);
-        hooked[kDeviceDrawIndexedPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
+        if (g_drawTelemetryEnabled)
+        {
+            hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
+            hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
+            hooked[kDeviceDrawPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitive);
+            hooked[kDeviceDrawIndexedPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitive);
+            hooked[kDeviceDrawPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitiveUP);
+            hooked[kDeviceDrawIndexedPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
+        }
 
         DWORD oldProtection = 0;
         if (!VirtualProtect(objectVTable, sizeof(void*), PAGE_READWRITE, &oldProtection))
