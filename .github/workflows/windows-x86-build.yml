@@ -74,6 +74,16 @@ jobs:
           if ($machine -ne 0x14c) { throw ("Expected x86 PE machine 0x14c; found 0x{0:x}" -f $machine) }
           Write-Host "Verified x86 PE ASI: $($asi.Length) bytes"
 
+      - name: Run D3D9 ASI hook runtime smoke test
+        shell: pwsh
+        run: |
+          rc.exe /nologo /fo build\bin\test_gtaiv_version.res tests\test_gtaiv_version.rc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cl.exe /nologo /EHsc /W4 /O2 /Fe:build\bin\GTAIV.exe tests\asi_runtime_smoke.cpp build\bin\test_gtaiv_version.res /link d3d9.lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & build\bin\GTAIV.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Stage build outputs with repository-relative paths
         shell: pwsh
         run: |
