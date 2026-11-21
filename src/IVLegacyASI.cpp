@@ -78,6 +78,10 @@ namespace
     BOOL g_telemetryEnabled = TRUE;
     BOOL g_captureShaderBytecode = FALSE;
     DWORD g_captureMaxFiles = 1024;
+    BOOL g_shaderFallbacksEnabled = FALSE;
+    wchar_t g_shaderFallbackIniPath[MAX_PATH] = {};
+    volatile LONG g_shaderFallbackAppliedCount = 0;
+    volatile LONG g_shaderFallbackMissCount = 0;
 
     typedef IDirect3D9* (WINAPI* Direct3DCreate9Fn)(UINT);
     typedef HRESULT (WINAPI* D3D9GetAdapterIdentifierFn)(
@@ -428,6 +432,12 @@ namespace
         *slash = L'\0';
         _snwprintf_s(g_logPath, MAX_PATH, _TRUNCATE, L"%s\\IVLegacy.log", g_gameDirectory);
         _snwprintf_s(g_iniPath, MAX_PATH, _TRUNCATE, L"%s\\IVLegacy.ini", g_gameDirectory);
+        _snwprintf_s(
+            g_shaderFallbackIniPath,
+            MAX_PATH,
+            _TRUNCATE,
+            L"%s\\IVLegacyShaderFallbacks.ini",
+            g_gameDirectory);
 
         g_logFile = CreateFileW(
             g_logPath,
@@ -453,6 +463,8 @@ namespace
                 L"General", L"CaptureDrawTelemetry", L"0", g_iniPath);
             WritePrivateProfileStringW(
                 L"General", L"CaptureDrawMaxCalls", L"4096", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"EnableShaderFallbacks", L"0", g_iniPath);
         }
     }
 
@@ -923,14 +935,245 @@ namespace
         return hr;
     }
 
+    bool ValidatePS20FallbackBytecode(
+        const DWORD* words,
+        DWORD byteCount)
+    {
+        if (!words || byteCount < sizeof(DWORD) * 2 ||
+            (byteCount % sizeof(DWORD)) != 0 ||
+            words[0] != 0xFFFF0200UL)
+        {
+            return false;
+        }
+
+        const DWORD wordCount = byteCount / sizeof(DWORD);
+        DWORD index = 1;
+        while (index < wordCount)
+        {
+            const DWORD instruction = words[index++];
+            const DWORD opcode = instruction & 0xFFFFUL;
+            if (opcode == 0xFFFFUL) // D3DSIO_END
+                return index == wordCount;
+
+            if (opcode == 0xFFFEUL) // D3DSIO_COMMENT
+            {
+                const DWORD commentWords = (instruction >> 16) & 0x7FFFUL;
+                if (commentWords > wordCount - index)
+                    return false;
+                index += commentWords;
+                continue;
+            }
+
+            const DWORD parameterWords = (instruction >> 24) & 0x0FUL;
+            if (parameterWords > wordCount - index)
+                return false;
+            index += parameterWords;
+        }
+        return false;
+    }
+
+    bool LoadConfiguredPS2Fallback(
+        unsigned __int64 sourceHash,
+        BYTE** fallbackBytes,
+        DWORD* fallbackByteCount,
+        wchar_t* resolvedPath,
+        DWORD resolvedPathCount)
+    {
+        if (!g_shaderFallbacksEnabled || !fallbackBytes ||
+            !fallbackByteCount || !resolvedPath || resolvedPathCount == 0)
+        {
+            return false;
+        }
+
+        *fallbackBytes = NULL;
+        *fallbackByteCount = 0;
+        resolvedPath[0] = L'\\0';
+
+        wchar_t key[32] = {};
+        _snwprintf_s(
+            key, _countof(key), _TRUNCATE,
+            L"%016llX", sourceHash);
+
+        wchar_t relativePath[MAX_PATH] = {};
+        const DWORD copied = GetPrivateProfileStringW(
+            L"ShaderFallbacks",
+            key,
+            L"",
+            relativePath,
+            _countof(relativePath),
+            g_shaderFallbackIniPath);
+        if (copied == 0)
+        {
+            const LONG misses = InterlockedIncrement(&g_shaderFallbackMissCount);
+            if (misses <= 128)
+                Log("SHADER_FALLBACK_NOT_MAPPED source_hash=%016llX", sourceHash);
+            return false;
+        }
+
+        // Only game-directory-relative paths are accepted. Reject absolute,
+        // drive-qualified and parent-traversal paths from the external INI.
+        if (relativePath[0] == L'\\' || relativePath[0] == L'/' ||
+            wcschr(relativePath, L':') != NULL ||
+            wcsstr(relativePath, L"..") != NULL)
+        {
+            Log(
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=unsafe_relative_path",
+                sourceHash);
+            return false;
+        }
+
+        for (wchar_t* ch = relativePath; *ch; ++ch)
+        {
+            if (*ch == L'/')
+                *ch = L'\\';
+        }
+
+        if (_snwprintf_s(
+                resolvedPath,
+                resolvedPathCount,
+                _TRUNCATE,
+                L"%s\\%s",
+                g_gameDirectory,
+                relativePath) < 0)
+        {
+            Log(
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=path_too_long",
+                sourceHash);
+            return false;
+        }
+
+        HANDLE file = CreateFileW(
+            resolvedPath,
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            NULL,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            Log(
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=file_open_failed error=%lu",
+                sourceHash,
+                static_cast<unsigned long>(GetLastError()));
+            return false;
+        }
+
+        LARGE_INTEGER fileSize = {};
+        if (!GetFileSizeEx(file, &fileSize) ||
+            fileSize.QuadPart < sizeof(DWORD) * 2 ||
+            fileSize.QuadPart > 1024 * 1024 ||
+            (fileSize.QuadPart % sizeof(DWORD)) != 0)
+        {
+            CloseHandle(file);
+            Log(
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=invalid_file_size",
+                sourceHash);
+            return false;
+        }
+
+        const DWORD byteCount = static_cast<DWORD>(fileSize.QuadPart);
+        BYTE* buffer = static_cast<BYTE*>(
+            HeapAlloc(GetProcessHeap(), 0, byteCount));
+        if (!buffer)
+        {
+            CloseHandle(file);
+            Log(
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=out_of_memory",
+                sourceHash);
+            return false;
+        }
+
+        DWORD bytesRead = 0;
+        const BOOL readSucceeded =
+            ReadFile(file, buffer, byteCount, &bytesRead, NULL);
+        CloseHandle(file);
+
+        if (!readSucceeded || bytesRead != byteCount ||
+            !ValidatePS20FallbackBytecode(
+                reinterpret_cast<const DWORD*>(buffer), byteCount))
+        {
+            HeapFree(GetProcessHeap(), 0, buffer);
+            Log(
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=invalid_ps20_bytecode",
+                sourceHash);
+            return false;
+        }
+
+        *fallbackBytes = buffer;
+        *fallbackByteCount = byteCount;
+        return true;
+    }
+
     HRESULT WINAPI HookDeviceCreatePixelShader(
         IDirect3DDevice9* self,
         const DWORD* function,
         IDirect3DPixelShader9** shader)
     {
-        const HRESULT hr = g_realDeviceCreatePixelShader
-            ? g_realDeviceCreatePixelShader(self, function, shader)
-            : D3DERR_INVALIDCALL;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        BYTE* fallbackBytes = NULL;
+        DWORD fallbackByteCount = 0;
+        DWORD sourceVersion = 0;
+        DWORD sourceByteCount = 0;
+        unsigned __int64 sourceHash = 0;
+        wchar_t fallbackPath[MAX_PATH] = {};
+
+        const bool validSource = GetShaderBytecodeInfo(
+            function, TRUE, &sourceVersion, &sourceByteCount, &sourceHash);
+        const DWORD sourceMajor = validSource ? ((sourceVersion >> 8) & 0xFF) : 0;
+
+        if (g_realDeviceCreatePixelShader &&
+            g_shaderFallbacksEnabled &&
+            validSource &&
+            sourceMajor == 3 &&
+            LoadConfiguredPS2Fallback(
+                sourceHash,
+                &fallbackBytes,
+                &fallbackByteCount,
+                fallbackPath,
+                _countof(fallbackPath)))
+        {
+            Log(
+                "SHADER_FALLBACK_ATTEMPT source_hash=%016llX source_bytes=%lu "
+                "fallback_bytes=%lu path=%ls",
+                sourceHash,
+                static_cast<unsigned long>(sourceByteCount),
+                static_cast<unsigned long>(fallbackByteCount),
+                fallbackPath);
+
+            hr = g_realDeviceCreatePixelShader(
+                self,
+                reinterpret_cast<const DWORD*>(fallbackBytes),
+                shader);
+            if (SUCCEEDED(hr))
+            {
+                InterlockedIncrement(&g_shaderFallbackAppliedCount);
+                Log(
+                    "SHADER_FALLBACK_APPLIED source_hash=%016llX target=ps_2_0 hr=0x%08lX",
+                    sourceHash,
+                    static_cast<unsigned long>(hr));
+            }
+            else
+            {
+                Log(
+                    "SHADER_FALLBACK_CREATE_FAILED source_hash=%016llX hr=0x%08lX; "
+                    "retrying original bytecode",
+                    sourceHash,
+                    static_cast<unsigned long>(hr));
+                if (shader)
+                    *shader = NULL;
+                hr = g_realDeviceCreatePixelShader(self, function, shader);
+            }
+
+            HeapFree(GetProcessHeap(), 0, fallbackBytes);
+        }
+        else
+        {
+            hr = g_realDeviceCreatePixelShader
+                ? g_realDeviceCreatePixelShader(self, function, shader)
+                : D3DERR_INVALIDCALL;
+        }
+
         LogShaderProfile("PS", function, hr);
         if (SUCCEEDED(hr) && shader && *shader)
             LogShaderObject("PS", TRUE, function, hr, *shader);
@@ -1437,6 +1680,13 @@ namespace
         g_telemetryEnabled =
             GetPrivateProfileIntW(
                 L"General", L"EnableD3D9Telemetry", 1, g_iniPath) != 0;
+        g_shaderFallbacksEnabled =
+            GetPrivateProfileIntW(
+                L"General", L"EnableShaderFallbacks", 0, g_iniPath) != 0;
+        if (g_shaderFallbacksEnabled)
+        {
+            Log("SHADER_FALLBACKS_ENABLED map=IVLegacyShaderFallbacks.ini");
+        }
 
         g_captureShaderBytecode =
             GetPrivateProfileIntW(
