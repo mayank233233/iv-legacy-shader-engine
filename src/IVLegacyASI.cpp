@@ -2471,6 +2471,18 @@ namespace
             reinterpret_cast<DeviceSetRenderStateFn>(original[kDeviceSetRenderStateSlot]);
         g_realDeviceSetTextureStageState =
             reinterpret_cast<DeviceSetTextureStageStateFn>(original[kDeviceSetTextureStageStateSlot]);
+        g_realDeviceCreateVertexDeclaration =
+            reinterpret_cast<DeviceCreateVertexDeclarationFn>(original[kDeviceCreateVertexDeclarationSlot]);
+        g_realDeviceSetVertexDeclaration =
+            reinterpret_cast<DeviceSetVertexDeclarationFn>(original[kDeviceSetVertexDeclarationSlot]);
+        g_realDeviceSetFVF =
+            reinterpret_cast<DeviceSetFVFFn>(original[kDeviceSetFVFSlot]);
+        g_realDeviceSetStreamSource =
+            reinterpret_cast<DeviceSetStreamSourceFn>(original[kDeviceSetStreamSourceSlot]);
+        g_realDeviceSetStreamSourceFreq =
+            reinterpret_cast<DeviceSetStreamSourceFreqFn>(original[kDeviceSetStreamSourceFreqSlot]);
+        g_realDeviceSetIndices =
+            reinterpret_cast<DeviceSetIndicesFn>(original[kDeviceSetIndicesSlot]);
 
         hooked[kDeviceGetDeviceCapsSlot] = reinterpret_cast<void*>(HookDeviceGetDeviceCaps);
         hooked[kDeviceResetSlot] = reinterpret_cast<void*>(HookDeviceReset);
@@ -2496,6 +2508,15 @@ namespace
             hooked[kDeviceCreateCubeTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateCubeTexture);
             hooked[kDeviceSetRenderStateSlot] = reinterpret_cast<void*>(HookDeviceSetRenderState);
             hooked[kDeviceSetTextureStageStateSlot] = reinterpret_cast<void*>(HookDeviceSetTextureStageState);
+            hooked[kDeviceCreateVertexDeclarationSlot] =
+                reinterpret_cast<void*>(HookDeviceCreateVertexDeclaration);
+            hooked[kDeviceSetVertexDeclarationSlot] =
+                reinterpret_cast<void*>(HookDeviceSetVertexDeclaration);
+            hooked[kDeviceSetFVFSlot] = reinterpret_cast<void*>(HookDeviceSetFVF);
+            hooked[kDeviceSetStreamSourceSlot] = reinterpret_cast<void*>(HookDeviceSetStreamSource);
+            hooked[kDeviceSetStreamSourceFreqSlot] =
+                reinterpret_cast<void*>(HookDeviceSetStreamSourceFreq);
+            hooked[kDeviceSetIndicesSlot] = reinterpret_cast<void*>(HookDeviceSetIndices);
         }
         if (g_captureShaderConstants)
         {
