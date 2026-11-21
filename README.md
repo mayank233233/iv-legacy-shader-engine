@@ -67,12 +67,15 @@ Open an **x86 Native Tools Command Prompt** for Visual Studio, change to the rep
 ```bat
 build\compile_shaders.bat
 build\build_probe.bat
+build\build_asi.bat
 build\run_probe.bat
 ```
 
-The compiler script writes six bytecode files (`.vso` / `.pso`) and six FXC assembly listings into `build\out`. The C++ build writes `build\bin\D3D9ShaderProbe.exe`. The probe writes `D3D9ProbeReport.txt` in the repository root.
+The compiler script writes six bytecode files (`.vso` / `.pso`) and six FXC assembly listings into `build\out`. The C++ builds write `build\bin\D3D9ShaderProbe.exe` and `build\bin\IVLegacyASI.asi`. The probe writes `D3D9ProbeReport.txt` in the repository root. The ASI writes `IVLegacy.log` and creates `IVLegacy.ini` beside the game executable.
 
 The FXC script searches `PATH`, the unversioned Windows SDK `bin\x86` path, the versioned SDK path, and common DirectX SDK June 2010 locations. If FXC is installed elsewhere, add its directory to `PATH`.
+
+**Do not install the current ASI into the game yet.** It has passed a synthetic CI host test, but the original GTAIV.exe import table, ASI-loader path and actual GMA 3100 driver have not been validated. It does not yet replace any GTA IV shader.
 
 ## Test modes and report interpretation
 
@@ -108,7 +111,7 @@ The adapter report separates fixed-function multitexture capability from the rep
 
 The smoke host reports a **synthetic** adapter identity VEN_8086&DEV_29C2 and SM2 caps. It is a controlled fake COM implementation used to exercise the plugin's hooks. The two captured shader binaries are synthetic SM2 test shaders, **not shaders captured from GTA IV**. This CI run does not test the Intel GMA 3100 driver, the original game executable, an ASI loader, gameplay, image correctness, or FPS.
 
-#### Known limitations
+## Known limitations
 
 - No GTA IV executable, game assets, proprietary bytecode, material definitions or render-state interfaces are included or reverse-engineered.
 - The x86 ASI is an experimental telemetry plugin for the original PC GTAIV.exe 1.0.0.0 build. It hooks only a direct d3d9.dll!Direct3DCreate9 import in the main executable; it is not a complete D3D9 proxy and does not intercept all GetProcAddress, delay-load, or secondary-module paths. The actual GTA IV import table has not yet been verified.
