@@ -69,6 +69,8 @@ namespace
 
 int main()
 {
+    SetUnhandledExceptionFilter(SmokeUnhandledExceptionFilter);
+    SmokeMark("process-start");
     const wchar_t* iniPath = L"build\\bin\\IVLegacy.ini";
     WritePrivateProfileStringW(
         L"General", L"EnableD3D9Telemetry", L"1", iniPath);
@@ -80,22 +82,30 @@ int main()
         L"General", L"CaptureMaxFiles", L"16", iniPath);
     DeleteFileW(L"build\\bin\\IVLegacy.log");
 
+    SmokeMark("before-LoadLibrary");
     HMODULE asi = LoadLibraryW(L"build\\bin\\IVLegacyASI.asi");
+    SmokeMark("after-LoadLibrary");
     if (!asi)
         return Fail("LoadLibrary failed for IVLegacyASI.asi");
 
     if (!WaitForLog("D3D9_IAT_HOOK_INSTALLED", 10000))
         return Fail("ASI bootstrap did not install the Direct3DCreate9 IAT hook");
 
+    SmokeMark("before-Direct3DCreate9");
     IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    SmokeMark("after-Direct3DCreate9");
     if (!d3d)
         return Fail("Direct3DCreate9 returned NULL");
 
     D3DADAPTER_IDENTIFIER9 identifier = {};
+    SmokeMark("before-GetAdapterIdentifier");
     const HRESULT identifierHr = d3d->GetAdapterIdentifier(0, 0, &identifier);
+    SmokeMark("after-GetAdapterIdentifier");
 
     D3DCAPS9 caps = {};
+    SmokeMark("before-IDirect3D9-GetDeviceCaps");
     const HRESULT capsHr = d3d->GetDeviceCaps(0, D3DDEVTYPE_HAL, &caps);
+    SmokeMark("after-IDirect3D9-GetDeviceCaps");
     const HRESULT formatHr = d3d->CheckDeviceFormat(
         0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
         D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
@@ -134,6 +144,7 @@ int main()
     parameters.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
 
     IDirect3DDevice9* device = NULL;
+    SmokeMark("before-CreateDevice");
     const HRESULT createDeviceHr = d3d->CreateDevice(
         0,
         D3DDEVTYPE_HAL,
@@ -141,6 +152,7 @@ int main()
         D3DCREATE_SOFTWARE_VERTEXPROCESSING,
         &parameters,
         &device);
+    SmokeMark("after-CreateDevice");
 
     HRESULT deviceCapsHr = D3DERR_NOTAVAILABLE;
     HRESULT renderTargetHr = D3DERR_NOTAVAILABLE;
@@ -162,14 +174,18 @@ int main()
     if (SUCCEEDED(createDeviceHr) && device)
     {
         D3DCAPS9 deviceCaps = {};
+        SmokeMark("before-device-GetDeviceCaps");
         deviceCapsHr = device->GetDeviceCaps(&deviceCaps);
+        SmokeMark("after-device-GetDeviceCaps");
 
+        SmokeMark("before-CreateRenderTarget");
         renderTargetHr = device->CreateRenderTarget(
             32, 32, D3DFMT_A8R8G8B8,
             D3DMULTISAMPLE_NONE, 0, FALSE, &renderTarget, NULL);
         if (SUCCEEDED(renderTargetHr) && renderTarget)
             setRenderTargetHr = device->SetRenderTarget(0, renderTarget);
 
+        SmokeMark("before-CreateDepthStencilSurface");
         depthSurfaceHr = device->CreateDepthStencilSurface(
             32, 32, D3DFMT_D24S8,
             D3DMULTISAMPLE_NONE, 0, TRUE, &depthSurface, NULL);
@@ -234,11 +250,13 @@ int main()
 
         if (vertexBytecode)
         {
+            SmokeMark("before-CreateVertexShader");
             vertexShaderHr = device->CreateVertexShader(
                 reinterpret_cast<const DWORD*>(vertexBytecode), &vertexShader);
         }
         if (pixelBytecode)
         {
+            SmokeMark("before-CreatePixelShader");
             pixelShaderHr = device->CreatePixelShader(
                 reinterpret_cast<const DWORD*>(pixelBytecode), &pixelShader);
         }
