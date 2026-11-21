@@ -119,8 +119,8 @@ jobs:
           python tools\analyze_asi_constants.py build\bin\IVLegacyConstants --log build\bin\IVLegacy.log --json build\bin\shader_constant_inventory.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $constantInventory = Get-Content build\bin\shader_constant_inventory.json -Raw | ConvertFrom-Json
-          if ($constantInventory.record_count -ne 2 -or $constantInventory.invalid_record_count -ne 0) { throw 'Expected two valid synthetic shader constant records.' }
-          if ($constantInventory.shader_objects_resolved -ne 2) { throw 'Expected both constant sidecars to resolve to shader objects/hashes.' }
+          if ($constantInventory.record_count -ne 6 -or $constantInventory.invalid_record_count -ne 0) { throw 'Expected six valid float/integer/boolean shader constant records.' }
+          if ($constantInventory.shader_objects_resolved -ne 6) { throw 'Expected all six constant sidecars to resolve to shader objects/hashes.' }
           if (@($constantInventory.records | Where-Object { $_.source_shader_hash -eq 'ccc333' }).Count -lt 1) { throw 'Expected pixel constant sidecar to retain the original PS3 source shader hash.' }
           python tools\analyze_d3d9_shaders.py build\bin\IVLegacyCaptures --output build\bin\captured_shader_inventory.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -157,7 +157,7 @@ jobs:
           if (-not (Test-Path artifact\IVLegacyASI.asi)) { throw 'Staged GTA IV telemetry ASI is missing.' }
           if (-not (Test-Path artifact\build\bin\IVLegacyConstants)) { throw 'Staged shader constant sidecars are missing.' }
           $constantFiles = @(Get-ChildItem artifact\build\bin\IVLegacyConstants -File -Filter '*.bin')
-          if ($constantFiles.Count -ne 2) { throw "Expected 2 constant sidecars in staged artifact; found $($constantFiles.Count)." }
+          if ($constantFiles.Count -ne 6) { throw "Expected 6 constant sidecars in staged artifact; found $($constantFiles.Count)." }
           $bytecode = @(Get-ChildItem artifact\build\out -File | Where-Object { $_.Extension -in @('.vso', '.pso') })
           if ($bytecode.Count -ne 6) { throw "Expected 6 shader bytecode files in staged artifact; found $($bytecode.Count)." }
 
