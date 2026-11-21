@@ -7,7 +7,7 @@ if errorlevel 1 (
   exit /b 2
 )
 if not exist build\bin mkdir build\bin
-cl.exe /nologo /LD /EHsc /W4 /O2 /DWIN32 /D_WINDOWS /Fe:build\bin\IVLegacyASI.asi src\IVLegacyASI.cpp /link version.lib
+cl.exe /nologo /LD /EHsc /W4 /O2 /DWIN32 /D_WINDOWS /Fe:build\bin\IVLegacyASI.asi src\IVLegacyASI.cpp src\IVLegacyASI.def /link version.lib
 if errorlevel 1 exit /b 1
 if not exist build\bin\IVLegacyASI.asi (
   echo ERROR: compiler returned success but IVLegacyASI.asi was not created.
