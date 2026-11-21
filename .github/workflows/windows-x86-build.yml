@@ -1,0 +1,67 @@
+name: Windows x86 build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up x86 MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: Locate FXC
+        shell: pwsh
+        run: |
+          $roots = @(
+            "$env:ProgramFiles(x86)\Windows Kits\10\bin",
+            "$env:ProgramFiles(x86)\Windows Kits\8.1\bin",
+            "$env:ProgramFiles\Windows Kits\10\bin"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $fxc = $null
+          foreach ($root in $roots) {
+            $fxc = Get-ChildItem -Path $root -Filter fxc.exe -File -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x86\\fxc\.exe$' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if ($fxc) { break }
+          }
+          if (-not $fxc) { throw 'fxc.exe was not found in the installed Windows SDKs.' }
+          Write-Host "Using FXC: $($fxc.FullName)"
+          $fxc.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Run source sanity checks
+        shell: pwsh
+        run: |
+          python tests\check_sources.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Compile Shader Model 2.0 shaders
+        shell: pwsh
+        run: |
+          cmd.exe /d /c build\compile_shaders.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build x86 D3D9 probe
+        shell: pwsh
+        run: |
+          cmd.exe /d /c build\build_probe.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: iv-legacy-shader-engine-windows-x86
+          path: |
+            build/out/*.vso
+            build/out/*.pso
+            build/out/*.asm
+            build/bin/D3D9ShaderProbe.exe
+          if-no-files-found: error
