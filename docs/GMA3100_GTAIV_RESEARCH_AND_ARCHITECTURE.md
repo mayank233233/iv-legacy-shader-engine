@@ -83,28 +83,47 @@ The intended product is a Win32/x86 game-loaded ASI/plugin plus a D3D9 intercept
 
 ### Layer A — version-aware ASI plugin
 
-- Load only in the intended GTA IV 1.0.0.0 executable.
-- Detect the exact executable build using PE identity and validated signatures.
-- Keep patch sites and offsets in a version table. A missing or ambiguous signature must skip the patch, not guess.
-- Provide an INI with independently switchable optimizations, compatibility mode and conservative defaults.
-- Log adapter/device caps, selected renderer profile, shader fallback hits/misses, device reset and failure reasons.
-- Keep a clean disable/uninstall path and avoid overwriting the user's original game files.
+**Initial implementation exists in `src/IVLegacyASI.cpp`.** It is a Win32/x86 ASI-style DLL module, not yet a completed compatibility mod.
+
+Implemented in the current source:
+
+- Bootstrap runs from a worker thread started by DLL_PROCESS_ATTACH.
+- Validates the host as a 32-bit PE named `GTAIV.exe`; by default it also requires the executable's file-version resource to report 1.0.0.0.
+- Creates `IVLegacy.log` and a default `IVLegacy.ini` beside the host executable.
+- Supports `EnableD3D9Telemetry` and `StrictGTAIV100` settings.
+- Logs target validation, initialization and hook installation failures.
+- Does not yet fingerprint the executable by cryptographic hash or validate code signatures. Before adding any game-code patch, we need build-specific PE identity and signature/byte checks. No guessed patch offsets are acceptable.
+- The ASI must remain loaded for the life of the process; hot-unloading is unsafe because active IAT/vtable entries point into the module.
 
 ZolikaPatch is the strongest old-version compatibility reference found: its author lists support for 1.0.0.0, 1.0.4.0, 1.0.7.0 and 1.0.8.0. Its fixes include loading, VRAM reporting, high-FPS cutscene/bike issues, crash fixes and graphics/gameplay fixes. The independent [Gillian Guide ZolikaPatch reconstruction](https://github.com/gillian-guide/ZolikaPatch) is a useful source-level study of per-build hooks, signatures, exact x86 register/stack contracts and feature toggles; it is not the original author's source and should not be copied blindly.
 
-### Layer B — Direct3D 9 compatibility wrapper / hooks
+### Layer B — Direct3D 9 compatibility instrumentation
 
-Investigate an x86 D3D9 proxy or per-device vtable/IAT interception around:
+**A first hook layer is now implemented.** It is deliberately observational; it does not spoof SM3 caps or substitute shaders.
 
-- Direct3DCreate9, adapter identification and IDirect3D9::GetDeviceCaps.
-- CreateDevice and device flags.
-- CreateVertexShader / CreatePixelShader.
-- Shader, texture, sampler, render-state, stream/index-buffer and constant binding.
-- SetRenderTarget, depth-stencil surfaces, Draw*, Present and Reset.
+- The current implementation patches the main executable's import-table entry for a direct `d3d9.dll!Direct3DCreate9` import. It logs a clear failure if that import is not present or the original thunk is unavailable. It does not yet cover every GetProcAddress, delay-load, proxy-DLL or secondary-module loading path.
+- After Direct3DCreate9 returns, the plugin clones that object's vtable and observes IDirect3D9 methods: GetAdapterIdentifier, CheckDeviceFormat, CheckDepthStencilMatch, GetDeviceCaps and CreateDevice.
+- After CreateDevice succeeds, it clones the returned device object's vtable and observes GetDeviceCaps, Reset, failed Present calls, CreateRenderTarget, CreateDepthStencilSurface, SetRenderTarget, SetDepthStencilSurface, CreateVertexShader and CreatePixelShader.
+- The hooks call the original COM methods and log their HRESULTs. The adapter logger records PCI VendorId, DeviceId, SubSysId, Revision, driver version and description. Capability logging records VS/PS versions and available SM2 cap fields. Surface logging records size, format, multisample and usage where exposed.
+- Shader creation currently logs only the bytecode version token/profile and HRESULT. It does not yet dump, hash, translate or replace bytecode.
+- Current CI has compiled and linked the Win32/x86 ASI. A synthetic GTAIV.exe host and D3D9 hook smoke test have been added to CI; their latest result is tracked in STATUS.md. This validates a controlled test host, not GTA IV's actual import table or physical graphics hardware.
 
-The wrapper must preserve COM reference counts, device identity, call ordering, error propagation and lost-device/reset behavior. It must never claim SM3 support unless the replacement path can safely handle every shader and dependent feature the game can reach.
+The current hook table is a first instrumentation scaffold, not a full D3D9 proxy. It must be validated against the actual GTA IV 1.0.0.0 binary before we rely on the import-table assumption. The wrapper must continue to preserve COM reference counts, device identity, call ordering, error propagation and lost-device/reset behavior.
 
-**Important:** an ASI that only reads caps is a diagnostic plugin, not the finished compatibility fix. A wrapper that only lies about caps is worse: it can defer the crash from startup to shader creation or the first unsupported rendering pass.
+### Layer C — Shader translator and fallback library
+
+The realistic first implementation is a **precompiled, hash-indexed fallback library** for selected, well-understood shader variants. A general runtime SM3-to-SM2 compiler is a much larger project.
+
+A proper pipeline should include:
+
+1. Capture/hash each shader bytecode and map it to a decompiled source/FXC metadata entry when possible.
+2. Parse the D3D shader token stream into an intermediate representation; preserve declarations, constants, samplers and input/output semantics.
+3. Validate features and resource use against the actual GMA caps.
+4. Apply explicit lowering passes: remove unsupported branches/loops, unroll only bounded loops, reduce instruction/temp use, replace unsupported texture operations where semantics permit, and eliminate expensive effects when a valid approximation exists.
+5. Compile to vs_2_0 / ps_2_0, validate bytecode headers and instruction counts, and cache by source hash + preset + compiler version.
+6. Provide a known fallback for every covered shader. If a shader is unknown or cannot be translated, fail safely with a clear diagnostic rather than passing unsupported SM3 bytecode to the driver.
+
+The first shader families to analyse are default/world, normal/specular/reflection, vehicle, pedestrian/skin, trees/alpha, water, shadow, post-FX and deferred-lighting variants. This is a prioritisation list, not an assertion that these cover every runtime shader.
 
 ### Layer C — Shader translator and fallback library
 
