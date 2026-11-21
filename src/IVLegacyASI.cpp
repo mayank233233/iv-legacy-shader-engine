@@ -2226,6 +2226,14 @@ namespace
             reinterpret_cast<DeviceSetShaderConstantFFn>(original[kDeviceSetVertexShaderConstantFSlot]);
         g_realDeviceSetPixelShaderConstantF =
             reinterpret_cast<DeviceSetShaderConstantFFn>(original[kDeviceSetPixelShaderConstantFSlot]);
+        g_realDeviceSetVertexShaderConstantI =
+            reinterpret_cast<DeviceSetShaderConstantIFn>(original[kDeviceSetVertexShaderConstantISlot]);
+        g_realDeviceSetVertexShaderConstantB =
+            reinterpret_cast<DeviceSetShaderConstantBFn>(original[kDeviceSetVertexShaderConstantBSlot]);
+        g_realDeviceSetPixelShaderConstantI =
+            reinterpret_cast<DeviceSetShaderConstantIFn>(original[kDeviceSetPixelShaderConstantISlot]);
+        g_realDeviceSetPixelShaderConstantB =
+            reinterpret_cast<DeviceSetShaderConstantBFn>(original[kDeviceSetPixelShaderConstantBSlot]);
         g_realDeviceCreateTexture =
             reinterpret_cast<DeviceCreateTextureFn>(original[kDeviceCreateTextureSlot]);
         g_realDeviceCreateVolumeTexture =
@@ -2268,6 +2276,14 @@ namespace
                 reinterpret_cast<void*>(HookDeviceSetVertexShaderConstantF);
             hooked[kDeviceSetPixelShaderConstantFSlot] =
                 reinterpret_cast<void*>(HookDeviceSetPixelShaderConstantF);
+            hooked[kDeviceSetVertexShaderConstantISlot] =
+                reinterpret_cast<void*>(HookDeviceSetVertexShaderConstantI);
+            hooked[kDeviceSetVertexShaderConstantBSlot] =
+                reinterpret_cast<void*>(HookDeviceSetVertexShaderConstantB);
+            hooked[kDeviceSetPixelShaderConstantISlot] =
+                reinterpret_cast<void*>(HookDeviceSetPixelShaderConstantI);
+            hooked[kDeviceSetPixelShaderConstantBSlot] =
+                reinterpret_cast<void*>(HookDeviceSetPixelShaderConstantB);
         }
 
         DWORD oldProtection = 0;
