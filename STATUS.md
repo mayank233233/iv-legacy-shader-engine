@@ -336,3 +336,17 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 
 - Follow-up audit hardening: required texture bindings are now checked only for samplers actually sampled by the pixel shader; unused sampler declarations do not create false missing-texture failures.
 - `DrawPrimitiveUP` and `DrawIndexedPrimitiveUP` are explicitly marked capture-incomplete because the current telemetry does not record their transient per-draw vertex/index memory layout and ranges.
+
+
+## D3D9 capability audit and QPC frame profiler — 2026-11-22
+
+- Added to isolated branch `feature/d3d9-capability-frame-profiler`, based on `feature/paired-shader-interface-audit`; the previous branches and `main` are unchanged.
+- The ASI now logs `D3DCAPS9.DevCaps`, `D3DDEVCAPS_HWTRANSFORMANDLIGHT`, `VertexProcessingCaps`, `MaxStreams`, `MaxStreamStride`, `MaxVertexIndex` and `MaxPrimitiveCount` from both interface and device capability queries.
+- `CreateDevice` logging records hardware/mixed/software vertex-processing request flags separately from the advertised HW-T&L capability. A requested processing mode is not treated as proof of the driver's internal execution path.
+- Added optional `EnableFrameProfiler=1`, disabled by default, with configurable windows of 1–600 frames (default 120). Uses QueryPerformanceCounter and captures successful Present-return intervals, Present-call wall time, and wall time inside all four D3D9 draw methods.
+- Summary output includes average, P50, P95, P99 and maximum frame intervals, Present time, draw API time, unattributed interval time, average draw calls and draw failures. Logging occurs per window, not once per frame.
+- Draw-method hooks are installed for profiler-only mode without enabling the verbose draw-state telemetry hooks.
+- The profiler explicitly reports `gpu_time=not_measured`. Present/draw API wall times may include driver waits; unattributed time includes simulation and non-draw API work and is not a direct world-simulation measurement.
+- Extended the synthetic Windows runtime test: its fake D3D9 caps advertise HW-T&L, CreateDevice requests software VP, four fake draw methods execute between Present calls, and the test requires a one-sample profile summary showing four draw calls.
+- **Verification pending:** Windows x86 CI must compile the updated ASI, run the synthetic host and pass source checks.
+- **Not tested:** original GTA IV 1.0.0.0 loading, the physical GMA 3100 capability response, real-game Present cadence, fixed-function rendering performance, GPU execution time or FPS.
