@@ -401,11 +401,11 @@ def decode_fvf(fvf: int) -> tuple[list[dict[str, Any]], list[str]]:
         0x0002: (2, 12, "POSITION"),
         0x0004: (3, 16, "POSITIONT"),
         0x4002: (3, 16, "POSITION"),
-        0x0006: (2, 16, "POSITION"),
-        0x0008: (2, 20, "POSITION"),
-        0x000A: (2, 24, "POSITION"),
-        0x000C: (2, 28, "POSITION"),
-        0x000E: (2, 32, "POSITION"),
+        0x0006: (2, 12, "POSITION"),
+        0x0008: (2, 12, "POSITION"),
+        0x000A: (2, 12, "POSITION"),
+        0x000C: (2, 12, "POSITION"),
+        0x000E: (2, 12, "POSITION"),
     }
     if position_code not in position_formats:
         return [], [f"FVF 0x{fvf:08X} has an unsupported position format"]
@@ -632,6 +632,10 @@ def audit_draw(
         result["warnings"].append("no sampler-state fingerprint was captured")
     if draw.get("render_state_count", 0) == 0:
         result["warnings"].append("no render-state fingerprint was captured")
+    result["warnings"].append(
+        "individual blend, depth, alpha-test and sampler-state values are not captured; "
+        "render-state compatibility still requires manual review"
+    )
 
     if not vs_result.get("structural_candidate_for_manual_lowering"):
         result["reasons"].append("vertex shader is outside the currently audited VS2 subset")
@@ -831,7 +835,7 @@ def _self_test() -> None:
     assert len(packed_inputs) == 2
     assert any("packs multiple semantics" in reason for reason in packed_reasons)
 
-    fvf_elements, fvf_errors = decode_fvf(0x002 | 0x100 | 0x200)
+    fvf_elements, fvf_errors = decode_fvf(0x002 | 0x200)
     assert not fvf_errors
     assert [(x["usage"], x["usage_index"]) for x in fvf_elements] == [
         (0, 0), (5, 0), (5, 1)
