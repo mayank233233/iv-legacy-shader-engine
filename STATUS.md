@@ -352,3 +352,12 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44999020323/artifacts/14744669712), ID `14744669712`, 242,306 bytes.
 - The synthetic runtime test verified the HW-T&L cap log, software-VP request logging, and a one-frame profile summary containing four draw calls. These values are synthetic fixtures, not actual GMA 3100 measurements.
 - **Not tested:** original GTA IV 1.0.0.0 loading, the physical GMA 3100 capability response, real-game Present cadence, fixed-function rendering performance, GPU execution time or FPS.
+
+## Direct3D9 factory-import assessment correction — 2026-11-22
+
+- Created isolated branch `feature/d3d9-import-hook-assessment` from `feature/d3d9-capability-frame-profiler`; `main` and the profiler branch are unchanged.
+- Corrected `tools/inspect_gtaiv_executable.py`: the prior report combined normal and delay imports when describing the factory-hook path, but the current ASI scans only the main executable's normal import table.
+- Normal import records now retain `OriginalFirstThunk` and `FirstThunk` RVAs. The report separately identifies normal and delay `Direct3DCreate9` imports and whether a normal import has the lookup table required by the current hook.
+- Hook assessment distinguishes a normal-IAT candidate, delay-only import, normal import with zero `OriginalFirstThunk`, and a mixed normal-plus-delay case. It explicitly warns that the normal path is only a static candidate; runtime use and ASI load timing still require verification.
+- Added self-tests for supported normal imports, delay-only imports, zero-`OriginalFirstThunk` imports, and mixed import paths. The existing Windows x86 workflow already runs this tool's `--self-test`.
+- This is an inspector/reporting correction only. It does not inspect the user's installed `GTAIV.exe`, change the ASI hook, or establish the game's actual import path.
