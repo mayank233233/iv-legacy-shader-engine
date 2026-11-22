@@ -352,3 +352,14 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44999020323/artifacts/14744669712), ID `14744669712`, 242,306 bytes.
 - The synthetic runtime test verified the HW-T&L cap log, software-VP request logging, and a one-frame profile summary containing four draw calls. These values are synthetic fixtures, not actual GMA 3100 measurements.
 - **Not tested:** original GTA IV 1.0.0.0 loading, the physical GMA 3100 capability response, real-game Present cadence, fixed-function rendering performance, GPU execution time or FPS.
+
+
+## Conservative D3D9 scalar state cache — 2026-11-22
+
+- Created isolated branch `feature/redundant-d3d9-state-cache` from the most advanced `feature/d3d9-capability-frame-profiler` branch; `main` and the existing feature branches were not modified.
+- Added an experimental, opt-in state-shadow optimization for only `IDirect3DDevice9::SetRenderState` (slot 57), `SetTextureStageState` (slot 67) and `SetSamplerState` (slot 69). A setter is skipped only when the same device's last successful call for that exact state index already established the identical value.
+- The optimization is disabled by default. It uses a serialized state-cache critical section, records forwarded/skipped calls per configured Present window and continues to use the existing state snapshots for draw analysis.
+- State is invalidated on successful Reset, failed Present and device-hook installation. `CreateStateBlock`, `BeginStateBlock` and `EndStateBlock` hooks permanently disable the optimization for that process before forwarding the state-block API call.
+- The synthetic Windows x86 runtime test now checks two duplicate hits per state group, forwarded/skipped counts, Reset invalidation and automatic state-block disable.
+- **Verification pending:** the new branch has not yet completed GitHub Actions. CI's fake D3D9 tests do not establish real-driver timing or game correctness.
+- **Not measured:** no GTA IV 1.0.0.0 gameplay session, physical GMA 3100 state-call profile, average/1% low FPS or 30 FPS result. This feature is an experiment intended to be benchmarked with `EnableRedundantStateCache=1`; leave it disabled otherwise.
