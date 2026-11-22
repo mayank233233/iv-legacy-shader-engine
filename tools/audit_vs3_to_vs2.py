@@ -1469,7 +1469,7 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
     ]
     texcoord_mask = audit_vs3_bytes(shader(*texcoord_mask_words))
-    assert any("unsupported combined write mask" in reason for reason in texcoord_mask["reasons"])
+    assert any("non-contiguous component mask" in reason and "no free VS2 color output" in reason for reason in texcoord_mask["reasons"])
 
     # A TEXCOORD with a sparse component mask can be carried by a color output
     # when one is free; the report marks the pixel-shader link rewrite.
