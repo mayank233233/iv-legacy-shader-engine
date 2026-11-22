@@ -139,7 +139,13 @@ D3DDECLUSAGE_NAMES = {
     12: "DEPTH", 13: "SAMPLE",
 }
 MATRIX_ROWS = {20: 4, 21: 3, 22: 4, 23: 3, 24: 2}
-MATRIX_DEST_MASKS = {20: 0xF, 21: 0x7, 22: 0xF, 23: 0x7, 24: 0x3}
+MATRIX_DEST_MASKS = {
+    20: (0x7, 0xF),  # m4x4 permits .xyz or .xyzw
+    21: (0x7,),      # m4x3 requires .xyz
+    22: (0x7, 0xF),  # m3x4 permits .xyz or .xyzw
+    23: (0x7,),      # m3x3 requires .xyz
+    24: (0x3,),      # m3x2 requires .xy
+}
 IDENTITY_SWIZZLE = 0xE4
 
 @dataclass(frozen=True)
@@ -497,12 +503,13 @@ def audit_vs3_bytes(
         # Matrix instructions have a specific constant-file matrix operand and
         # fixed destination masks. The matrix source cannot be modified/swizzled.
         if opcode in MATRIX_ROWS:
-            expected_mask = MATRIX_DEST_MASKS[opcode]
+            expected_masks = MATRIX_DEST_MASKS[opcode]
             actual_mask = destination_mask(ins.operands[0])
-            if actual_mask != expected_mask:
+            if actual_mask not in expected_masks:
+                expected_text = " or ".join(f"0x{mask:X}" for mask in expected_masks)
                 reasons.append(
                     f"{name} at DWORD {ins.offset} requires destination mask "
-                    f"0x{expected_mask:X}, got 0x{actual_mask:X}"
+                    f"{expected_text}, got 0x{actual_mask:X}"
                 )
             matrix_token = ins.operands[2]
             matrix_register = decode_register(matrix_token)
@@ -524,7 +531,8 @@ def audit_vs3_bytes(
 
         # EXP/LOG/POW forms require explicit scalar replication on their inputs.
         scalar_source_indices = {
-            14: (1,), 15: (1,), 32: (1, 2), 78: (1,), 79: (1,)
+            6: (1,), 7: (1,), 14: (1,), 15: (1,),
+            32: (1, 2), 78: (1,), 79: (1,)
         }.get(opcode, ())
         for source_index in scalar_source_indices:
             if source_swizzle(ins.operands[source_index]) not in (
@@ -532,6 +540,13 @@ def audit_vs3_bytes(
             ):
                 reasons.append(
                     f"{name} at DWORD {ins.offset} requires a scalar-replicate source swizzle"
+                )
+
+        if opcode in (6, 7, 14, 15, 32, 78, 79):
+            mask = destination_mask(ins.operands[0])
+            if mask == 0 or (mask & (mask - 1)) != 0:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} requires a single-component destination mask"
                 )
 
         if opcode == 34:
@@ -573,6 +588,25 @@ def audit_vs3_bytes(
                 if destination_mask(operand) == 0:
                     reasons.append(
                         f"{name} at DWORD {ins.offset} has an empty destination write mask"
+                    )
+                destination_modifier = (operand >> 20) & 0xF
+                destination_shift = (operand >> 24) & 0xF
+                if destination_modifier:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} uses destination modifier "
+                        f"{destination_modifier}; _sat is not supported by baseline vs_2_0"
+                    )
+                if destination_shift:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} uses destination scaling, "
+                        "which this baseline vs_2_0 audit does not support"
+                    )
+            elif not is_destination:
+                modifier = source_modifier(operand)
+                if modifier not in (0, 1):
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} uses unvalidated source modifier {modifier}; "
+                        "only no modifier and negate are allowed in this audit"
                     )
 
             if is_destination:
@@ -716,6 +750,32 @@ def audit_vs3_bytes(
             "shader must write all four position components xyzw; "
             f"the mapped oPos write mask is 0x{position_mask:X}"
         )
+
+    # Baseline vs_2_0 uses a scalar x component for fog and point size.
+    for scalar_output in ((REG_RASTOUT, 1), (REG_RASTOUT, 2)):
+        scalar_mask = written_outputs.get(scalar_output, 0)
+        if scalar_mask and scalar_mask != 0x1:
+            reasons.append(
+                f"mapped scalar output register {scalar_output[1]} must use only the x component"
+            )
+
+    # The combined write mask for each oT# must be .x, .xy, .xyz or .xyzw;
+    # if a higher texture-coordinate register is written, all lower ones must be.
+    written_texcoord_indices = sorted(
+        index for (register_type, index), mask in written_outputs.items()
+        if register_type == REG_OUTPUT and mask
+    )
+    for index in written_texcoord_indices:
+        mask = written_outputs[(REG_OUTPUT, index)]
+        if mask not in (0x1, 0x3, 0x7, 0xF):
+            reasons.append(
+                f"mapped oT{index} has unsupported combined write mask 0x{mask:X}"
+            )
+        for lower_index in range(index):
+            if (REG_OUTPUT, lower_index) not in written_outputs:
+                reasons.append(
+                    f"mapped oT{index} is written without the required lower output oT{lower_index}"
+                )
 
     reasons = list(dict.fromkeys(reasons))
     candidate = not reasons
