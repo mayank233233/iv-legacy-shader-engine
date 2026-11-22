@@ -15,6 +15,7 @@ import json
 import re
 import struct
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -913,6 +914,56 @@ def _self_test() -> None:
     assert [(x["usage"], x["usage_index"]) for x in fvf_elements] == [
         (0, 0), (5, 0), (5, 1)
     ]
+
+    # Exercise end-to-end draw correlation using a synthetic log-shaped draw
+    # record and matching captured bytecode files (not GTA IV captures).
+    with tempfile.TemporaryDirectory() as temporary:
+        capture_root = Path(temporary)
+        vs_hash = fnv1a64(vs_bytes)
+        ps_hash = fnv1a64(ps_bytes)
+        (capture_root / f"VS_3_0_{vs_hash}.bin").write_bytes(vs_bytes)
+        (capture_root / f"PS_3_0_{ps_hash}.bin").write_bytes(ps_bytes)
+        captures = index_captures(capture_root)
+        draw_record = {
+            "seq": 1,
+            "frame": 1,
+            "kind": "DrawIndexedPrimitive",
+            "vertex_shader": {"hash": vs_hash, "profile": "vs_3_0"},
+            "pixel_shader": {"hash": ps_hash, "profile": "ps_3_0"},
+            "vertex_declaration": draw["vertex_declaration"],
+            "fvf": 0,
+            "stream_bindings": draw["stream_bindings"],
+            "texture_bindings": [],
+            "render_targets": [{
+                "index": 0, "object": "1000", "width": 640,
+                "height": 480, "format": 21,
+            }],
+            "sampler_state_hash": "abcd",
+            "sampler_state_count": 1,
+            "render_state_hash": "1234",
+            "render_state_count": 1,
+            "texture_stage_state_hash": "5678",
+            "texture_stage_state_count": 1,
+        }
+        capability_snapshot = {
+            "vertex_shader": {"profile": "vs_2_0", "major": 2, "minor": 0},
+            "pixel_shader": {"profile": "ps_2_0", "major": 2, "minor": 0},
+            "max_simultaneous_render_targets": 1,
+            "vs20_temps": 12,
+            "ps20_temps": 12,
+            "ps20_instruction_slots": 96,
+        }
+        integrated = audit_draw(
+            draw_record, captures, capability_snapshot, {}
+        )
+        assert integrated["interface"]["interface_matches"], integrated
+        assert integrated["interface"]["independent_vs2_ps2_allocations_match"], integrated
+        assert integrated["vertex_input_layout"]["source"] == "vertex_declaration"
+        assert integrated["sampler_bindings"]["missing_sampler_stages"] == []
+        assert integrated["device_limits"]["active_render_targets"] == 1
+        assert integrated["pixel_stage"]["structural_candidate"]
+        assert integrated["vertex_stage"]["structural_candidate"]
+        assert integrated["status"] == "capture_incomplete", integrated
 
     print("PASS: paired VS3/PS3 interface, vertex-layout and draw-level audit self-tests")
 
