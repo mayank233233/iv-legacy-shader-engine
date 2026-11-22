@@ -205,3 +205,19 @@ No GTA IV launch, rendering or FPS claim is made until the game-loaded build has
 
 
 The auditor also validates setup instructions: `DCL`, `DEF`, `DEFB`, and `DEFI` must precede executable instructions, and constant definitions must target the matching float, boolean, or integer constant register classes. `DEFB` follows the D3D9 rule that zero is false and nonzero is true. These setup opcodes are checked as setup records, not mistaken for arithmetic source reads.
+
+## GTA IV render-pipeline inventory (read-only development work)
+
+The D3D9 ASI now records the render/depth surface state associated with draw submissions when `CaptureDrawTelemetry=1`:
+
+- Active render-target slots (up to four): object address, dimensions, format, resource type, usage, pool and multisample settings.
+- Active depth-stencil surface with the same descriptor fields.
+- Initial/current surfaces are queried after device creation and successful reset when the D3D9 vtable provides the standard getter slots. Explicit `SetRenderTarget` and `SetDepthStencilSurface` snapshots update only after the original API call succeeds.
+- Surface snapshots are cleared after a successful device reset. Getter references are released after their descriptors are copied.
+- The log buffer was enlarged so the additional per-draw surface descriptors do not crowd out the trailing shader/state/HRESULT fields.
+
+`tools/analyze_asi_log.py` attaches these descriptors to each draw and groups usage by surface, resolution, format and shader pair. It also inventories adapter identity, VS/PS capability versions, relevant shader caps, `CheckDeviceFormat` results, depth-format match results, device creation parameters and render/depth-surface creation/binding events. Adapter description and driver strings are retained as full text.
+
+This is deliberately **observability only**: it does not replace shaders, skip render targets, change D3D9 state, spoof caps, lower resolution, alter LODs, or disable game simulation. A surface is not labelled as a G-buffer, shadow map, reflection or water target from its format alone; that requires correlating shader pairs, pass order and captured contents. The synthetic tests validate parsing and hooks, not GTA IV rendering or GMA 3100 behavior.
+
+The current code still does not implement a complete VS3-to-VS2 translator or an SM3-compatible renderer. The pixel shader fallback remains opt-in and manually hash-mapped; vertex shader creation continues to pass the original shader through.
