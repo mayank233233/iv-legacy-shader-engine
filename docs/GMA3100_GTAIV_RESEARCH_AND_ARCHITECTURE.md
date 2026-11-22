@@ -290,3 +290,8 @@ The component tracker maps source swizzles to the actual source components read.
 Static flow control remains outside this analysis. IF/loop/call shaders are rejected before a candidate is reported, so the tool never claims that initialization is definite across unanalysed branches or loops.
 
 References: [VS2 register read-port table](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-2-0), [input-register rules](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-input), [LIT](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/lit---vs), [DST](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dst---vs), [NRM](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/nrm---vs), [CRS](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/crs---vs), and [SGN](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/sgn---vs).
+
+
+### Point-size output mask correction — 2026-11-22
+
+The VS3 PSIZE0 DCL must use a full xyzw declaration mask, and no other semantic may share that register. The point-size value itself is scalar: only x is consumed, so the lowered VS2 point-size output is written through its x component. The analyzer now keeps the full declaration-mask check separate from the x-only effective write check. Synthetic tests cover the valid full-DCL/x-write case and reject a partial PSIZE declaration or y-only output write. See the Microsoft [output DCL usage rules](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dcl-usage-outut-register---vs) and [point-size register reference](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-point-size).
