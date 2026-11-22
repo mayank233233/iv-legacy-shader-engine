@@ -698,6 +698,25 @@ def _self_test() -> None:
     output_semantic = audit_vs3_bytes(shader(*output_semantic_words))
     assert any("no fixed vs_2_0 output mapping" in reason for reason in output_semantic["reasons"])
 
+    read_only_write_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_parameter_token(REG_INPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+    ]
+    read_only_write = audit_vs3_bytes(shader(*read_only_write_words))
+    assert any("writes read-only or unsupported register type" in reason for reason in read_only_write["reasons"])
+
+    static_flow_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(40, make_parameter_token(REG_CONSTBOOL, 0)),
+        *make_instruction(43),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+    ]
+    static_flow = audit_vs3_bytes(shader(*static_flow_words))
+    assert any("static flow control" in reason for reason in static_flow["reasons"])
+
     over_budget_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
