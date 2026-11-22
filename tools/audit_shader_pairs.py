@@ -172,6 +172,21 @@ def parse_ps_inputs(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
 def semantic_key(item: dict[str, Any]) -> tuple[int, int]:
     return int(item["usage"]), int(item["usage_index"])
 
+def max_ps_temp_register(data: bytes) -> int:
+    """Return the highest referenced PS temporary register, or -1."""
+    try:
+        _, instructions = audit_sm3_to_sm2.parse_ps3(data)
+    except (audit_sm3_to_sm2.AuditError, struct.error):
+        return -1
+    highest = -1
+    for ins in instructions:
+        if ins.opcode in (audit_sm3_to_sm2.OP_DCL, audit_sm3_to_sm2.OP_DEF):
+            continue
+        for operand in ins.operands:
+            if audit_sm3_to_sm2.reg_type(operand) == audit_sm3_to_sm2.REG_TEMP:
+                highest = max(highest, audit_sm3_to_sm2.reg_number(operand))
+    return highest
+
 def format_mask(mask: int) -> str:
     return "".join(letter for bit, letter in enumerate("xyzw") if mask & (1 << bit)) or "-"
 
@@ -206,6 +221,12 @@ def audit_shader_interface(
     ambiguous: list[str] = []
 
     for pixel_input in pixel_inputs:
+        if pixel_input.get("instruction_modifier_bits", 0):
+            ambiguous.append(
+                f"{pixel_input['semantic']} uses DCL interpolation modifier bits "
+                f"0x{pixel_input['instruction_modifier_bits']:02X}; interpolation mode "
+                "requires explicit VS2/PS2 compatibility review"
+            )
         key = semantic_key(pixel_input)
         semantic = pixel_input["semantic"]
         candidates = outputs.get(key, [])
@@ -371,6 +392,10 @@ def validate_vertex_layout(
                 )
             else:
                 buffer_check = "first_element_span_fits"
+                warnings.append(
+                    f"vertex semantic {semantic}: allocation check covers the first element only; "
+                    "the full draw index/vertex range is not validated"
+                )
         else:
             warnings.append(
                 f"vertex buffer size for stream {stream_index} was not captured"
@@ -660,8 +685,47 @@ def audit_draw(
         result["warnings"].append("vertex input layout is not fully verified")
     if not caps:
         result["warnings"].append("no device capability snapshot is available")
-    elif not caps.get("vertex_shader") or not caps.get("pixel_shader"):
-        result["warnings"].append("captured shader-model capability fields are incomplete")
+    else:
+        vertex_cap = caps.get("vertex_shader")
+        pixel_cap = caps.get("pixel_shader")
+        if not vertex_cap or not pixel_cap:
+            result["warnings"].append("captured shader-model capability fields are incomplete")
+        else:
+            result["device_limits"]["vertex_shader_profile"] = vertex_cap.get("profile")
+            result["device_limits"]["pixel_shader_profile"] = pixel_cap.get("profile")
+            for stage, capability in (("vertex", vertex_cap), ("pixel", pixel_cap)):
+                major = int(capability.get("major", 0))
+                minor = int(capability.get("minor", 0))
+                if (major, minor) < (2, 0):
+                    result["reasons"].append(
+                        f"captured device reports {stage}-shader model {major}.{minor}; "
+                        "the fallback path requires at least shader model 2.0"
+                    )
+
+        vs_temp_limit = int(caps.get("vs20_temps", -1))
+        vs_temps = vs_result.get("registers", {}).get("temp", [])
+        if vs_temp_limit >= 0 and vs_temps and max(vs_temps) >= vs_temp_limit:
+            result["reasons"].append(
+                f"vertex shader uses r{max(vs_temps)} but the captured VS2 temporary-register "
+                f"limit is {vs_temp_limit}"
+            )
+        ps_temp_limit = int(caps.get("ps20_temps", -1))
+        ps_highest_temp = max_ps_temp_register(ps_bytes)
+        if ps_temp_limit >= 0 and ps_highest_temp >= ps_temp_limit:
+            result["reasons"].append(
+                f"pixel shader uses r{ps_highest_temp} but the captured PS2 temporary-register "
+                f"limit is {ps_temp_limit}"
+            )
+        ps_slot_limit = int(caps.get("ps20_instruction_slots", -1))
+        ps_total_slots = int(ps_result.get("arithmetic_slots", 0)) + int(ps_result.get("texture_slots", 0))
+        result["device_limits"]["ps20_temporary_registers"] = ps_temp_limit
+        result["device_limits"]["ps20_instruction_slots"] = ps_slot_limit
+        result["device_limits"]["pixel_shader_instruction_slots_used"] = ps_total_slots
+        if ps_slot_limit >= 0 and ps_total_slots > ps_slot_limit:
+            result["reasons"].append(
+                f"pixel shader uses {ps_total_slots} instruction slots but the captured "
+                f"PS2 limit is {ps_slot_limit}"
+            )
 
     # Classification is deliberately conservative. "Candidate" is not a claim
     # of bytecode generation, driver acceptance or visual equivalence.
