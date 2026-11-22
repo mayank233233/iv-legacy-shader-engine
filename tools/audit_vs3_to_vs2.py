@@ -720,14 +720,36 @@ def audit_vs3_bytes(
                 reasons.append(
                     f"LOOP at DWORD {ins.offset} requires aL as its first operand"
                 )
-            elif source_swizzle(ins.operands[0]) != IDENTITY_SWIZZLE:
-                reasons.append(
-                    f"LOOP at DWORD {ins.offset} requires the default .xyzw swizzle on aL"
-                )
+            else:
+                if loop_register[1] != 0:
+                    reasons.append(
+                        f"LOOP at DWORD {ins.offset} uses invalid loop register aL{loop_register[1]}"
+                    )
+                if source_swizzle(ins.operands[0]) != IDENTITY_SWIZZLE:
+                    reasons.append(
+                        f"LOOP at DWORD {ins.offset} requires the default .xyzw swizzle on aL"
+                    )
+                if source_modifier(ins.operands[0]) != 0:
+                    reasons.append(
+                        f"LOOP at DWORD {ins.offset} does not allow a source modifier on aL"
+                    )
             if integer_register is None or integer_register[0] != REG_CONSTINT:
                 reasons.append(
                     f"LOOP at DWORD {ins.offset} requires an integer constant i# as its second operand"
                 )
+            else:
+                if integer_register[1] > 15:
+                    reasons.append(
+                        f"LOOP at DWORD {ins.offset} uses i{integer_register[1]}; vs_2_0 has i0-i15"
+                    )
+                if source_swizzle(ins.operands[1]) != IDENTITY_SWIZZLE:
+                    reasons.append(
+                        f"LOOP at DWORD {ins.offset} requires the default .xyzw swizzle on i#"
+                    )
+                if source_modifier(ins.operands[1]) != 0:
+                    reasons.append(
+                        f"LOOP at DWORD {ins.offset} does not allow a source modifier on i#"
+                    )
             if any(operand & 0xC000 for operand in ins.operands):
                 reasons.append(
                     f"LOOP at DWORD {ins.offset} sets reserved parameter-token bits"
@@ -1708,6 +1730,33 @@ def _self_test() -> None:
     ]
     loop_wrong_integer = audit_vs3_bytes(shader(*loop_wrong_integer_words))
     assert any("requires an integer constant i#" in reason for reason in loop_wrong_integer["reasons"])
+
+    loop_out_of_range_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            27,
+            make_source_token(REG_LOOP, 1),
+            make_source_token(REG_CONSTINT, 16),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    loop_out_of_range = audit_vs3_bytes(shader(*loop_out_of_range_words))
+    assert any("invalid loop register aL1" in reason for reason in loop_out_of_range["reasons"])
+    assert any("uses i16" in reason for reason in loop_out_of_range["reasons"])
+
+    loop_swizzle_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            27,
+            make_source_token(REG_LOOP, 0, 0x00),
+            make_source_token(REG_CONSTINT, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    loop_swizzle = audit_vs3_bytes(shader(*loop_swizzle_words))
+    assert any("default .xyzw swizzle on aL" in reason for reason in loop_swizzle["reasons"])
 
     # a0 is write-only; baseline vs_2_0 uses MOVA (not MOV) to update it.
     address_read_words = [
