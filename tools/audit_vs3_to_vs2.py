@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Conservative D3D9 vs_3_0 compatibility audit against the vs_2_0 baseline.
+"""Conservative D3D9 vs_3_0 to vs_2_0 audit and restricted bytecode emitter.
 
-This tool does not rewrite or emit shader bytecode. It inventories a narrow,
-straight-line subset that appears structurally compatible with vs_2_0 and
-explains why other programs are rejected. Even a candidate needs interface,
-driver and rendered-output validation.
+Only a narrow, statically checked straight-line subset is emitted. Candidates
+still require paired-interface, driver and rendered-output validation.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import re
 import struct
 import sys
 from collections import Counter
