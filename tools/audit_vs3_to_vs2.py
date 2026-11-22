@@ -1471,7 +1471,7 @@ def inspect_file(
     item["output_sha256"] = hashlib.sha256(bytecode).hexdigest()
     item["fallback_relative_path"] = (
         fallback_prefix.replace("/", "\\").strip("\\")
-        + "\\\\"
+        + "\\"
         + output_path.name
     )
     return item
