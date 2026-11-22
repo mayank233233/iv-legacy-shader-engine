@@ -553,6 +553,18 @@ def _self_test() -> None:
     assert imports[0]["table"] == "normal"
     assert imports[0]["original_first_thunk_rva"] == 0x1040
 
+    # Exercise the real PE parser's OFT==0 fallback to FirstThunk. The
+    # on-disk IAT contains name RVAs before the Windows loader resolves it.
+    oft_zero_image = bytearray(_synthetic_pe32())
+    struct.pack_into("<I", oft_zero_image, 0x200, 0)
+    oft_zero_imports = PE32Image(bytes(oft_zero_image)).normal_imports()
+    assert len(oft_zero_imports) == 1
+    assert oft_zero_imports[0]["name"] == "Direct3DCreate9"
+    assert oft_zero_imports[0]["original_first_thunk_rva"] == 0
+    oft_zero_assessment = assess_factory_hook_path(oft_zero_imports, [])
+    assert oft_zero_assessment["classification"] == "normal_import_without_lookup_table"
+    assert oft_zero_assessment["hook_candidate"] is False
+
     normal_candidate = assess_factory_hook_path(imports, [])
     assert normal_candidate["classification"] == "normal_iat_candidate"
     assert normal_candidate["hook_candidate"] is True
