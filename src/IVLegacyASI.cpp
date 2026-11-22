@@ -1120,14 +1120,14 @@ namespace
     {
         if (!g_shaderFallbacksEnabled || !fallbackBytes ||
             !fallbackByteCount || !resolvedPath || resolvedPathCount == 0 ||
-            g_shaderFallbackIniPath[0] == L'\\0')
+            g_shaderFallbackIniPath[0] == L'\0')
         {
             return false;
         }
 
         *fallbackBytes = NULL;
         *fallbackByteCount = 0;
-        resolvedPath[0] = L'\\0';
+        resolvedPath[0] = L'\0';
 
         wchar_t key[32] = {};
         _snwprintf_s(
