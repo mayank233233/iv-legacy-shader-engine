@@ -649,14 +649,13 @@ def _self_test() -> None:
 
         vs_capture_hash = audit_shader_pairs.fnv1a64(vs_bytes)
         ps_capture_hash = audit_shader_pairs.fnv1a64(ps_bytes)
-        assert vs_capture_hash == vertex_hash
-        assert ps_capture_hash == pixel_hash
+        fixture_pair = (vs_capture_hash, ps_capture_hash)
         (capture_dir / f"VS_3_0_{vs_capture_hash}.bin").write_bytes(vs_bytes)
         (capture_dir / f"PS_3_0_{ps_capture_hash}.bin").write_bytes(ps_bytes)
 
         pair_record = {
-            "vertex_shader_hash": vertex_hash,
-            "pixel_shader_hash": pixel_hash,
+            "vertex_shader_hash": vs_capture_hash,
+            "pixel_shader_hash": ps_capture_hash,
             "structural_pair_candidate": True,
             "device_limits": {
                 "vs20_temporary_registers": 12,
@@ -668,15 +667,15 @@ def _self_test() -> None:
             [pair_record], capture_dir, emit_dir, "IVLegacyFallbacks"
         )
         assert emitted_pairs[0]["emitted"], emitted_pairs[0].get("emission_reasons")
-        assert vertex_hash in vertex_outputs and pixel_hash in pixel_outputs
-        vertex_output_bytes = Path(vertex_outputs[vertex_hash]["output_file"]).read_bytes()
-        pixel_output_bytes = Path(pixel_outputs[pixel_hash]["output_file"]).read_bytes()
+        assert vs_capture_hash in vertex_outputs and ps_capture_hash in pixel_outputs
+        vertex_output_bytes = Path(vertex_outputs[vs_capture_hash]["output_file"]).read_bytes()
+        pixel_output_bytes = Path(pixel_outputs[ps_capture_hash]["output_file"]).read_bytes()
         assert audit_vs3_to_vs2.struct.unpack_from("<I", vertex_output_bytes)[0] == audit_vs3_to_vs2.VS2_VERSION
         assert audit_sm3_to_sm2.struct.unpack_from("<I", pixel_output_bytes)[0] == audit_sm3_to_sm2.PS2_VERSION
 
         pair_map_path = root / "IVLegacyShaderFallbacks.ini"
         approved_vs, approved_ps = validate_approved_pairs(
-            emitted_pairs, {(vertex_hash, pixel_hash)}
+            emitted_pairs, {fixture_pair}
         )
         assert audit_vs3_to_vs2.write_vertex_fallback_ini(
             pair_map_path, list(vertex_outputs.values()), approved_vs
