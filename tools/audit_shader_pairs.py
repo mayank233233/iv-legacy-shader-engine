@@ -220,10 +220,12 @@ def audit_shader_interface(
     component_errors: list[str] = []
     register_remaps: list[dict[str, Any]] = []
     ambiguous: list[str] = []
+    unsupported_semantics: list[str] = []
+    interpolation_review: list[str] = []
 
     for pixel_input in pixel_inputs:
         if pixel_input.get("instruction_modifier_bits", 0):
-            ambiguous.append(
+            interpolation_review.append(
                 f"{pixel_input['semantic']} uses DCL interpolation modifier bits "
                 f"0x{pixel_input['instruction_modifier_bits']:02X}; interpolation mode "
                 "requires explicit VS2/PS2 compatibility review"
@@ -256,6 +258,10 @@ def audit_shader_interface(
         vs_type = output.get("vs_2_0_register_type")
         vs_index = output.get("vs_2_0_register_index")
         ps_target = map_ps2_input(key[0], key[1])
+        if ps_target is None:
+            unsupported_semantics.append(
+                f"pixel input {semantic} has no mapping in the current PS2 fallback subset"
+            )
         vs_link_type = VS2_TO_PS2_LINK_TYPES.get(vs_type)
         mapping_matches = (
             vs_link_type is not None
@@ -298,10 +304,15 @@ def audit_shader_interface(
         "component_mask_errors": component_errors,
         "ambiguous_vertex_outputs": ambiguous,
         "register_relinks_required": register_remaps,
+        "unsupported_pixel_semantics": unsupported_semantics,
+        "interpolation_review": interpolation_review,
         "pixel_input_declaration_issues": [],
-        "interface_matches": not (missing or component_errors or ambiguous),
+        "interface_matches": not (
+            missing or component_errors or ambiguous or unsupported_semantics
+        ),
         "independent_vs2_ps2_allocations_match": (
-            not register_remaps and not missing and not component_errors and not ambiguous
+            not register_remaps and not missing and not component_errors
+            and not ambiguous and not unsupported_semantics
         ),
     }
 
@@ -599,6 +610,7 @@ def audit_draw(
 
     interface = audit_shader_interface(vs_result, ps_result, cached["pixel_inputs"])
     result["interface"] = interface
+    result["warnings"].extend(interface["interpolation_review"])
     layout = validate_vertex_layout(vs_result, draw)
     result["vertex_input_layout"] = layout
     if layout["reasons"]:
