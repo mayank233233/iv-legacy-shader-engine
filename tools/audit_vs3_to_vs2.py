@@ -1247,7 +1247,7 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     packed_unwritten = audit_vs3_bytes(shader(*packed_unwritten_words))
-    assert any("declared output semantic" in reason and "not written" in reason for reason in packed_unwritten["reasons"])
+    assert any("declared output semantic" in reason and "has unwritten components" in reason for reason in packed_unwritten["reasons"])
 
     over_budget_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
