@@ -54,6 +54,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools\audit_sm3_to_sm2.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools\audit_vs3_to_vs2.py --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools\inspect_gtaiv_executable.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
