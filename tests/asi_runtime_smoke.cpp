@@ -847,6 +847,10 @@ int main()
 
     if (!PatchImportToFakeCreate9())
         return Fail("Could not patch the synthetic host IAT to its fake D3D9 factory");
+    std::printf(
+        "SMOKE: fake state-block vtable slots create=%p begin=%p end=%p\\n",
+        g_fakeDeviceVTable[58], g_fakeDeviceVTable[59], g_fakeDeviceVTable[60]);
+    std::fflush(stdout);
 
     const wchar_t* iniPath = L"build\\bin\\IVLegacy.ini";
     WritePrivateProfileStringW(
