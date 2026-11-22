@@ -328,3 +328,13 @@ Synthetic tests now verify:
 Standalone vertex-audit CI run #224 passed these cases. The Windows x86 job for the same commit was still in environment setup at the last check. No real GTA IV shader or Intel GMA 3100 hardware has been tested.
 
 Reference: [Microsoft D3D9 dcl_usage output register](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dcl-usage-outut-register---vs).
+
+### Read-only D3D9 render-pipeline capture — 2026-11-22
+
+The current implementation milestone is observation, not a reduced renderer. When draw telemetry is enabled, the ASI snapshots up to four current render-target bindings and the active depth-stencil binding alongside every draw call. Descriptors include dimensions, D3D format, surface type, usage, pool and multisampling metadata. The state is refreshed after successful Set calls and initially queried after device creation/reset with D3D9 getter methods. Failed state changes do not replace the cached state; reset clears old snapshot metadata. Getter-returned COM references are released after the descriptor is copied.
+
+The offline log parser now associates each draw with the captured target/depth descriptors, groups use by surface object/resolution/format/shader pair, and retains adapter identity and driver strings. It also parses vertex/pixel caps, `CheckDeviceFormat` and `CheckDepthStencilMatch` results, device creation parameters, and render/depth surface creation/binding events. These observations let a later real capture tell us which formats are accepted and which surfaces are actually bound at each draw.
+
+**Do not infer pass identity from format or dimensions alone.** The report does not claim that a particular surface is a G-buffer, shadow map, reflection, water or post-process target without correlating the shader pair, draw sequence, state and (eventually) captured image. No render target is suppressed or redirected; no render state, shader capability, LOD, population, physics, mission or game-simulation setting is changed by this telemetry work.
+
+All automated coverage uses synthetic logs/fake D3D9 devices. The normal game render path is unchanged, but actual-game correctness and performance remain unverified until a real capture and gameplay test are possible. The current pixel shader fallback is still opt-in/manual-map only; there is still no runtime VS3 replacement path and no complete shader translator.
