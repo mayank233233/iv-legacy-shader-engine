@@ -36,6 +36,7 @@ namespace
         kDevicePresentSlot = 17,
         kDeviceCreateRenderTargetSlot = 28,
         kDeviceCreateDepthStencilSurfaceSlot = 29,
+        kDeviceSetViewportSlot = 47,
         kDeviceSetRenderTargetSlot = 37,
         kDeviceGetRenderTargetSlot = 38,
         kDeviceSetDepthStencilSurfaceSlot = 39,
@@ -164,6 +165,7 @@ namespace
     wchar_t g_shaderConstantCaptureDirectory[MAX_PATH] = {};
     volatile LONG g_renderTargetLogCount = 0;
     volatile LONG g_depthTargetCreateLogCount = 0;
+    volatile LONG g_viewportLogCount = 0;
     volatile LONG g_setRenderTargetLogCount = 0;
     volatile LONG g_setDepthTargetLogCount = 0;
     BOOL g_telemetryEnabled = TRUE;
@@ -193,6 +195,8 @@ namespace
         IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
     typedef HRESULT (WINAPI* DevicePresentFn)(
         IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*);
+    typedef HRESULT (WINAPI* DeviceSetViewportFn)(
+        IDirect3DDevice9*, const D3DVIEWPORT9*);
     typedef HRESULT (WINAPI* DeviceCreateRenderTargetFn)(
         IDirect3DDevice9*, UINT, UINT, D3DFORMAT, D3DMULTISAMPLE_TYPE,
         DWORD, BOOL, IDirect3DSurface9**, HANDLE*);
@@ -280,6 +284,7 @@ namespace
     DeviceGetDeviceCapsFn g_realDeviceGetDeviceCaps = NULL;
     DeviceResetFn g_realDeviceReset = NULL;
     DevicePresentFn g_realDevicePresent = NULL;
+    DeviceSetViewportFn g_realDeviceSetViewport = NULL;
     DeviceCreateRenderTargetFn g_realDeviceCreateRenderTarget = NULL;
     DeviceCreateDepthStencilSurfaceFn g_realDeviceCreateDepthStencilSurface = NULL;
     DeviceSetRenderTargetFn g_realDeviceSetRenderTarget = NULL;
@@ -1906,6 +1911,37 @@ namespace
                     "SET_DEPTH_STENCIL_SURFACE object=%p desc_available=%u hr=0x%08lX",
                     surface,
                     hasDescription ? 1 : 0,
+                    static_cast<unsigned long>(hr));
+            }
+        }
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceSetViewport(
+        IDirect3DDevice9* self,
+        const D3DVIEWPORT9* viewport)
+    {
+        const HRESULT hr = g_realDeviceSetViewport
+            ? g_realDeviceSetViewport(self, viewport)
+            : D3DERR_INVALIDCALL;
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_viewportLogCount) <= 4096)
+        {
+            if (viewport)
+            {
+                Log(
+                    "SET_VIEWPORT x=%lu y=%lu width=%lu height=%lu min_z=%.6f max_z=%.6f hr=0x%08lX",
+                    static_cast<unsigned long>(viewport->X),
+                    static_cast<unsigned long>(viewport->Y),
+                    static_cast<unsigned long>(viewport->Width),
+                    static_cast<unsigned long>(viewport->Height),
+                    static_cast<double>(viewport->MinZ),
+                    static_cast<double>(viewport->MaxZ),
+                    static_cast<unsigned long>(hr));
+            }
+            else
+            {
+                Log("SET_VIEWPORT viewport=NULL hr=0x%08lX",
                     static_cast<unsigned long>(hr));
             }
         }
@@ -3622,6 +3658,7 @@ namespace
             reinterpret_cast<DeviceGetDeviceCapsFn>(original[kDeviceGetDeviceCapsSlot]);
         g_realDeviceReset = reinterpret_cast<DeviceResetFn>(original[kDeviceResetSlot]);
         g_realDevicePresent = reinterpret_cast<DevicePresentFn>(original[kDevicePresentSlot]);
+        g_realDeviceSetViewport = reinterpret_cast<DeviceSetViewportFn>(original[kDeviceSetViewportSlot]);
         g_realDeviceCreateRenderTarget =
             reinterpret_cast<DeviceCreateRenderTargetFn>(original[kDeviceCreateRenderTargetSlot]);
         g_realDeviceCreateDepthStencilSurface =
@@ -3725,6 +3762,7 @@ namespace
         }
         if (g_drawTelemetryEnabled)
         {
+            hooked[kDeviceSetViewportSlot] = reinterpret_cast<void*>(HookDeviceSetViewport);
             hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
             hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
             hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
