@@ -579,7 +579,15 @@ def audit_draw(
     cache_key = (vs_hash, ps_hash)
     cached = stage_cache.get(cache_key)
     if cached is None:
-        vs_result = audit_vs3_to_vs2.audit_vs3_bytes(vs_bytes)
+        vs_limits: dict[str, int] = {}
+        if caps:
+            captured_vs_temps = int(caps.get("vs20_temps", -1))
+            captured_vs_constants = int(caps.get("max_vertex_shader_constants", -1))
+            if captured_vs_temps > 0:
+                vs_limits["max_temps"] = captured_vs_temps
+            if captured_vs_constants > 0:
+                vs_limits["max_float_constants"] = captured_vs_constants
+        vs_result = audit_vs3_to_vs2.audit_vs3_bytes(vs_bytes, **vs_limits)
         ps_result = audit_sm3_to_sm2.audit_and_lower_ps3(ps_bytes)
         ps_inputs, ps_parse_reasons = parse_ps_inputs(ps_bytes)
         cached = {
@@ -671,6 +679,9 @@ def audit_draw(
     result["device_limits"] = {
         "max_simultaneous_render_targets": max_rts,
         "active_render_targets": len(active_targets),
+        "max_vertex_shader_constants": (
+            int(caps.get("max_vertex_shader_constants", -1)) if caps else -1
+        ),
     }
     if max_rts >= 0 and len(active_targets) > max_rts:
         result["reasons"].append(
@@ -735,6 +746,19 @@ def audit_draw(
             result["reasons"].append(
                 f"vertex shader uses r{max(vs_temps)} but the captured VS2 temporary-register "
                 f"limit is {vs_temp_limit}"
+            )
+        vs_constant_limit = int(caps.get("max_vertex_shader_constants", -1))
+        vs_highest_constant = vs_result.get("highest_float_constant_register")
+        result["device_limits"]["vs20_temporary_registers"] = vs_temp_limit
+        result["device_limits"]["vs20_highest_float_constant"] = vs_highest_constant
+        if (
+            vs_constant_limit >= 0
+            and vs_highest_constant is not None
+            and int(vs_highest_constant) >= vs_constant_limit
+        ):
+            result["reasons"].append(
+                f"vertex shader reads c{vs_highest_constant} but the captured D3D9 "
+                f"MaxVertexShaderConst limit is {vs_constant_limit}"
             )
         ps_temp_limit = int(caps.get("ps20_temps", -1))
         ps_highest_temp = max_ps_temp_register(ps_bytes)
