@@ -105,7 +105,7 @@ python tools/audit_vs3_to_vs2.py IVLegacyCaptures \
   --report build/bin/vertex_downlevel.json
 ```
 
-The output files are candidates, not certified replacements. The tool reports a source FNV-1a hash and a relative fallback path. After reviewing the paired-shader audit, render states, vertex layout, constants and actual output, an explicitly approved hash can be added to the runtime map:
+The output files are candidates, not certified replacements. The tool reports a source FNV-1a hash and a relative fallback path. For a real adapter, set `--max-temps` and `--max-float-constants` to the values captured from that adapter (`VS20Temps` and `MaxVertexShaderConst` in `IVLegacy.log)); the default limits are the baseline VS2 ceilings, not measured GMA 3100 values. The paired audit independently checks captured limits. Only after reviewing the paired shader, render states, vertex layout, constants and actual output should an explicitly approved hash be added to the runtime map:
 
 ```sh
 python tools/audit_vs3_to_vs2.py IVLegacyCaptures \
