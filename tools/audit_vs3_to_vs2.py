@@ -99,7 +99,7 @@ VS2_PARAMETER_COUNTS = {
     1: 2, 2: 3, 3: 3, 4: 4, 5: 3, 6: 2, 7: 2, 8: 3, 9: 3,
     10: 3, 11: 3, 12: 3, 13: 3, 14: 2, 15: 2, 16: 2, 17: 3,
     18: 4, 19: 2, 20: 3, 21: 3, 22: 3, 23: 3, 24: 3,
-    25: 1, 26: 2, 27: 2, 28: 0, 29: 0, 30: 1, 31: 2,
+    25: 1, 26: 2, 27: 1, 28: 0, 29: 0, 30: 1, 31: 2,
     32: 3, 33: 3, 34: 4, 35: 2, 36: 2, 37: 2,
     38: 1, 39: 0, 40: 1, 42: 0, 43: 0, 46: 2,
     47: 2, 48: 5, 78: 2, 79: 2, 81: 5,
@@ -132,6 +132,15 @@ USAGE_PSIZE = 4
 USAGE_TEXCOORD = 5
 USAGE_COLOR = 10
 USAGE_FOG = 11
+D3DDECLUSAGE_NAMES = {
+    0: "POSITION", 1: "BLENDWEIGHT", 2: "BLENDINDICES", 3: "NORMAL",
+    4: "PSIZE", 5: "TEXCOORD", 6: "TANGENT", 7: "BINORMAL",
+    8: "TESSFACTOR", 9: "POSITIONT", 10: "COLOR", 11: "FOG",
+    12: "DEPTH", 13: "SAMPLE",
+}
+MATRIX_ROWS = {20: 4, 21: 3, 22: 4, 23: 3, 24: 2}
+MATRIX_DEST_MASKS = {20: 0xF, 21: 0x7, 22: 0xF, 23: 0x7, 24: 0x3}
+IDENTITY_SWIZZLE = 0xE4
 
 @dataclass(frozen=True)
 class Instruction:
@@ -153,13 +162,33 @@ def decode_register(token: int) -> tuple[int, int] | None:
 
 
 def make_parameter_token(register_type: int, register: int) -> int:
-    """Build a D3D9 register token for deterministic self-tests."""
+    """Build the common D3D9 register-type/index fields for self-tests."""
     return (
         0x80000000
         | (register & 0x7FF)
         | ((register_type & 0x7) << 28)
         | ((register_type & 0x18) << 8)
     )
+
+
+def make_dest_token(register_type: int, register: int, mask: int = 0xF) -> int:
+    return make_parameter_token(register_type, register) | ((mask & 0xF) << 16)
+
+
+def make_source_token(register_type: int, register: int, swizzle: int = 0xE4) -> int:
+    return make_parameter_token(register_type, register) | ((swizzle & 0xFF) << 16)
+
+
+def destination_mask(token: int) -> int:
+    return (token >> 16) & 0xF
+
+
+def source_swizzle(token: int) -> int:
+    return (token >> 16) & 0xFF
+
+
+def source_modifier(token: int) -> int:
+    return (token >> 24) & 0xF
 
 
 def make_instruction(opcode: int, *operands: int) -> list[int]:
@@ -267,14 +296,27 @@ def audit_vs3_bytes(
     input_declarations: dict[int, dict[str, int]] = {}
     output_declarations: dict[int, dict[str, Any]] = {}
     output_targets: dict[tuple[int, int], int] = {}
-    written_outputs: set[tuple[int, int]] = set()
+    written_outputs: dict[tuple[int, int], int] = {}
+    input_semantics: dict[tuple[int, int], int] = {}
     registers: dict[str, set[int]] = {
         "temp": set(), "input": set(), "float_constant": set(),
         "integer_constant": set(), "boolean_constant": set(),
         "sampler": set(), "output": set(),
     }
 
-    # Pass one: declarations must be known before validating use sites.
+    # DCL/setup instructions must precede executable instructions. The parser
+    # has already discarded COMMENT payloads, so this is a direct code-order check.
+    seen_executable = False
+    for ins in instructions:
+        if ins.opcode == OP_DCL:
+            if seen_executable:
+                reasons.append(
+                    f"DCL at DWORD {ins.offset} appears after the first executable instruction"
+                )
+        elif ins.opcode not in (OP_DEF, OP_DEFB, OP_DEFI):
+            seen_executable = True
+
+    # Pass one: gather and validate declarations before validating use sites.
     for ins in instructions:
         if ins.opcode != OP_DCL:
             continue
@@ -290,6 +332,47 @@ def audit_vs3_bytes(
         register_type, register_number = decoded
         usage = declaration & 0xF
         usage_index = (declaration >> 16) & 0xF
+        declared_mask = destination_mask(destination)
+
+        if destination & 0xC000:
+            reasons.append(f"DCL at DWORD {ins.offset} sets reserved destination-token bits")
+        if destination & (1 << 13):
+            reasons.append(f"DCL at DWORD {ins.offset} uses relative addressing on a destination")
+        if declared_mask == 0:
+            reasons.append(f"DCL at DWORD {ins.offset} declares an empty component mask")
+
+        if register_type == REG_SAMPLER:
+            sampler_type = (declaration & 0x78000000) >> 27
+            if declaration & ~0xF8000000:
+                reasons.append(
+                    f"sampler DCL at DWORD {ins.offset} sets unsupported declaration bits"
+                )
+            if sampler_type not in (2, 3, 4):
+                reasons.append(
+                    f"vertex sampler s{register_number} has unsupported texture type {sampler_type}"
+                )
+            if register_number >= 4:
+                reasons.append(
+                    f"vertex sampler s{register_number} exceeds the vs_3_0 s0-s3 range"
+                )
+            reasons.append(
+                f"vertex sampler s{register_number} is not supported by the vs_2_0 path"
+            )
+            registers["sampler"].add(register_number)
+            continue
+
+        if declaration & ~0x800F000F:
+            reasons.append(
+                f"DCL at DWORD {ins.offset} sets unsupported usage-token bits"
+            )
+        if not (declaration & 0x80000000):
+            reasons.append(
+                f"DCL at DWORD {ins.offset} is missing the declaration-token marker bit"
+            )
+        if usage not in D3DDECLUSAGE_NAMES:
+            reasons.append(
+                f"DCL at DWORD {ins.offset} has unknown semantic usage {usage}"
+            )
 
         if register_type == REG_INPUT:
             if register_number >= 16:
@@ -298,8 +381,18 @@ def audit_vs3_bytes(
                 )
             if register_number in input_declarations:
                 reasons.append(f"input v{register_number} is declared more than once")
+            semantic_key = (usage, usage_index)
+            if semantic_key in input_semantics:
+                reasons.append(
+                    f"input semantic {D3DDECLUSAGE_NAMES.get(usage, usage)}{usage_index} "
+                    f"is declared by both v{input_semantics[semantic_key]} and v{register_number}"
+                )
+            input_semantics[semantic_key] = register_number
             input_declarations[register_number] = {
-                "usage": usage, "usage_index": usage_index
+                "usage": usage,
+                "usage_name": D3DDECLUSAGE_NAMES.get(usage, f"UNKNOWN_{usage}"),
+                "usage_index": usage_index,
+                "component_mask": declared_mask,
             }
         elif register_type == REG_OUTPUT:
             if register_number >= 12:
@@ -309,7 +402,9 @@ def audit_vs3_bytes(
             target = output_mapping(usage, usage_index)
             semantic = {
                 "usage": usage,
+                "usage_name": D3DDECLUSAGE_NAMES.get(usage, f"UNKNOWN_{usage}"),
                 "usage_index": usage_index,
+                "component_mask": declared_mask,
             }
             if target is None:
                 reasons.append(
@@ -328,11 +423,6 @@ def audit_vs3_bytes(
                 semantic["target_register_type"] = target[0]
                 semantic["target_register_index"] = target[1]
             output_declarations[register_number] = semantic
-        elif register_type == REG_SAMPLER:
-            reasons.append(
-                f"vertex sampler s{register_number} is not supported by the vs_2_0 path"
-            )
-            registers["sampler"].add(register_number)
         else:
             reasons.append(
                 f"DCL at DWORD {ins.offset} targets register type {register_type}, "
@@ -343,6 +433,7 @@ def audit_vs3_bytes(
         number: (
             declaration.get("target_register_type"),
             declaration.get("target_register_index"),
+            declaration.get("component_mask", 0),
         )
         for number, declaration in output_declarations.items()
         if "target_register_type" in declaration
@@ -404,6 +495,54 @@ def audit_vs3_bytes(
             )
             continue
 
+        # Matrix instructions have a specific constant-file matrix operand and
+        # fixed destination masks. The matrix source cannot be modified/swizzled.
+        if opcode in MATRIX_ROWS:
+            expected_mask = MATRIX_DEST_MASKS[opcode]
+            actual_mask = destination_mask(ins.operands[0])
+            if actual_mask != expected_mask:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} requires destination mask "
+                    f"0x{expected_mask:X}, got 0x{actual_mask:X}"
+                )
+            matrix_token = ins.operands[2]
+            matrix_register = decode_register(matrix_token)
+            if matrix_register is None or matrix_register[0] != REG_CONST:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} requires a float-constant matrix source"
+                )
+            else:
+                first_constant = matrix_register[1]
+                if first_constant + MATRIX_ROWS[opcode] > max_float_constants:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} reads past configured "
+                        "vs_2_0 float-constant range"
+                    )
+            if source_swizzle(matrix_token) != IDENTITY_SWIZZLE or source_modifier(matrix_token) != 0:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} requires an unmodified, identity-swizzled matrix source"
+                )
+
+        # EXP/LOG/POW forms require explicit scalar replication on their inputs.
+        scalar_source_indices = {
+            14: (1,), 15: (1,), 32: (1, 2), 78: (1,), 79: (1,)
+        }.get(opcode, ())
+        for source_index in scalar_source_indices:
+            if source_swizzle(ins.operands[source_index]) not in (
+                0x00, 0x55, 0xAA, 0xFF
+            ):
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} requires a scalar-replicate source swizzle"
+                )
+
+        if opcode == 34:
+            for temp_operand in ins.operands[2:4]:
+                decoded_temp = decode_register(temp_operand)
+                if decoded_temp is None or decoded_temp[0] != REG_TEMP:
+                    reasons.append(
+                        f"SGN at DWORD {ins.offset} requires its final two operands to be temporary registers"
+                    )
+
         # DEF-family payload DWORDs are literal values, not register tokens.
         for operand_index, operand in enumerate(_register_operands(ins)):
             decoded = decode_register(operand)
@@ -427,6 +566,16 @@ def audit_vs3_bytes(
                 and opcode not in (25, 26, 27, 28, 29, 30, 38, 39, 40, 42, 43)
             )
 
+            if operand & 0xC000:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} sets reserved parameter-token bits"
+                )
+            if is_destination and opcode not in (OP_DEF, OP_DEFB, OP_DEFI):
+                if destination_mask(operand) == 0:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} has an empty destination write mask"
+                    )
+
             if is_destination:
                 if opcode == OP_DEF and register_type != REG_CONST:
                     reasons.append(f"DEF at DWORD {ins.offset} must target a float constant register")
@@ -434,9 +583,9 @@ def audit_vs3_bytes(
                     reasons.append(f"DEFB at DWORD {ins.offset} must target a boolean constant register")
                 elif opcode == OP_DEFI and register_type != REG_CONSTINT:
                     reasons.append(f"DEFI at DWORD {ins.offset} must target an integer constant register")
-                elif opcode == 46 and register_type != REG_ADDR:
+                elif opcode in (1, 46) and register_type != REG_ADDR and opcode == 46:
                     reasons.append(f"MOVA at DWORD {ins.offset} must target address register a0")
-                elif opcode != 46 and register_type == REG_ADDR:
+                elif opcode not in (1, 46) and register_type == REG_ADDR:
                     reasons.append(f"{name} at DWORD {ins.offset} may not write address register a0")
                 elif opcode not in (OP_DEF, OP_DEFB, OP_DEFI) and register_type in (
                     REG_INPUT, REG_CONST, REG_CONSTINT, REG_CONSTBOOL,
@@ -472,20 +621,20 @@ def audit_vs3_bytes(
             elif register_type == REG_ADDR:
                 if register_number != 0:
                     reasons.append(f"{name} at DWORD {ins.offset} uses unsupported address register a{register_number}")
-            elif register_type == REG_RASTOUT:
-                if register_number > 2:
-                    reasons.append(f"{name} at DWORD {ins.offset} writes invalid raster output o{register_number}")
-                elif not is_destination:
-                    reasons.append(f"{name} at DWORD {ins.offset} reads a write-only raster output")
-                else:
-                    written_outputs.add((REG_RASTOUT, register_number))
-            elif register_type == REG_ATTROUT:
-                if register_number > 1:
-                    reasons.append(f"{name} at DWORD {ins.offset} writes oD{register_number}; vs_2_0 has oD0-oD1")
-                elif not is_destination:
-                    reasons.append(f"{name} at DWORD {ins.offset} reads a write-only color output")
-                else:
-                    written_outputs.add((REG_ATTROUT, register_number))
+                if not is_destination:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} reads a0 directly; the address register "
+                        "is only used for relative constant addressing"
+                    )
+                elif opcode not in (1, 46):
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} may not write address register a0"
+                    )
+            elif register_type in (REG_RASTOUT, REG_ATTROUT):
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses a legacy fixed-output register type "
+                    "that is not part of the vs_3_0 output register file"
+                )
             elif register_type == REG_OUTPUT:
                 registers["output"].add(register_number)
                 target = declared_outputs.get(register_number)
@@ -499,18 +648,40 @@ def audit_vs3_bytes(
                         f"{name} at DWORD {ins.offset} reads a write-only vertex output"
                     )
                 else:
-                    written_outputs.add(target)
+                    target_type, target_index, declared_mask = target
+                    write_mask = destination_mask(operand)
+                    if write_mask & ~declared_mask:
+                        reasons.append(
+                            f"{name} at DWORD {ins.offset} writes components outside "
+                            f"the declared mask for output o{register_number}"
+                        )
+                    mapped_target = (target_type, target_index)
+                    written_outputs[mapped_target] = (
+                        written_outputs.get(mapped_target, 0) | write_mask
+                    )
             elif register_type == REG_CONSTINT:
                 registers["integer_constant"].add(register_number)
                 if register_number > 15:
                     reasons.append(f"{name} at DWORD {ins.offset} reads i{register_number}; vs_2_0 has i0-i15")
+                if not is_destination:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} reads i{register_number}; "
+                        "integer constants are outside this no-flow-control subset"
+                    )
             elif register_type == REG_CONSTBOOL:
                 registers["boolean_constant"].add(register_number)
                 if register_number > 15:
                     reasons.append(f"{name} at DWORD {ins.offset} reads b{register_number}; vs_2_0 has b0-b15")
+                if not is_destination:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} reads b{register_number}; "
+                        "boolean constants are outside this no-flow-control subset"
+                    )
             elif register_type == REG_LOOP:
-                if register_number != 0:
-                    reasons.append(f"{name} at DWORD {ins.offset} uses invalid loop register aL{register_number}")
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses aL; loop counter semantics "
+                    "require the unimplemented flow-control audit"
+                )
             elif register_type == REG_SAMPLER:
                 registers["sampler"].add(register_number)
                 reasons.append(
@@ -540,8 +711,12 @@ def audit_vs3_bytes(
         )
 
     position_output = (REG_RASTOUT, 0)
-    if position_output not in written_outputs:
-        reasons.append("shader does not write the required vs_2_0 position output oPos")
+    position_mask = written_outputs.get(position_output, 0)
+    if position_mask != 0xF:
+        reasons.append(
+            "shader must write all four position components xyzw; "
+            f"the mapped oPos write mask is 0x{position_mask:X}"
+        )
 
     reasons = list(dict.fromkeys(reasons))
     candidate = not reasons
@@ -551,6 +726,7 @@ def audit_vs3_bytes(
                 "usage": declaration["usage"],
                 "usage_index": declaration["usage_index"],
             },
+            "declared_component_mask": declaration.get("component_mask", 0),
             "vs_2_0_register_type": declaration.get("target_register_type"),
             "vs_2_0_register_index": declaration.get("target_register_index"),
         }
@@ -580,8 +756,12 @@ def audit_vs3_bytes(
         },
         "output_mapping_plan": output_map_report,
         "written_outputs": [
-            {"register_type": register_type, "register_index": register_index}
-            for register_type, register_index in sorted(written_outputs)
+            {
+                "register_type": register_type,
+                "register_index": register_index,
+                "component_mask": mask,
+            }
+            for (register_type, register_index), mask in sorted(written_outputs.items())
         ],
         "reasons": reasons,
         "output_bytecode": None,
