@@ -252,7 +252,7 @@ The initial subset explicitly rejects:
 - The two-operand VS3 `sincos` form, because VS2 uses a different four-operand form.
 - Vertex texture sampling, predicate registers and VS3-only instructions.
 - Relative register addressing and pre-transformed `POSITIONT` outputs.
-- `MOV` writes to `a0`; VS2 requires `MOVA` for address-register writes.
+- Baseline `vs_2_0` address-register update is restricted to `MOVA a0.x`. The `MOV a0` path is documented for `vs_1_1`; arbitrary `MOVA` component write masks are documented only for `vs_2_x` and later.
 - Missing writes to the required full-width position output.
 
 The output interface is not treated as a one-source-register/one-destination-register mapping. VS3 permits distinct semantics to occupy disjoint component masks of one output register. The audit retains these declarations as separate entries, checks that masks do not overlap and that repeated semantic identifiers are not used, then assigns each semantic to one of the ten generic VS2 outputs (`oD0/oD1`, `oT0-oT7`). Standard `COLOR0/1` mappings are preserved. TEXCOORD semantics are compacted in sorted order into consecutive `oT0-oT7` slots; dense sequences retain their original indices, while sparse sequences such as only `TEXCOORD1` are mapped to `oT0` and flagged for a paired pixel-shader DCL rewrite. Other semantics (including VS3 `FOG`) are allocated to remaining VS2 color/texture outputs and flagged for the same reason. Position and point size remain special outputs. The analyzer makes no claim that these interface rewrites have been implemented in bytecode.
@@ -264,3 +264,18 @@ Specification references:
 - [Microsoft: Registers — vs_2_0](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-2-0)
 - [Microsoft: Instructions — vs_2_0](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-instructions-vs-2-0)
 - [Microsoft: Flow Control Nesting Limits](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-instructions-flow-control)
+
+
+### Matrix-instruction audit rules — 2026-11-22
+
+The analyzer now enforces the exact D3D9 vertex-shader matrix-op destination masks and constant spans:
+
+| Instruction | Destination mask | Consecutive matrix constants |
+|---|---|---:|
+| m4x4 | `.xyzw` | 4 |
+| m4x3 | `.xyz` | 3 |
+| m3x4 | `.xyzw` | 4 |
+| m3x3 | `.xyz` | 3 |
+| m3x2 | `.xy` | 2 |
+
+The number of constant registers follows the result dimension (the second dimension of the matrix op). The source matrix register may not be swizzled or negated, and the destination may not alias the vector source. These rules are covered by synthetic boundary and negative fixtures. See the Microsoft [m4x4](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m4x4---vs), [m4x3](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m4x3---vs), [m3x4](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x4---vs), [m3x3](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x3---vs), and [m3x2](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x2---vs) references.
