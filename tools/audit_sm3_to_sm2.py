@@ -1011,10 +1011,17 @@ def _self_test() -> None:
         assert record["eligible"], record.get("reasons")
         assert record["source_fnv1a64"] == fnv1a64(source)
         map_path = root / "IVLegacyShaderFallbacks.ini"
+        map_path.write_text(
+            "[VertexShaderFallbacks]\\n"
+            "FEDCBA9876543210=IVLegacyFallbacks\\smoke.vs20.vso\\n",
+            encoding="utf-8",
+        )
         count = write_fallback_ini(map_path, [record])
         assert count == 1
         map_text = map_path.read_text(encoding="utf-8")
         assert f"{record['source_fnv1a64']}={record['fallback_relative_path']}" in map_text
+        assert "[VertexShaderFallbacks]" in map_text
+        assert "FEDCBA9876543210=IVLegacyFallbacks\\smoke.vs20.vso" in map_text
 
     print("PASS: conservative ps_3_0 to ps_2_0 downlevel and fallback-map self-tests")
 
