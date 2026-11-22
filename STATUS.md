@@ -318,3 +318,19 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Artifact: `iv-legacy-shader-engine-windows-x86`, 237,403 bytes, SHA-256 `baaf821d66560a20d2aafebe34982aec5e307ede6e4fa4ce338105f34c8ca556`, run #239.
 - These are Windows CI and synthetic tests only. They do not establish that GTA IV 1.0.0.0 launches, renders correctly, or reaches any FPS on an Intel GMA 3100.
 - Branch `feature/vs3-vs2-vertex-audit` remains separate; `main` was not changed.
+
+## Draw-level paired VS3/PS3 compatibility audit — 2026-11-22
+
+- Created isolated development branch `feature/paired-shader-interface-audit` from `feature/vs3-vs2-vertex-audit`; `main` and the previous development branch are unchanged.
+- Added `tools/audit_shader_pairs.py`, a read-only analysis tool that correlates each logged draw's active VS/PS object hashes with captured bytecode using the ASI's FNV-1a 64-bit hash.
+- The tool currently targets `vs_3_0 + ps_3_0` pairs. It reuses the existing conservative stage auditors, checks original VS-output / PS-input semantics and component masks, and identifies cases where the independently generated VS2 and PS2 register allocations would require a coordinated relink.
+- Packed PS3 input registers carrying multiple semantics are reported explicitly because the current PS3-to-PS2 lowerer cannot split one input register across multiple PS2 registers.
+- Added per-draw vertex-input checks against captured `D3DVERTEXELEMENT9` declarations or a limited common-FVF decoder, including stream binding, stride, declaration method and first-element allocation span. Unknown FVF encodings fail closed.
+- Added checks for non-null texture bindings at declared/used pixel sampler stages, active render-target count versus the captured device limit, shader-model floor, captured VS2/PS2 temporary-register limits and pixel instruction-slot limits.
+- Interpolation DCL modifiers, absent detailed blend/depth/alpha/sampler-state values, and unvalidated full draw vertex/index ranges remain visible as warnings. The tool does not infer state meaning from hashes.
+- Added synthetic self-tests for semantic matching, sparse TEXCOORD relinking, packed pixel inputs, explicit vertex declarations, FVF decoding, device caps and end-to-end hash-to-draw correlation.
+- Wired the paired audit's syntax check and self-test into the Ubuntu audit job and Windows x86 build job in `.github/workflows/windows-x86-build.yml`.
+- **Verification pending:** the new branch's GitHub Actions run has not yet been confirmed. A passing synthetic self-test will establish only parser/decision logic, not real-game compatibility.
+- No actual original GTA IV shader capture, original executable import inspection, ASI-loaded gameplay session, physical GMA 3100 render, screenshot comparison or FPS measurement has been performed.
+- The tool emits no replacement bytecode, does not modify D3D9 state, does not spoof capabilities and does not drop rendering passes.
+
