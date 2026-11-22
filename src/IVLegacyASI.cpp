@@ -36,7 +36,9 @@ namespace
         kDeviceCreateRenderTargetSlot = 28,
         kDeviceCreateDepthStencilSurfaceSlot = 29,
         kDeviceSetRenderTargetSlot = 37,
+        kDeviceGetRenderTargetSlot = 38,
         kDeviceSetDepthStencilSurfaceSlot = 39,
+        kDeviceGetDepthStencilSurfaceSlot = 40,
         kDeviceCreateVertexShaderSlot = 91,
         kDeviceSetVertexShaderSlot = 92,
         kDeviceCreatePixelShaderSlot = 106,
@@ -173,6 +175,10 @@ namespace
         IDirect3DDevice9*, IDirect3DSurface9*);
     typedef HRESULT (WINAPI* DeviceSetRenderTargetFn)(
         IDirect3DDevice9*, DWORD, IDirect3DSurface9*);
+    typedef HRESULT (WINAPI* DeviceGetDepthStencilSurfaceFn)(
+        IDirect3DDevice9*, IDirect3DSurface9**);
+    typedef HRESULT (WINAPI* DeviceGetRenderTargetFn)(
+        IDirect3DDevice9*, DWORD, IDirect3DSurface9**);
     typedef HRESULT (WINAPI* DeviceCreateVertexShaderFn)(
         IDirect3DDevice9*, const DWORD*, IDirect3DVertexShader9**);
     typedef HRESULT (WINAPI* DeviceCreatePixelShaderFn)(
@@ -277,8 +283,11 @@ namespace
 
     void Log(const char* format, ...)
     {
-        char message[1536] = {};
-        char line[1792] = {};
+        // DRAW_CALL can contain 16 texture stages, 16 streams and four
+        // render-target descriptors. Keep enough headroom so trailing shader,
+        // state and HRESULT fields are not silently truncated.
+        char message[3072] = {};
+        char line[3328] = {};
         SYSTEMTIME now = {};
         DWORD written = 0;
 
@@ -350,6 +359,78 @@ namespace
     {
         if (snapshot)
             InterlockedExchange(&snapshot->known, 0);
+    }
+
+    void CaptureCurrentSurfaceState(IDirect3DDevice9* device)
+    {
+        if (!g_drawTelemetryEnabled || !device)
+            return;
+
+        void*** objectVTable = reinterpret_cast<void***>(device);
+        if (!objectVTable || !*objectVTable)
+            return;
+
+        void** vtable = *objectVTable;
+        DeviceGetRenderTargetFn getRenderTarget =
+            reinterpret_cast<DeviceGetRenderTargetFn>(
+                vtable[kDeviceGetRenderTargetSlot]);
+        DeviceGetDepthStencilSurfaceFn getDepthStencilSurface =
+            reinterpret_cast<DeviceGetDepthStencilSurfaceFn>(
+                vtable[kDeviceGetDepthStencilSurfaceSlot]);
+
+        // Synthetic D3D9 test devices and unusual proxy devices may not
+        // implement these slots. Do not dereference null vtable entries.
+        if (getRenderTarget)
+        {
+            for (DWORD index = 0; index < _countof(g_renderTargetSnapshots); ++index)
+            {
+                IDirect3DSurface9* surface = NULL;
+                const HRESULT hr = getRenderTarget(device, index, &surface);
+                if (FAILED(hr) || !surface)
+                {
+                    ClearSurfaceSnapshot(&g_renderTargetSnapshots[index]);
+                    continue;
+                }
+
+                D3DSURFACE_DESC description = {};
+                const HRESULT descHr = surface->GetDesc(&description);
+                if (SUCCEEDED(descHr))
+                {
+                    UpdateSurfaceSnapshot(
+                        &g_renderTargetSnapshots[index], surface, &description);
+                }
+                else
+                {
+                    ClearSurfaceSnapshot(&g_renderTargetSnapshots[index]);
+                }
+                surface->Release();
+            }
+        }
+
+        if (getDepthStencilSurface)
+        {
+            IDirect3DSurface9* surface = NULL;
+            const HRESULT hr = getDepthStencilSurface(device, &surface);
+            if (SUCCEEDED(hr) && surface)
+            {
+                D3DSURFACE_DESC description = {};
+                const HRESULT descHr = surface->GetDesc(&description);
+                if (SUCCEEDED(descHr))
+                {
+                    UpdateSurfaceSnapshot(
+                        &g_depthStencilSnapshot, surface, &description);
+                }
+                else
+                {
+                    ClearSurfaceSnapshot(&g_depthStencilSnapshot);
+                }
+                surface->Release();
+            }
+            else
+            {
+                ClearSurfaceSnapshot(&g_depthStencilSnapshot);
+            }
+        }
     }
 
     BOOL FormatSurfaceSnapshot(
@@ -973,6 +1054,7 @@ namespace
             for (DWORD target = 0; target < _countof(g_renderTargetSnapshots); ++target)
                 ClearSurfaceSnapshot(&g_renderTargetSnapshots[target]);
             ClearSurfaceSnapshot(&g_depthStencilSnapshot);
+            CaptureCurrentSurfaceState(self);
             for (DWORD stream = 0; stream < 16; ++stream)
             {
                 InterlockedExchangePointer(&g_streamBuffers[stream], NULL);
@@ -2895,7 +2977,10 @@ namespace
 
         Log("D3D9_CREATE_DEVICE_RESULT hr=0x%08lX", static_cast<unsigned long>(hr));
         if (SUCCEEDED(hr) && device && *device)
+        {
             HookD3D9Device(*device);
+            CaptureCurrentSurfaceState(*device);
+        }
 
         return hr;
     }
