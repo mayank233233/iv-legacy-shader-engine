@@ -165,7 +165,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $vertexAudit = Get-Content build\bin\captured_vertex_shader_downlevel_audit.json -Raw | ConvertFrom-Json
           if ($vertexAudit.audited_file_count -lt 3 -or $vertexAudit.vs_3_0_file_count -lt 1) { throw 'Expected captured synthetic VS3 source and SM2 fallback shaders in the VS downlevel audit.' }
-          if ($vertexAudit.emitted_count -lt 1 -or $vertexAudit.runtime_fallback_mapping_count -lt 1) { throw 'Expected at least one VS3 shader to emit VS2 bytecode and a hash-keyed runtime fallback mapping.' }
+          if ($vertexAudit.emitted_count -lt 1) { throw 'Expected at least one VS3 shader to emit VS2 bytecode.' }
+          if ($vertexAudit.runtime_fallback_mapping_count -ne 0) { throw 'CI must not automatically approve an unpaired VS2 fallback for gameplay.' }
           $fallbackMap = Get-Content build\bin\IVLegacyShaderFallbacks.ini -Raw
           if ($fallbackMap -notmatch '\[VertexShaderFallbacks\]' -or $fallbackMap -notmatch '\[ShaderFallbacks\]') { throw 'Expected both pixel and vertex shader fallback sections to survive combined map generation.' }
           $generatedVs = @(Get-ChildItem build\bin\IVLegacyFallbacks -File -Filter '*.vs20.vso')
