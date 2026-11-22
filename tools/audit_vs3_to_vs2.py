@@ -2250,11 +2250,58 @@ def _self_test() -> None:
     shared_special_output = audit_vs3_bytes(shader(*shared_special_output_words))
     assert any("special POSITION0/PSIZE0 output o10 cannot share" in reason
                for reason in shared_special_output["reasons"])
+
+    shared_position_output_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 11),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 11, usage_index=0, component_mask=0x1),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 11), make_source_token(REG_INPUT, 0)),
+    ]
+    shared_position_output = audit_vs3_bytes(shader(*shared_position_output_words))
+    assert any("special POSITION0/PSIZE0 output o11 cannot share" in reason
+               for reason in shared_position_output["reasons"])
+
     assert len({
         (entry["vs_2_0_register_type"], entry["vs_2_0_register_index"])
         for declarations in max_output_bank["output_mapping_plan"].values()
         for entry in declarations
     }) == 12
+
+    # Without PSIZE, ten generic interpolators plus POSITION0 still fit.
+    # One of the 12 VS3 slots remains unused in this boundary case.
+    no_point_size_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 11),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 0, usage_index=0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 1, usage_index=1),
+    ]
+    for semantic_index in range(8):
+        no_point_size_words.extend(
+            dcl(USAGE_TEXCOORD, REG_OUTPUT, semantic_index + 2, usage_index=semantic_index)
+        )
+    for output_index in range(10):
+        no_point_size_words.extend(
+            make_instruction(
+                1,
+                make_dest_token(REG_OUTPUT, output_index),
+                make_source_token(REG_INPUT, 0),
+            )
+        )
+    no_point_size_words.extend(
+        make_instruction(1, make_dest_token(REG_OUTPUT, 11), make_source_token(REG_INPUT, 0))
+    )
+    no_point_size = audit_vs3_bytes(shader(*no_point_size_words))
+    assert no_point_size["structural_candidate_for_manual_lowering"] is True
+    assert len({
+        (entry["vs_2_0_register_type"], entry["vs_2_0_register_index"])
+        for declarations in no_point_size["output_mapping_plan"].values()
+        for entry in declarations
+    }) == 11
+    assert all(
+        entry["vs_2_0_link_semantic"] != "PSIZE0"
+        for declarations in no_point_size["output_mapping_plan"].values()
+        for entry in declarations
+    )
 
     too_many_interpolators_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
