@@ -99,7 +99,7 @@ VS2_PARAMETER_COUNTS = {
     1: 2, 2: 3, 3: 3, 4: 4, 5: 3, 6: 2, 7: 2, 8: 3, 9: 3,
     10: 3, 11: 3, 12: 3, 13: 3, 14: 2, 15: 2, 16: 2, 17: 3,
     18: 4, 19: 2, 20: 3, 21: 3, 22: 3, 23: 3, 24: 3,
-    25: 1, 26: 2, 27: 1, 28: 0, 29: 0, 30: 1, 31: 2,
+    25: 1, 26: 2, 27: 2, 28: 0, 29: 0, 30: 1, 31: 2,
     32: 3, 33: 3, 34: 4, 35: 2, 36: 2, 37: 2,
     38: 1, 39: 0, 40: 1, 42: 0, 43: 0, 46: 2,
     47: 2, 48: 5, 78: 2, 79: 2, 81: 5,
@@ -1076,12 +1076,16 @@ def _self_test() -> None:
     static_flow = audit_vs3_bytes(shader(*static_flow_words))
     assert any("static flow control" in reason for reason in static_flow["reasons"])
 
-    # LOOP has one source operand in real D3D9 bytecode; it is parsed correctly
-    # and then explicitly rejected by this limited no-flow-control audit.
+    # LOOP has two parameter tokens (aL and i#) in D3D9 bytecode; it is
+    # parsed correctly and then rejected by this limited no-flow-control audit.
     loop_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(27, make_source_token(REG_LOOP, 0)),
+        *make_instruction(
+            27,
+            make_dest_token(REG_LOOP, 0),
+            make_source_token(REG_CONSTINT, 0),
+        ),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     loop = audit_vs3_bytes(shader(*loop_words))
