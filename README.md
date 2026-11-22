@@ -35,7 +35,7 @@ All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs
 
 - Added an opt-in D3D9 state cache for repeated `SetRenderState`, `SetTextureStageState` and `SetSamplerState` calls. It skips only a consecutive setter whose last call on the same device succeeded with the identical state/value.
 - The cache is **disabled by default** (`EnableRedundantStateCache=0`). Enable it only for controlled tests with the matching GTA IV 1.0.0.0 build and retain a way to remove the ASI.
-- State shadows are invalidated after successful `Reset`, failed `Present` and a newly hooked device. The cache disables itself permanently for that process as soon as `CreateStateBlock`, `BeginStateBlock` or `EndStateBlock` is used, because applying a D3D9 state block would bypass the tracked setters.
+- State shadows are invalidated after successful `Reset`, failed `Present` and a newly hooked device. The cache disables itself permanently for that process as soon as `CreateStateBlock`, `BeginStateBlock` or `EndStateBlock` is used, because applying a D3D9 state block would bypass the tracked setters. It also disables permanently if the tracked setters and `Present` are observed on different threads.
 - Per-window forwarded/skipped counters are logged by successful Presents. Set `StateCacheReportFrames` to control the reporting interval (1–600, default 120).
 - The Windows synthetic runtime test covers duplicate suppression, counter output, Reset invalidation and the state-block safety fallback.
 - This is an experimental CPU-side API-call optimization. CI verification and real-game/GMA 3100 benchmarks are required before claiming any FPS gain; no 30 FPS result is implied.
