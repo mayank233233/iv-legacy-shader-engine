@@ -60,6 +60,9 @@ namespace
         kDeviceCreateVolumeTextureSlot = 24,
         kDeviceCreateCubeTextureSlot = 25,
         kDeviceSetRenderStateSlot = 57,
+        kDeviceCreateStateBlockSlot = 58,
+        kDeviceBeginStateBlockSlot = 59,
+        kDeviceEndStateBlockSlot = 60,
         kDeviceSetTextureStageStateSlot = 67,
         kDeviceCreateVertexDeclarationSlot = 86,
         kDeviceSetVertexDeclarationSlot = 87,
@@ -94,6 +97,13 @@ namespace
     volatile LONG g_materialStateLogCount = 0;
     volatile LONG g_textureCreateLogCount = 0;
     volatile LONG g_bufferCreateLogCount = 0;
+    volatile LONG g_redundantStateCacheEnabled = FALSE;
+    DWORD g_stateCacheReportFrames = 120;
+    volatile LONG g_stateCacheWindowFrameCount = 0;
+    volatile LONG g_stateCacheLock = 0;
+    PVOID volatile g_stateCacheDevice = NULL;
+    volatile LONG64 g_stateCacheForwarded[3] = {};
+    volatile LONG64 g_stateCacheSkipped[3] = {};
     BOOL g_frameProfilerEnabled = FALSE;
     DWORD g_frameProfilerWindowFrames = 120;
     LONGLONG g_qpcFrequency = 0;
@@ -233,6 +243,11 @@ namespace
         IDirect3DCubeTexture9**, HANDLE*);
     typedef HRESULT (WINAPI* DeviceSetRenderStateFn)(
         IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+    typedef HRESULT (WINAPI* DeviceCreateStateBlockFn)(
+        IDirect3DDevice9*, D3DSTATEBLOCKTYPE, IDirect3DStateBlock9**);
+    typedef HRESULT (WINAPI* DeviceBeginStateBlockFn)(IDirect3DDevice9*);
+    typedef HRESULT (WINAPI* DeviceEndStateBlockFn)(
+        IDirect3DDevice9*, IDirect3DStateBlock9**);
     typedef HRESULT (WINAPI* DeviceSetTextureStageStateFn)(
         IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD);
     typedef HRESULT (WINAPI* DeviceCreateVertexDeclarationFn)(
@@ -287,6 +302,9 @@ namespace
     DeviceCreateVolumeTextureFn g_realDeviceCreateVolumeTexture = NULL;
     DeviceCreateCubeTextureFn g_realDeviceCreateCubeTexture = NULL;
     DeviceSetRenderStateFn g_realDeviceSetRenderState = NULL;
+    DeviceCreateStateBlockFn g_realDeviceCreateStateBlock = NULL;
+    DeviceBeginStateBlockFn g_realDeviceBeginStateBlock = NULL;
+    DeviceEndStateBlockFn g_realDeviceEndStateBlock = NULL;
     DeviceSetTextureStageStateFn g_realDeviceSetTextureStageState = NULL;
     DeviceCreateVertexDeclarationFn g_realDeviceCreateVertexDeclaration = NULL;
     DeviceSetVertexDeclarationFn g_realDeviceSetVertexDeclaration = NULL;
@@ -332,6 +350,344 @@ namespace
 
         InterlockedExchange(&g_logLock, 0);
         OutputDebugStringA(line);
+    }
+
+    enum
+    {
+        kStateCacheRenderState = 0,
+        kStateCacheTextureStageState = 1,
+        kStateCacheSamplerState = 2
+    };
+
+    void AcquireStateCacheLock()
+    {
+        while (InterlockedCompareExchange(&g_stateCacheLock, 1, 0) != 0)
+            Sleep(0);
+    }
+
+    void ReleaseStateCacheLock()
+    {
+        InterlockedExchange(&g_stateCacheLock, 0);
+    }
+
+    // Caller must own g_stateCacheLock. The cache only shadows scalar D3D9
+    // state setters; Reset/device changes invalidate all known values.
+    void InvalidateStateCacheLocked(PVOID device)
+    {
+        for (DWORD state = 0; state < 256; ++state)
+            InterlockedExchange(&g_renderStateKnown[state], 0);
+        for (DWORD stage = 0; stage < 16; ++stage)
+        {
+            for (DWORD state = 0; state < 64; ++state)
+                InterlockedExchange(&g_textureStageStateKnown[stage][state], 0);
+            for (DWORD state = 0; state < 14; ++state)
+                InterlockedExchange(&g_samplerStateKnown[stage][state], 0);
+        }
+        InterlockedExchangePointer(&g_stateCacheDevice, device);
+    }
+
+    void InvalidateRedundantStateCache(PVOID device)
+    {
+        AcquireStateCacheLock();
+        InvalidateStateCacheLocked(device);
+        InterlockedExchange(&g_stateCacheWindowFrameCount, 0);
+        for (LONG index = 0; index < 3; ++index)
+        {
+            InterlockedExchange64(&g_stateCacheForwarded[index], 0);
+            InterlockedExchange64(&g_stateCacheSkipped[index], 0);
+        }
+        ReleaseStateCacheLock();
+    }
+
+    void DisableRedundantStateCacheForStateBlock()
+    {
+        BOOL logDisabled = FALSE;
+        AcquireStateCacheLock();
+        if (g_redundantStateCacheEnabled)
+        {
+            g_redundantStateCacheEnabled = FALSE;
+            InvalidateStateCacheLocked(NULL);
+            logDisabled = TRUE;
+        }
+        ReleaseStateCacheLock();
+
+        if (logDisabled)
+            Log("STATE_CACHE_DISABLED reason=state_block_api_used");
+    }
+
+    void RecordRedundantStateCacheWindow()
+    {
+        if (!g_redundantStateCacheEnabled)
+            return;
+
+        const LONG frames = InterlockedIncrement(&g_stateCacheWindowFrameCount);
+        if (frames < static_cast<LONG>(g_stateCacheReportFrames))
+            return;
+
+        InterlockedExchange(&g_stateCacheWindowFrameCount, 0);
+        const LONGLONG renderForwarded =
+            InterlockedExchange64(&g_stateCacheForwarded[kStateCacheRenderState], 0);
+        const LONGLONG renderSkipped =
+            InterlockedExchange64(&g_stateCacheSkipped[kStateCacheRenderState], 0);
+        const LONGLONG stageForwarded =
+            InterlockedExchange64(&g_stateCacheForwarded[kStateCacheTextureStageState], 0);
+        const LONGLONG stageSkipped =
+            InterlockedExchange64(&g_stateCacheSkipped[kStateCacheTextureStageState], 0);
+        const LONGLONG samplerForwarded =
+            InterlockedExchange64(&g_stateCacheForwarded[kStateCacheSamplerState], 0);
+        const LONGLONG samplerSkipped =
+            InterlockedExchange64(&g_stateCacheSkipped[kStateCacheSamplerState], 0);
+
+        Log(
+            "D3D9_STATE_CACHE_WINDOW frames=%ld "
+            "render_forwarded=%lld render_skipped=%lld "
+            "texture_stage_forwarded=%lld texture_stage_skipped=%lld "
+            "sampler_forwarded=%lld sampler_skipped=%lld",
+            frames,
+            static_cast<long long>(renderForwarded),
+            static_cast<long long>(renderSkipped),
+            static_cast<long long>(stageForwarded),
+            static_cast<long long>(stageSkipped),
+            static_cast<long long>(samplerForwarded),
+            static_cast<long long>(samplerSkipped));
+    }
+
+    HRESULT SetRenderStateWithCache(
+        IDirect3DDevice9* self,
+        D3DRENDERSTATETYPE state,
+        DWORD value,
+        BOOL* skipped)
+    {
+        if (skipped)
+            *skipped = FALSE;
+        const DWORD index = static_cast<DWORD>(state);
+        if (!g_redundantStateCacheEnabled || index >= 256)
+        {
+            const HRESULT hr = g_realDeviceSetRenderState
+                ? g_realDeviceSetRenderState(self, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr) && index < 256)
+            {
+                InterlockedExchange(&g_renderStates[index], static_cast<LONG>(value));
+                InterlockedExchange(&g_renderStateKnown[index], 1);
+            }
+            return hr;
+        }
+
+        AcquireStateCacheLock();
+        if (!g_redundantStateCacheEnabled)
+        {
+            ReleaseStateCacheLock();
+            const HRESULT hr = g_realDeviceSetRenderState
+                ? g_realDeviceSetRenderState(self, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchange(&g_renderStates[index], static_cast<LONG>(value));
+                InterlockedExchange(&g_renderStateKnown[index], 1);
+            }
+            return hr;
+        }
+
+        if (g_stateCacheDevice != self)
+            InvalidateStateCacheLocked(self);
+        const BOOL known = InterlockedCompareExchange(
+            &g_renderStateKnown[index], 0, 0) != 0;
+        const DWORD current = static_cast<DWORD>(InterlockedCompareExchange(
+            &g_renderStates[index], 0, 0));
+        if (known && current == value)
+        {
+            InterlockedIncrement64(&g_stateCacheSkipped[kStateCacheRenderState]);
+            if (skipped)
+                *skipped = TRUE;
+            ReleaseStateCacheLock();
+            return D3D_OK;
+        }
+
+        const HRESULT hr = g_realDeviceSetRenderState
+            ? g_realDeviceSetRenderState(self, state, value)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+        {
+            InterlockedExchange(&g_renderStates[index], static_cast<LONG>(value));
+            InterlockedExchange(&g_renderStateKnown[index], 1);
+        }
+        else
+        {
+            InterlockedExchange(&g_renderStateKnown[index], 0);
+        }
+        InterlockedIncrement64(&g_stateCacheForwarded[kStateCacheRenderState]);
+        ReleaseStateCacheLock();
+        return hr;
+    }
+
+    HRESULT SetTextureStageStateWithCache(
+        IDirect3DDevice9* self,
+        DWORD stage,
+        D3DTEXTURESTAGETYPE state,
+        DWORD value,
+        BOOL* skipped)
+    {
+        if (skipped)
+            *skipped = FALSE;
+        const DWORD index = static_cast<DWORD>(state);
+        if (!g_redundantStateCacheEnabled || stage >= 16 || index >= 64)
+        {
+            const HRESULT hr = g_realDeviceSetTextureStageState
+                ? g_realDeviceSetTextureStageState(self, stage, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr) && stage < 16 && index < 64)
+            {
+                InterlockedExchange(&g_textureStageStates[stage][index], static_cast<LONG>(value));
+                InterlockedExchange(&g_textureStageStateKnown[stage][index], 1);
+            }
+            return hr;
+        }
+
+        AcquireStateCacheLock();
+        if (!g_redundantStateCacheEnabled)
+        {
+            ReleaseStateCacheLock();
+            const HRESULT hr = g_realDeviceSetTextureStageState
+                ? g_realDeviceSetTextureStageState(self, stage, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchange(&g_textureStageStates[stage][index], static_cast<LONG>(value));
+                InterlockedExchange(&g_textureStageStateKnown[stage][index], 1);
+            }
+            return hr;
+        }
+
+        if (g_stateCacheDevice != self)
+            InvalidateStateCacheLocked(self);
+        const BOOL known = InterlockedCompareExchange(
+            &g_textureStageStateKnown[stage][index], 0, 0) != 0;
+        const DWORD current = static_cast<DWORD>(InterlockedCompareExchange(
+            &g_textureStageStates[stage][index], 0, 0));
+        if (known && current == value)
+        {
+            InterlockedIncrement64(&g_stateCacheSkipped[kStateCacheTextureStageState]);
+            if (skipped)
+                *skipped = TRUE;
+            ReleaseStateCacheLock();
+            return D3D_OK;
+        }
+
+        const HRESULT hr = g_realDeviceSetTextureStageState
+            ? g_realDeviceSetTextureStageState(self, stage, state, value)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+        {
+            InterlockedExchange(&g_textureStageStates[stage][index], static_cast<LONG>(value));
+            InterlockedExchange(&g_textureStageStateKnown[stage][index], 1);
+        }
+        else
+        {
+            InterlockedExchange(&g_textureStageStateKnown[stage][index], 0);
+        }
+        InterlockedIncrement64(&g_stateCacheForwarded[kStateCacheTextureStageState]);
+        ReleaseStateCacheLock();
+        return hr;
+    }
+
+    HRESULT SetSamplerStateWithCache(
+        IDirect3DDevice9* self,
+        DWORD sampler,
+        D3DSAMPLERSTATETYPE state,
+        DWORD value,
+        BOOL* skipped)
+    {
+        if (skipped)
+            *skipped = FALSE;
+        const DWORD index = static_cast<DWORD>(state);
+        if (!g_redundantStateCacheEnabled || sampler >= 16 || index >= 14)
+        {
+            const HRESULT hr = g_realDeviceSetSamplerState
+                ? g_realDeviceSetSamplerState(self, sampler, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr) && sampler < 16 && index < 14)
+            {
+                InterlockedExchange(&g_samplerStates[sampler][index], static_cast<LONG>(value));
+                InterlockedExchange(&g_samplerStateKnown[sampler][index], 1);
+            }
+            return hr;
+        }
+
+        AcquireStateCacheLock();
+        if (!g_redundantStateCacheEnabled)
+        {
+            ReleaseStateCacheLock();
+            const HRESULT hr = g_realDeviceSetSamplerState
+                ? g_realDeviceSetSamplerState(self, sampler, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchange(&g_samplerStates[sampler][index], static_cast<LONG>(value));
+                InterlockedExchange(&g_samplerStateKnown[sampler][index], 1);
+            }
+            return hr;
+        }
+
+        if (g_stateCacheDevice != self)
+            InvalidateStateCacheLocked(self);
+        const BOOL known = InterlockedCompareExchange(
+            &g_samplerStateKnown[sampler][index], 0, 0) != 0;
+        const DWORD current = static_cast<DWORD>(InterlockedCompareExchange(
+            &g_samplerStates[sampler][index], 0, 0));
+        if (known && current == value)
+        {
+            InterlockedIncrement64(&g_stateCacheSkipped[kStateCacheSamplerState]);
+            if (skipped)
+                *skipped = TRUE;
+            ReleaseStateCacheLock();
+            return D3D_OK;
+        }
+
+        const HRESULT hr = g_realDeviceSetSamplerState
+            ? g_realDeviceSetSamplerState(self, sampler, state, value)
+            : D3DERR_INVALIDCALL;
+        if (SUCCEEDED(hr))
+        {
+            InterlockedExchange(&g_samplerStates[sampler][index], static_cast<LONG>(value));
+            InterlockedExchange(&g_samplerStateKnown[sampler][index], 1);
+        }
+        else
+        {
+            InterlockedExchange(&g_samplerStateKnown[sampler][index], 0);
+        }
+        InterlockedIncrement64(&g_stateCacheForwarded[kStateCacheSamplerState]);
+        ReleaseStateCacheLock();
+        return hr;
+    }
+
+    HRESULT WINAPI HookDeviceCreateStateBlock(
+        IDirect3DDevice9* self,
+        D3DSTATEBLOCKTYPE type,
+        IDirect3DStateBlock9** stateBlock)
+    {
+        DisableRedundantStateCacheForStateBlock();
+        return g_realDeviceCreateStateBlock
+            ? g_realDeviceCreateStateBlock(self, type, stateBlock)
+            : D3DERR_INVALIDCALL;
+    }
+
+    HRESULT WINAPI HookDeviceBeginStateBlock(IDirect3DDevice9* self)
+    {
+        DisableRedundantStateCacheForStateBlock();
+        return g_realDeviceBeginStateBlock
+            ? g_realDeviceBeginStateBlock(self)
+            : D3DERR_INVALIDCALL;
+    }
+
+    HRESULT WINAPI HookDeviceEndStateBlock(
+        IDirect3DDevice9* self,
+        IDirect3DStateBlock9** stateBlock)
+    {
+        DisableRedundantStateCacheForStateBlock();
+        return g_realDeviceEndStateBlock
+            ? g_realDeviceEndStateBlock(self, stateBlock)
+            : D3DERR_INVALIDCALL;
     }
 
     void UpdateSurfaceSnapshot(
@@ -803,6 +1159,10 @@ namespace
                 L"General", L"EnableFrameProfiler", L"0", g_iniPath);
             WritePrivateProfileStringW(
                 L"General", L"FrameProfilerWindowFrames", L"120", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"EnableRedundantStateCache", L"0", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"StateCacheReportFrames", L"120", g_iniPath);
         }
     }
 
@@ -1127,6 +1487,9 @@ namespace
                 InterlockedExchange(&g_renderStates[state], 0);
                 InterlockedExchange(&g_renderStateKnown[state], 0);
             }
+            // Reset invalidates every device state. Do this after the
+            // telemetry snapshots are cleared so no stale value is reused.
+            InvalidateRedundantStateCache(self);
         }
         return hr;
     }
@@ -1313,9 +1676,16 @@ namespace
         }
 
         if (FAILED(hr))
+        {
+            InvalidateRedundantStateCache(self);
             Log("DEVICE_PRESENT_FAILED hr=0x%08lX", static_cast<unsigned long>(hr));
-        else if (g_drawTelemetryEnabled || g_frameProfilerEnabled)
-            InterlockedIncrement(&g_presentFrameIndex);
+        }
+        else
+        {
+            RecordRedundantStateCacheWindow();
+            if (g_drawTelemetryEnabled || g_frameProfilerEnabled)
+                InterlockedIncrement(&g_presentFrameIndex);
+        }
 
         return hr;
     }
@@ -2236,25 +2606,19 @@ namespace
         D3DRENDERSTATETYPE state,
         DWORD value)
     {
-        const HRESULT hr = g_realDeviceSetRenderState
-            ? g_realDeviceSetRenderState(self, state, value)
-            : D3DERR_INVALIDCALL;
-
+        BOOL skipped = FALSE;
+        const HRESULT hr = SetRenderStateWithCache(self, state, value, &skipped);
         const DWORD stateIndex = static_cast<DWORD>(state);
-        if (SUCCEEDED(hr) && stateIndex < 256)
-        {
-            InterlockedExchange(&g_renderStates[stateIndex], static_cast<LONG>(value));
-            InterlockedExchange(&g_renderStateKnown[stateIndex], 1);
-        }
 
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
             Log(
-                "SET_RENDER_STATE state=%u value=%lu hr=0x%08lX",
+                "SET_RENDER_STATE state=%u value=%lu hr=0x%08lX cached=%u",
                 stateIndex,
                 static_cast<unsigned long>(value),
-                static_cast<unsigned long>(hr));
+                static_cast<unsigned long>(hr),
+                skipped ? 1 : 0);
         }
         return hr;
     }
@@ -2262,30 +2626,24 @@ namespace
     HRESULT WINAPI HookDeviceSetTextureStageState(
         IDirect3DDevice9* self,
         DWORD stage,
-        D3DTEXTURESTAGESTATETYPE state,
+        D3DTEXTURESTAGETYPE state,
         DWORD value)
     {
-        const HRESULT hr = g_realDeviceSetTextureStageState
-            ? g_realDeviceSetTextureStageState(self, stage, state, value)
-            : D3DERR_INVALIDCALL;
-
+        BOOL skipped = FALSE;
+        const HRESULT hr = SetTextureStageStateWithCache(
+            self, stage, state, value, &skipped);
         const DWORD stateIndex = static_cast<DWORD>(state);
-        if (SUCCEEDED(hr) && stage < 16 && stateIndex < 64)
-        {
-            InterlockedExchange(
-                &g_textureStageStates[stage][stateIndex], static_cast<LONG>(value));
-            InterlockedExchange(&g_textureStageStateKnown[stage][stateIndex], 1);
-        }
 
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
             Log(
-                "SET_TEXTURE_STAGE_STATE stage=%lu state=%u value=%lu hr=0x%08lX",
+                "SET_TEXTURE_STAGE_STATE stage=%lu state=%u value=%lu hr=0x%08lX cached=%u",
                 static_cast<unsigned long>(stage),
                 stateIndex,
                 static_cast<unsigned long>(value),
-                static_cast<unsigned long>(hr));
+                static_cast<unsigned long>(hr),
+                skipped ? 1 : 0);
         }
         return hr;
     }
@@ -2435,28 +2793,21 @@ namespace
         D3DSAMPLERSTATETYPE type,
         DWORD value)
     {
-        const HRESULT hr = g_realDeviceSetSamplerState
-            ? g_realDeviceSetSamplerState(self, sampler, type, value)
-            : D3DERR_INVALIDCALL;
-
+        BOOL skipped = FALSE;
+        const HRESULT hr = SetSamplerStateWithCache(
+            self, sampler, type, value, &skipped);
         const DWORD stateIndex = static_cast<DWORD>(type);
-        if (SUCCEEDED(hr) && sampler < 16 && stateIndex < 14)
-        {
-            InterlockedExchange(
-                &g_samplerStates[sampler][stateIndex],
-                static_cast<LONG>(value));
-            InterlockedExchange(&g_samplerStateKnown[sampler][stateIndex], 1);
-        }
 
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
             Log(
-                "SET_SAMPLER_STATE sampler=%lu type=%u value=%lu hr=0x%08lX",
+                "SET_SAMPLER_STATE sampler=%lu type=%u value=%lu hr=0x%08lX cached=%u",
                 static_cast<unsigned long>(sampler),
                 stateIndex,
                 static_cast<unsigned long>(value),
-                static_cast<unsigned long>(hr));
+                static_cast<unsigned long>(hr),
+                skipped ? 1 : 0);
         }
         return hr;
     }
@@ -3000,6 +3351,10 @@ namespace
         if (original[kDeviceGetDeviceCapsSlot] == reinterpret_cast<void*>(HookDeviceGetDeviceCaps))
             return true;
 
+        // A newly-created device may reuse a previous COM address. Never
+        // carry the preceding device's state shadow into it.
+        InvalidateRedundantStateCache(device);
+
         const SIZE_T vtableBytes =
             sizeof(void*) * kD3D9DeviceInterfaceSlots;
         MEMORY_BASIC_INFORMATION vtableMemory = {};
@@ -3083,6 +3438,12 @@ namespace
             reinterpret_cast<DeviceCreateCubeTextureFn>(original[kDeviceCreateCubeTextureSlot]);
         g_realDeviceSetRenderState =
             reinterpret_cast<DeviceSetRenderStateFn>(original[kDeviceSetRenderStateSlot]);
+        g_realDeviceCreateStateBlock =
+            reinterpret_cast<DeviceCreateStateBlockFn>(original[kDeviceCreateStateBlockSlot]);
+        g_realDeviceBeginStateBlock =
+            reinterpret_cast<DeviceBeginStateBlockFn>(original[kDeviceBeginStateBlockSlot]);
+        g_realDeviceEndStateBlock =
+            reinterpret_cast<DeviceEndStateBlockFn>(original[kDeviceEndStateBlockSlot]);
         g_realDeviceSetTextureStageState =
             reinterpret_cast<DeviceSetTextureStageStateFn>(original[kDeviceSetTextureStageStateSlot]);
         g_realDeviceCreateVertexDeclaration =
@@ -3111,6 +3472,16 @@ namespace
         hooked[kDeviceSetDepthStencilSurfaceSlot] = reinterpret_cast<void*>(HookDeviceSetDepthStencilSurface);
         hooked[kDeviceCreateVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceCreateVertexShader);
         hooked[kDeviceCreatePixelShaderSlot] = reinterpret_cast<void*>(HookDeviceCreatePixelShader);
+        if (g_redundantStateCacheEnabled)
+        {
+            hooked[kDeviceSetRenderStateSlot] = reinterpret_cast<void*>(HookDeviceSetRenderState);
+            hooked[kDeviceSetTextureStageStateSlot] =
+                reinterpret_cast<void*>(HookDeviceSetTextureStageState);
+            hooked[kDeviceSetSamplerStateSlot] = reinterpret_cast<void*>(HookDeviceSetSamplerState);
+            hooked[kDeviceCreateStateBlockSlot] = reinterpret_cast<void*>(HookDeviceCreateStateBlock);
+            hooked[kDeviceBeginStateBlockSlot] = reinterpret_cast<void*>(HookDeviceBeginStateBlock);
+            hooked[kDeviceEndStateBlockSlot] = reinterpret_cast<void*>(HookDeviceEndStateBlock);
+        }
         if (g_drawTelemetryEnabled)
         {
             hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
@@ -3427,6 +3798,22 @@ namespace
                 L"General", L"CaptureDrawTelemetry", 0, g_iniPath) != 0;
         g_drawTelemetryMaxCalls = GetPrivateProfileIntW(
             L"General", L"CaptureDrawMaxCalls", 4096, g_iniPath);
+        g_redundantStateCacheEnabled = GetPrivateProfileIntW(
+            L"General", L"EnableRedundantStateCache", 0, g_iniPath) != 0;
+        g_stateCacheReportFrames = GetPrivateProfileIntW(
+            L"General", L"StateCacheReportFrames", 120, g_iniPath);
+        if (g_stateCacheReportFrames == 0)
+            g_stateCacheReportFrames = 1;
+        if (g_stateCacheReportFrames > 600)
+            g_stateCacheReportFrames = 600;
+        if (g_redundantStateCacheEnabled)
+        {
+            InvalidateRedundantStateCache(NULL);
+            Log(
+                "REDUNDANT_STATE_CACHE_ENABLED groups=render_state,texture_stage,sampler "
+                "report_frames=%lu state_block_policy=disable_on_use default=off",
+                static_cast<unsigned long>(g_stateCacheReportFrames));
+        }
         g_frameProfilerEnabled =
             GetPrivateProfileIntW(
                 L"General", L"EnableFrameProfiler", 0, g_iniPath) != 0;
