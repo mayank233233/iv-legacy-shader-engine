@@ -86,7 +86,7 @@ def self_test() -> None:
     # by validating the report schema through a temporary synthetic log.
     import tempfile
     from pathlib import Path
-    synthetic = """DRAW_CALL seq=1 frame=1 kind=DrawIndexedPrimitive device=0x1 primitive=4 primitive_count=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=4 start_index=0 vs=0x0 ps=0x0 vertex_declaration=0x0 fvf=0x112 render_targets=0:0x10:320:240:21:3:1:0:0:0 depth_target=0x20:320:240:75:2:0:0:0:0 sampler_hash=0 sampler_count=0 render_state_hash=0 render_state_count=0 texture_stage_hash=0 texture_stage_count=0 hr=0x00000000
+    synthetic = """DRAW_CALL seq=1 frame=1 kind=DrawIndexedPrimitive device=0x1 primitive=4 primitives=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=4 start_index=0 bound_vs=0x0 bound_ps=0x0 vertex_decl=0x0 fvf=0x112 render_targets=0:0x10:320:240:21:3:1:0:0:0 depth_target=0x20:320:240:75:2:0:0:0:0 sampler_hash=0 sampler_count=0 render_state_hash=0 render_state_count=0 texture_stage_hash=0 texture_stage_count=0 hr=0x00000000
 """
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "synthetic.log"
