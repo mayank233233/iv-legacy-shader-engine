@@ -501,9 +501,29 @@ def audit_vs3_bytes(
         ),
         key=lambda item: (item[0], item[1]),
     )
-    for compact_index, (semantic_index, source_register, entry) in enumerate(texcoord_entries):
-        if compact_index < 8:
-            target = (REG_OUTPUT, compact_index)
+    next_texcoord_output = 0
+    legal_texcoord_masks = {0x1, 0x3, 0x7, 0xF}
+    for semantic_index, source_register, entry in texcoord_entries:
+        component_mask = entry["component_mask"]
+        if component_mask not in legal_texcoord_masks:
+            # A VS2 texture output cannot preserve a sparse component mask.
+            # Use a color output instead and ask the paired PS to relink it.
+            target = next(
+                (
+                    candidate for candidate in ((REG_ATTROUT, 0), (REG_ATTROUT, 1))
+                    if candidate not in allocated_targets
+                ),
+                None,
+            )
+            if target is None:
+                reasons.append(
+                    f"TEXCOORD{semantic_index} has a non-contiguous component mask "
+                    "and no free VS2 color output for a safe remap"
+                )
+                continue
+        elif next_texcoord_output < 8:
+            target = (REG_OUTPUT, next_texcoord_output)
+            next_texcoord_output += 1
         else:
             target = next(
                 (
@@ -539,14 +559,30 @@ def audit_vs3_bytes(
         for entry in entries:
             if "target_register_type" in entry:
                 continue
-            target = next(
-                (candidate for candidate in generic_targets if candidate not in allocated_targets),
-                None,
-            )
-            if target is None:
-                reasons.append(
-                    "more than ten generic vertex output semantics require VS2 interpolation registers"
+            component_mask = entry["component_mask"]
+            if component_mask not in legal_texcoord_masks:
+                target = next(
+                    (
+                        candidate for candidate in ((REG_ATTROUT, 0), (REG_ATTROUT, 1))
+                        if candidate not in allocated_targets
+                    ),
+                    None,
                 )
+            else:
+                target = next(
+                    (candidate for candidate in generic_targets if candidate not in allocated_targets),
+                    None,
+                )
+            if target is None:
+                if component_mask not in legal_texcoord_masks:
+                    reasons.append(
+                        f"{entry['usage_name']}{entry['usage_index']} has a non-contiguous "
+                        "component mask and no free VS2 color output for a safe remap"
+                    )
+                else:
+                    reasons.append(
+                        "more than ten generic vertex output semantics require VS2 interpolation registers"
+                    )
                 continue
             allocated_targets.add(target)
             entry["target_register_type"] = target[0]
@@ -1425,11 +1461,29 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
         *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 2, usage_index=0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=1),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0x5), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 2), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
     ]
     texcoord_mask = audit_vs3_bytes(shader(*texcoord_mask_words))
     assert any("unsupported combined write mask" in reason for reason in texcoord_mask["reasons"])
+
+    # A TEXCOORD with a sparse component mask can be carried by a color output
+    # when one is free; the report marks the pixel-shader link rewrite.
+    sparse_texcoord_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0x5), make_source_token(REG_INPUT, 0)),
+    ]
+    sparse_texcoord = audit_vs3_bytes(shader(*sparse_texcoord_words))
+    assert sparse_texcoord["structural_candidate_for_manual_lowering"] is True
+    assert sparse_texcoord["output_mapping_plan"]["o1"][0]["vs_2_0_link_semantic"] == "COLOR0"
+    assert sparse_texcoord["output_mapping_plan"]["o1"][0]["requires_pixel_shader_interface_remap"] is True
 
     # VS3 may pack different semantics into disjoint components of one output
     # register. The lowering plan must split that source write into two outputs.
