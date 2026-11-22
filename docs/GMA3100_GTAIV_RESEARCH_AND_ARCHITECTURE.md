@@ -164,6 +164,19 @@ These are **design principles**, not code ports. Minecraft's renderer, asset for
 
 Do not bundle other projects' binaries or source files without checking licences, version compatibility and hook conflicts. Reimplement compatible ideas behind our own settings and keep optional overlaps disabled by default.
 
+## D3D9 redundant scalar state cache — experimental implementation
+
+The isolated branch `feature/redundant-d3d9-state-cache` adds the first runtime optimization experiment. It adapts the state-shadowing lesson from ImmediatelyFast/Sodium to the native D3D9 path without replacing GTA IV's renderer.
+
+- It covers only `SetRenderState`, `SetTextureStageState` and `SetSamplerState`. A repeated call is skipped only when the exact state index and value were previously accepted by the original D3D9 method on the same device.
+- The feature is opt-in and defaults to off: `[General]`, `EnableRedundantStateCache=1`. `StateCacheReportFrames` selects a 1–600 successful-Present reporting interval (default 120).
+- State shadows are invalidated on successful device Reset, failed Present and device creation/hook changes.
+- D3D9 state blocks can apply state without passing through these setters. The plugin therefore hooks `CreateStateBlock` (slot 58), `BeginStateBlock` (59) and `EndStateBlock` (60), and disables the cache permanently for that process as soon as any is used. It does not attempt to intercept every `IDirect3DStateBlock9` method.
+- The serialized cache lock protects check/call/update ordering. This may itself cost CPU time or contend if callers use the device concurrently; the optimization is not assumed to be faster until measured.
+- A failed Present invalidates the shadow, but this is not a formal proof for every lost-device or proxy-driver edge case. Keep the option disabled outside controlled tests until the actual game/driver is validated.
+
+Successful Presents emit `D3D9_STATE_CACHE_WINDOW` with forwarded/skipped counts for each setter family. This proves only that the wrapper suppressed calls in the synthetic test. It does not measure GPU time, prove a GTA IV performance gain or establish 30 FPS on GMA 3100. Compare baseline and enabled builds on the same saved route and report average frame time, 1% lows, API-call counts and stability before retaining the optimization.
+
 ## 6. CPU, memory, streaming and renderer optimization plan
 
 Reverse-engineering research in [LibertyFlux's engine notes](https://monstercameron.github.io/LibertyFlux/engine.html) describes a game thread handling scripts, people, vehicles, physics, animation and draw lists; a separate render thread; audio workers; and a streaming path. The page states that parts of the thread ordering are inferred, so use it as an informed map, not an official Rockstar specification. It also inventories large pedestrian-AI, streaming, file/memory and physics subsystems. This reinforces why indiscriminate gameplay throttling is unsafe.
