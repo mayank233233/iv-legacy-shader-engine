@@ -338,9 +338,6 @@ def audit_vs3_bytes(
             reasons.append(f"DCL at DWORD {ins.offset} sets reserved destination-token bits")
         if destination & (1 << 13):
             reasons.append(f"DCL at DWORD {ins.offset} uses relative addressing on a destination")
-        if declared_mask == 0:
-            reasons.append(f"DCL at DWORD {ins.offset} declares an empty component mask")
-
         if register_type == REG_SAMPLER:
             sampler_type = (declaration & 0x78000000) >> 27
             if declaration & ~0xF8000000:
@@ -361,6 +358,8 @@ def audit_vs3_bytes(
             registers["sampler"].add(register_number)
             continue
 
+        if declared_mask == 0:
+            reasons.append(f"DCL at DWORD {ins.offset} declares an empty component mask")
         if declaration & ~0x800F000F:
             reasons.append(
                 f"DCL at DWORD {ins.offset} sets unsupported usage-token bits"
@@ -807,12 +806,12 @@ def _self_test() -> None:
 
     def dcl(usage: int, register_type: int, register: int, usage_index: int = 0) -> list[int]:
         declaration = 0x80000000 | (usage & 0xF) | ((usage_index & 0xF) << 16)
-        return make_instruction(OP_DCL, declaration, make_parameter_token(register_type, register))
+        return make_instruction(OP_DCL, declaration, make_dest_token(register_type, register))
 
     basic_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     basic = audit_vs3_bytes(shader(*basic_words))
     assert basic["structural_candidate_for_manual_lowering"] is True
@@ -823,7 +822,7 @@ def _self_test() -> None:
     temp12_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_TEMP, 12)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 12)),
     ]
     temp12 = audit_vs3_bytes(shader(*temp12_words))
     assert temp12["structural_candidate_for_manual_lowering"] is False
@@ -833,7 +832,7 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
         *dcl(0, REG_SAMPLER, 0),
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     sampler = audit_vs3_bytes(shader(*sampler_words))
     assert any("vertex sampler" in reason for reason in sampler["reasons"])
@@ -855,8 +854,8 @@ def _self_test() -> None:
     sincos_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(37, make_parameter_token(REG_TEMP, 0), make_parameter_token(REG_INPUT, 0)),
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(37, make_dest_token(REG_TEMP, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     sincos = audit_vs3_bytes(shader(*sincos_words))
     assert any("different four-operand form" in reason for reason in sincos["reasons"])
@@ -864,8 +863,8 @@ def _self_test() -> None:
     dynamic_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(95, make_parameter_token(REG_TEMP, 0), make_parameter_token(REG_INPUT, 0), make_parameter_token(REG_SAMPLER, 0)),
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(95, make_dest_token(REG_TEMP, 0), make_source_token(REG_INPUT, 0), make_source_token(REG_SAMPLER, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     dynamic = audit_vs3_bytes(shader(*dynamic_words))
     assert any("not in the vs_2_0 instruction set" in reason for reason in dynamic["reasons"])
@@ -873,7 +872,7 @@ def _self_test() -> None:
     output_semantic_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(3, REG_OUTPUT, 0),  # NORMAL is not a fixed vs_2_0 output register.
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     output_semantic = audit_vs3_bytes(shader(*output_semantic_words))
     assert any("no fixed vs_2_0 output mapping" in reason for reason in output_semantic["reasons"])
@@ -881,8 +880,8 @@ def _self_test() -> None:
     read_only_write_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(1, make_parameter_token(REG_INPUT, 0), make_parameter_token(REG_INPUT, 0)),
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_INPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     read_only_write = audit_vs3_bytes(shader(*read_only_write_words))
     assert any("writes read-only or unsupported register type" in reason for reason in read_only_write["reasons"])
@@ -890,12 +889,70 @@ def _self_test() -> None:
     static_flow_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(40, make_parameter_token(REG_CONSTBOOL, 0)),
+        *make_instruction(40, make_source_token(REG_CONSTBOOL, 0)),
         *make_instruction(43),
-        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     static_flow = audit_vs3_bytes(shader(*static_flow_words))
     assert any("static flow control" in reason for reason in static_flow["reasons"])
+
+    # LOOP has one source operand in real D3D9 bytecode; it is parsed correctly
+    # and then explicitly rejected by this limited no-flow-control audit.
+    loop_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(27, make_source_token(REG_LOOP, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    loop = audit_vs3_bytes(shader(*loop_words))
+    assert any("static flow control" in reason for reason in loop["reasons"])
+    assert not any("expected 2" in reason for reason in loop["reasons"])
+
+    # a0 is write-only for ordinary shader code: it may be updated with MOV/MOVA,
+    # but is not a general-purpose source register.
+    address_read_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_TEMP, 0), make_source_token(REG_ADDR, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    address_read = audit_vs3_bytes(shader(*address_read_words))
+    assert any("reads a0 directly" in reason for reason in address_read["reasons"])
+
+    address_write_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_ADDR, 0, 0x1), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    address_write = audit_vs3_bytes(shader(*address_write_words))
+    assert address_write["structural_candidate_for_manual_lowering"] is True
+
+    partial_position_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0, 0x7), make_source_token(REG_INPUT, 0)),
+    ]
+    partial_position = audit_vs3_bytes(shader(*partial_position_words))
+    assert any("write all four position components" in reason for reason in partial_position["reasons"])
+
+    matrix_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(20, make_dest_token(REG_TEMP, 0), make_source_token(REG_INPUT, 0), make_source_token(REG_CONST, 4)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+    ]
+    matrix = audit_vs3_bytes(shader(*matrix_words))
+    assert matrix["structural_candidate_for_manual_lowering"] is True
+
+    matrix_bad_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(20, make_dest_token(REG_TEMP, 0), make_source_token(REG_INPUT, 0), make_source_token(REG_TEMP, 4)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+    ]
+    matrix_bad = audit_vs3_bytes(shader(*matrix_bad_words))
+    assert any("requires a float-constant matrix source" in reason for reason in matrix_bad["reasons"])
 
     over_budget_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -904,7 +961,7 @@ def _self_test() -> None:
     for _ in range(257):
         over_budget_words.extend(make_instruction(0))
     over_budget_words.extend(
-        make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0))
+        make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0))
     )
     over_budget = audit_vs3_bytes(shader(*over_budget_words))
     assert over_budget["instruction_slots"] == 258
