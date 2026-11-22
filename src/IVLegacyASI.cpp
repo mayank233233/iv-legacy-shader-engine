@@ -1988,6 +1988,13 @@ namespace
         }
     }
 
+    bool LoadConfiguredVS2Fallback(
+        unsigned __int64 sourceHash,
+        BYTE** fallbackBytes,
+        DWORD* fallbackByteCount,
+        wchar_t* resolvedPath,
+        DWORD resolvedPathCount);
+
     HRESULT WINAPI HookDeviceCreateVertexShader(
         IDirect3DDevice9* self,
         const DWORD* function,
