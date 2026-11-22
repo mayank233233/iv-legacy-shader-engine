@@ -2201,16 +2201,18 @@ def _self_test() -> None:
     # own exclusive source registers.
     max_output_bank_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
-        *dcl(USAGE_POSITION, REG_OUTPUT, 11),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 1),
         *dcl(USAGE_PSIZE, REG_OUTPUT, 10),
         *dcl(USAGE_COLOR, REG_OUTPUT, 0, usage_index=0),
-        *dcl(USAGE_COLOR, REG_OUTPUT, 1, usage_index=1),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 2, usage_index=1),
     ]
-    for semantic_index in range(8):
+    generic_source_outputs = [0, 2, 3, 4, 5, 6, 7, 8, 9, 11]
+    texcoord_source_outputs = [3, 4, 5, 6, 7, 8, 9, 11]
+    for semantic_index, source_output in enumerate(texcoord_source_outputs):
         max_output_bank_words.extend(
-            dcl(USAGE_TEXCOORD, REG_OUTPUT, semantic_index + 2, usage_index=semantic_index)
+            dcl(USAGE_TEXCOORD, REG_OUTPUT, source_output, usage_index=semantic_index)
         )
-    for output_index in range(10):
+    for output_index in generic_source_outputs:
         max_output_bank_words.extend(
             make_instruction(
                 1,
@@ -2228,13 +2230,13 @@ def _self_test() -> None:
     max_output_bank_words.extend(
         make_instruction(
             1,
-            make_dest_token(REG_OUTPUT, 11),
+            make_dest_token(REG_OUTPUT, 1),
             make_source_token(REG_INPUT, 0),
         )
     )
     max_output_bank = audit_vs3_bytes(shader(*max_output_bank_words))
     assert max_output_bank["structural_candidate_for_manual_lowering"] is True
-    assert max_output_bank["output_mapping_plan"]["o11"][0]["vs_2_0_link_semantic"] == "POSITION0"
+    assert max_output_bank["output_mapping_plan"]["o1"][0]["vs_2_0_link_semantic"] == "POSITION0"
     assert max_output_bank["output_mapping_plan"]["o10"][0]["vs_2_0_link_semantic"] == "PSIZE0"
 
     # Position and PSIZE cannot be co-declared with other semantics, even
@@ -2273,13 +2275,14 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 11),
         *dcl(USAGE_COLOR, REG_OUTPUT, 0, usage_index=0),
-        *dcl(USAGE_COLOR, REG_OUTPUT, 1, usage_index=1),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 2, usage_index=1),
     ]
-    for semantic_index in range(8):
+    no_point_size_texcoords = [3, 4, 5, 6, 7, 8, 9, 10]
+    for semantic_index, source_output in enumerate(no_point_size_texcoords):
         no_point_size_words.extend(
-            dcl(USAGE_TEXCOORD, REG_OUTPUT, semantic_index + 2, usage_index=semantic_index)
+            dcl(USAGE_TEXCOORD, REG_OUTPUT, source_output, usage_index=semantic_index)
         )
-    for output_index in range(10):
+    for output_index in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
         no_point_size_words.extend(
             make_instruction(
                 1,
