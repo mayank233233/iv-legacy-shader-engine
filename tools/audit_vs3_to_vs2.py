@@ -689,10 +689,13 @@ def audit_vs3_bytes(
                     reasons.append(f"DEFB at DWORD {ins.offset} must target a boolean constant register")
                 elif opcode == OP_DEFI and register_type != REG_CONSTINT:
                     reasons.append(f"DEFI at DWORD {ins.offset} must target an integer constant register")
-                elif opcode in (1, 46) and register_type != REG_ADDR and opcode == 46:
+                elif opcode == 46 and register_type != REG_ADDR:
                     reasons.append(f"MOVA at DWORD {ins.offset} must target address register a0")
-                elif opcode not in (1, 46) and register_type == REG_ADDR:
-                    reasons.append(f"{name} at DWORD {ins.offset} may not write address register a0")
+                elif opcode != 46 and register_type == REG_ADDR:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} may not write address register a0; "
+                        "baseline vs_2_0 requires MOVA"
+                    )
                 elif opcode not in (OP_DEF, OP_DEFB, OP_DEFI) and register_type in (
                     REG_INPUT, REG_CONST, REG_CONSTINT, REG_CONSTBOOL,
                     REG_LOOP, REG_SAMPLER, REG_LABEL, REG_PREDICATE,
@@ -732,10 +735,8 @@ def audit_vs3_bytes(
                         f"{name} at DWORD {ins.offset} reads a0 directly; the address register "
                         "is only used for relative constant addressing"
                     )
-                elif opcode not in (1, 46):
-                    reasons.append(
-                        f"{name} at DWORD {ins.offset} may not write address register a0"
-                    )
+                # Destination legality is checked above: baseline vs_2_0
+                # requires MOVA for writes to a0.
             elif register_type in (REG_RASTOUT, REG_ATTROUT):
                 reasons.append(
                     f"{name} at DWORD {ins.offset} uses a legacy fixed-output register type "
@@ -1092,8 +1093,7 @@ def _self_test() -> None:
     assert any("static flow control" in reason for reason in loop["reasons"])
     assert not any("expected 2" in reason for reason in loop["reasons"])
 
-    # a0 is write-only for ordinary shader code: it may be updated with MOV/MOVA,
-    # but is not a general-purpose source register.
+    # a0 is write-only; baseline vs_2_0 uses MOVA (not MOV) to update it.
     address_read_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
@@ -1106,11 +1106,29 @@ def _self_test() -> None:
     address_write_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *make_instruction(1, make_dest_token(REG_ADDR, 0, 0x1), make_source_token(REG_INPUT, 0)),
+        *make_instruction(46, make_dest_token(REG_ADDR, 0, 0x1), make_source_token(REG_INPUT, 0)),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     address_write = audit_vs3_bytes(shader(*address_write_words))
     assert address_write["structural_candidate_for_manual_lowering"] is True
+
+    mov_to_address_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_ADDR, 0, 0x1), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    mov_to_address = audit_vs3_bytes(shader(*mov_to_address_words))
+    assert any("requires MOVA" in reason for reason in mov_to_address["reasons"])
+
+    mova_wrong_destination_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(46, make_dest_token(REG_TEMP, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    mova_wrong_destination = audit_vs3_bytes(shader(*mova_wrong_destination_words))
+    assert any("MOVA" in reason and "must target address register" in reason for reason in mova_wrong_destination["reasons"])
 
     partial_position_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
