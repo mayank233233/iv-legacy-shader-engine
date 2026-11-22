@@ -1000,6 +1000,7 @@ def _self_test() -> None:
             "vertex_shader": {"profile": "vs_2_0", "major": 2, "minor": 0},
             "pixel_shader": {"profile": "ps_2_0", "major": 2, "minor": 0},
             "max_simultaneous_render_targets": 1,
+            "max_vertex_shader_constants": 96,
             "vs20_temps": 12,
             "ps20_temps": 12,
             "ps20_instruction_slots": 96,
@@ -1016,7 +1017,42 @@ def _self_test() -> None:
         assert integrated["vertex_stage"]["structural_candidate"]
         assert integrated["status"] == "capture_incomplete", integrated
 
-    print("PASS: paired VS3/PS3 interface, vertex-layout and draw-level audit self-tests")
+        # The paired audit must apply the captured MaxVertexShaderConst cap
+        # while classifying a VS3 shader for baseline VS2 lowering.
+        high_constant_words = [audit_vs3_to_vs2.VS3_VERSION]
+        high_constant_words.extend(vs_dcl(0, audit_vs3_to_vs2.REG_INPUT, 0))
+        high_constant_words.extend(vs_dcl(0, audit_vs3_to_vs2.REG_OUTPUT, 0))
+        high_constant_words.extend(audit_vs3_to_vs2.make_instruction(
+            1,
+            audit_vs3_to_vs2.make_dest_token(audit_vs3_to_vs2.REG_OUTPUT, 0),
+            audit_vs3_to_vs2.make_source_token(audit_vs3_to_vs2.REG_CONST, 96),
+        ))
+        high_constant_words.append(audit_vs3_to_vs2.OP_END)
+        high_constant_bytes = struct.pack(
+            "<" + "I" * len(high_constant_words), *high_constant_words
+        )
+        high_constant_hash = fnv1a64(high_constant_bytes)
+        (capture_root / f"VS_3_0_{high_constant_hash}.bin").write_bytes(
+            high_constant_bytes
+        )
+        captures_with_high_constant = index_captures(capture_root)
+        high_constant_draw = {
+            **draw_record,
+            "vertex_shader": {"hash": high_constant_hash, "profile": "vs_3_0"},
+        }
+        high_constant_audit = audit_draw(
+            high_constant_draw,
+            captures_with_high_constant,
+            capability_snapshot,
+            {},
+        )
+        assert not high_constant_audit["vertex_stage"]["structural_candidate"]
+        assert any(
+            "c96" in reason
+            for reason in high_constant_audit["vertex_stage"]["reasons"]
+        ), high_constant_audit
+
+    print("PASS: paired VS3/PS3 interface, layout, device-cap and draw-level audit self-tests")
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
