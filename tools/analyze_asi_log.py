@@ -106,7 +106,46 @@ def parse_depth_stencil_target(raw: str) -> dict[str, Any] | None:
         return None
 
 
+def decode_shader_version(raw: str | None, stage: str) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    try:
+        token = int(raw, 0)
+    except ValueError:
+        return None
+    major = (token >> 8) & 0xFF
+    minor = token & 0xFF
+    marker = (token >> 16) & 0xFFFF
+    expected_marker = 0xFFFE if stage.upper() == "VS" else 0xFFFF
+    if marker != expected_marker or major == 0:
+        return None
+    return {
+        "token": f"0x{token:08X}",
+        "major": major,
+        "minor": minor,
+        "profile": f"{stage.lower()}_{major}_{minor}",
+    }
+
+
+def hresult_succeeded(raw: str | None) -> bool | None:
+    if raw is None:
+        return None
+    try:
+        return (int(raw, 0) & 0x80000000) == 0
+    except ValueError:
+        return None
+
+
 def analyze_log(path: Path) -> dict[str, Any]:
+    adapters_by_index: dict[int, dict[str, Any]] = {}
+    device_capability_snapshots: list[dict[str, Any]] = []
+    device_format_checks: list[dict[str, Any]] = []
+    depth_format_checks: list[dict[str, Any]] = []
+    device_create_events: list[dict[str, Any]] = []
+    render_target_create_requests: list[dict[str, Any]] = []
+    depth_stencil_create_requests: list[dict[str, Any]] = []
+    render_target_bind_events: list[dict[str, Any]] = []
+    depth_stencil_bind_events: list[dict[str, Any]] = []
     shaders_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     fallback_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     textures_by_address: dict[str, dict[str, Any]] = {}
@@ -121,6 +160,174 @@ def analyze_log(path: Path) -> dict[str, Any]:
     for line_number, raw_line in enumerate(
         path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
     ):
+        if "D3D9_ADAPTER " in raw_line:
+            fields = parse_fields(raw_line)
+            adapter_index = int_field(fields, "adapter", -1)
+            if adapter_index >= 0:
+                adapters_by_index[adapter_index] = {
+                    "adapter": adapter_index,
+                    "vendor_id": int_field(fields, "vendor"),
+                    "device_id": int_field(fields, "device"),
+                    "subsystem_id": int_field(fields, "subsys"),
+                    "revision": int_field(fields, "revision"),
+                    "driver_version_high": int_field(fields, "driver_version"),
+                    "driver_version_low": int_field(fields, "driver_version_low"),
+                    "description_token": fields.get("description"),
+                    "driver_token": fields.get("driver"),
+                    "log_line": line_number,
+                }
+            continue
+
+        if "D3D9_GET_DEVICE_CAPS " in raw_line or "DEVICE_GET_DEVICE_CAPS " in raw_line:
+            fields = parse_fields(raw_line)
+            vertex_version = decode_shader_version(fields.get("VS"), "VS")
+            pixel_version = decode_shader_version(fields.get("PS"), "PS")
+            device_capability_snapshots.append({
+                "source": (
+                    "d3d9_adapter_query"
+                    if "D3D9_GET_DEVICE_CAPS " in raw_line else "device_query"
+                ),
+                "adapter": int_field(fields, "adapter", -1),
+                "device_type": int_field(fields, "type", -1),
+                "vertex_shader": vertex_version,
+                "pixel_shader": pixel_version,
+                "max_simultaneous_textures": int_field(fields, "MaxSimTextures", -1),
+                "max_texture_stages": int_field(fields, "MaxTextureStages", -1),
+                "max_simultaneous_render_targets": int_field(fields, "MaxRTs", -1),
+                "max_vertex_shader_constants": int_field(fields, "MaxVSConst", -1),
+                "vs20_temps": int_field(fields, "VS20Temps", -1),
+                "vs20_dynamic_flow_depth": int_field(fields, "VS20DynamicFlow", -1),
+                "vs20_static_flow_depth": int_field(fields, "VS20StaticFlow", -1),
+                "ps20_caps": int_field(fields, "PS20Caps", -1),
+                "ps20_temps": int_field(fields, "PS20Temps", -1),
+                "ps20_instruction_slots": int_field(fields, "PS20Slots", -1),
+                "ps20_dynamic_flow_depth": int_field(fields, "PS20DynamicFlow", -1),
+                "ps20_static_flow_depth": int_field(fields, "PS20StaticFlow", -1),
+                "log_line": line_number,
+            })
+            continue
+
+        if "D3D9_CHECK_DEVICE_FORMAT " in raw_line:
+            fields = parse_fields(raw_line)
+            device_format_checks.append({
+                "adapter": int_field(fields, "adapter", -1),
+                "device_type": int_field(fields, "type", -1),
+                "adapter_format": int_field(fields, "adapter_format", -1),
+                "usage": int_field(fields, "usage", -1),
+                "resource_type": int_field(fields, "resource_type", -1),
+                "check_format": int_field(fields, "check_format", -1),
+                "hr": fields.get("hr"),
+                "supported": hresult_succeeded(fields.get("hr")),
+                "log_line": line_number,
+            })
+            continue
+
+        if "D3D9_CHECK_DEPTH_MATCH " in raw_line:
+            fields = parse_fields(raw_line)
+            depth_format_checks.append({
+                "adapter": int_field(fields, "adapter", -1),
+                "device_type": int_field(fields, "type", -1),
+                "adapter_format": int_field(fields, "adapter_format", -1),
+                "render_target_format": int_field(fields, "render_format", -1),
+                "depth_stencil_format": int_field(fields, "depth_format", -1),
+                "hr": fields.get("hr"),
+                "supported": hresult_succeeded(fields.get("hr")),
+                "log_line": line_number,
+            })
+            continue
+
+        if "D3D9_CREATE_DEVICE_REQUEST " in raw_line:
+            fields = parse_fields(raw_line)
+            device_create_events.append({
+                "event": "request",
+                "adapter": int_field(fields, "adapter", -1),
+                "device_type": int_field(fields, "type", -1),
+                "behavior_flags": int_field(fields, "flags", 0),
+                "width": int_field(fields, "width"),
+                "height": int_field(fields, "height"),
+                "backbuffer_format": int_field(fields, "backbuffer_format", -1),
+                "windowed": int_field(fields, "windowed", -1),
+                "log_line": line_number,
+            })
+            continue
+
+        if "D3D9_CREATE_DEVICE_RESULT " in raw_line:
+            fields = parse_fields(raw_line)
+            device_create_events.append({
+                "event": "result",
+                "hr": fields.get("hr"),
+                "succeeded": hresult_succeeded(fields.get("hr")),
+                "log_line": line_number,
+            })
+            continue
+
+        if "CREATE_RENDER_TARGET " in raw_line:
+            fields = parse_fields(raw_line)
+            render_target_create_requests.append({
+                "width": int_field(fields, "width"),
+                "height": int_field(fields, "height"),
+                "format": int_field(fields, "format", -1),
+                "multisample_type": int_field(fields, "multisample", -1),
+                "multisample_quality": int_field(fields, "quality", -1),
+                "lockable": int_field(fields, "lockable", -1),
+                "hr": fields.get("hr"),
+                "succeeded": hresult_succeeded(fields.get("hr")),
+                "log_line": line_number,
+            })
+            continue
+
+        if "CREATE_DEPTH_STENCIL_SURFACE " in raw_line:
+            fields = parse_fields(raw_line)
+            depth_stencil_create_requests.append({
+                "width": int_field(fields, "width"),
+                "height": int_field(fields, "height"),
+                "format": int_field(fields, "format", -1),
+                "multisample_type": int_field(fields, "multisample", -1),
+                "multisample_quality": int_field(fields, "quality", -1),
+                "discard": int_field(fields, "discard", -1),
+                "hr": fields.get("hr"),
+                "succeeded": hresult_succeeded(fields.get("hr")),
+                "log_line": line_number,
+            })
+            continue
+
+        if "SET_RENDER_TARGET " in raw_line:
+            fields = parse_fields(raw_line)
+            render_target_bind_events.append({
+                "index": int_field(fields, "index", -1),
+                "object": normalize_pointer(fields.get("object")),
+                "width": int_field(fields, "width"),
+                "height": int_field(fields, "height"),
+                "format": int_field(fields, "format", -1),
+                "type": int_field(fields, "type", -1),
+                "usage": int_field(fields, "usage", -1),
+                "pool": int_field(fields, "pool", -1),
+                "multisample_type": int_field(fields, "multisample", -1),
+                "multisample_quality": int_field(fields, "quality", -1),
+                "hr": fields.get("hr"),
+                "succeeded": hresult_succeeded(fields.get("hr")),
+                "log_line": line_number,
+            })
+            continue
+
+        if "SET_DEPTH_STENCIL_SURFACE " in raw_line:
+            fields = parse_fields(raw_line)
+            depth_stencil_bind_events.append({
+                "object": normalize_pointer(fields.get("object")),
+                "width": int_field(fields, "width"),
+                "height": int_field(fields, "height"),
+                "format": int_field(fields, "format", -1),
+                "type": int_field(fields, "type", -1),
+                "usage": int_field(fields, "usage", -1),
+                "pool": int_field(fields, "pool", -1),
+                "multisample_type": int_field(fields, "multisample", -1),
+                "multisample_quality": int_field(fields, "quality", -1),
+                "hr": fields.get("hr"),
+                "succeeded": hresult_succeeded(fields.get("hr")),
+                "log_line": line_number,
+            })
+            continue
+
         if "SHADER_OBJECT_CREATED " in raw_line:
             fields = parse_fields(raw_line)
             stage = fields.get("stage", "").upper()
@@ -632,6 +839,27 @@ def analyze_log(path: Path) -> dict[str, Any]:
         "unresolved_shader_references": unresolved_shader_references,
         "malformed_shader_records": malformed_shader_records,
         "malformed_draw_records": malformed_draw_records,
+        "adapter_identifiers": [
+            adapters_by_index[index] for index in sorted(adapters_by_index)
+        ],
+        "device_capability_snapshots": device_capability_snapshots,
+        "device_format_checks": {
+            "count": len(device_format_checks),
+            "supported_count": sum(1 for item in device_format_checks if item["supported"] is True),
+            "unsupported_count": sum(1 for item in device_format_checks if item["supported"] is False),
+            "checks": device_format_checks,
+        },
+        "depth_stencil_format_checks": {
+            "count": len(depth_format_checks),
+            "supported_count": sum(1 for item in depth_format_checks if item["supported"] is True),
+            "unsupported_count": sum(1 for item in depth_format_checks if item["supported"] is False),
+            "checks": depth_format_checks,
+        },
+        "device_create_events": device_create_events,
+        "render_target_create_requests": render_target_create_requests,
+        "depth_stencil_create_requests": depth_stencil_create_requests,
+        "render_target_bind_events": render_target_bind_events,
+        "depth_stencil_bind_events": depth_stencil_bind_events,
         "frames_observed": len(frame_counts),
         "draw_calls_by_frame": {
             str(frame): count for frame, count in sorted(frame_counts.items())
