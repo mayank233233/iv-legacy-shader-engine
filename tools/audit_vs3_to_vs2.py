@@ -304,7 +304,6 @@ def audit_vs3_bytes(
     instruction_slots = 0
     input_declarations: dict[int, dict[str, int]] = {}
     output_declarations: dict[int, list[dict[str, Any]]] = {}
-    output_targets: dict[tuple[int, int], tuple[int, int]] = {}
     output_semantics: set[tuple[int, int]] = set()
     written_outputs: dict[tuple[int, int], int] = {}
     input_semantics: dict[tuple[int, int], int] = {}
@@ -348,6 +347,10 @@ def audit_vs3_bytes(
             reasons.append(f"DCL at DWORD {ins.offset} sets reserved destination-token bits")
         if destination & (1 << 13):
             reasons.append(f"DCL at DWORD {ins.offset} uses relative addressing on a destination")
+        if destination & (0xF << 20):
+            reasons.append(f"DCL at DWORD {ins.offset} sets a destination modifier")
+        if destination & (0xF << 24):
+            reasons.append(f"DCL at DWORD {ins.offset} sets destination scaling")
         if register_type == REG_SAMPLER:
             sampler_type = (declaration & 0x78000000) >> 27
             if declaration & ~0xF8000000:
@@ -816,6 +819,23 @@ def audit_vs3_bytes(
             f"the mapped oPos write mask is 0x{position_mask:X}"
         )
 
+    for source_register, declarations in output_declarations.items():
+        for declaration in declarations:
+            target = (
+                declaration.get("target_register_type"),
+                declaration.get("target_register_index"),
+            )
+            if target[0] is None:
+                continue
+            written_mask = written_outputs.get(target, 0)
+            missing_mask = declaration["component_mask"] & ~written_mask
+            if missing_mask:
+                reasons.append(
+                    f"declared output semantic {declaration['usage_name']}"
+                    f"{declaration['usage_index']} on o{source_register} "
+                    f"has unwritten components (mask 0x{missing_mask:X})"
+                )
+
     # VS2 point size is a scalar register but its assembler write mask must
     # remain implicit/full (.xyzw); only x is consumed by the rasterizer.
     point_size_output = (REG_RASTOUT, 2)
@@ -956,8 +976,8 @@ def _self_test() -> None:
     basic = audit_vs3_bytes(shader(*basic_words))
     assert basic["structural_candidate_for_manual_lowering"] is True
     assert basic["instruction_slots"] == 1
-    assert basic["output_mapping_plan"]["o0"]["vs_2_0_register_type"] == REG_RASTOUT
-    assert basic["output_mapping_plan"]["o0"]["vs_2_0_register_index"] == 0
+    assert basic["output_mapping_plan"]["o0"][0]["vs_2_0_register_type"] == REG_RASTOUT
+    assert basic["output_mapping_plan"]["o0"][0]["vs_2_0_register_index"] == 0
 
     temp12_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1015,7 +1035,9 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     output_semantic = audit_vs3_bytes(shader(*output_semantic_words))
-    assert any("no fixed vs_2_0 output mapping" in reason for reason in output_semantic["reasons"])
+    assert output_semantic["requires_pixel_shader_interface_remap"] is True
+    assert output_semantic["structural_candidate_for_manual_lowering"] is False
+    assert any("position output" in reason for reason in output_semantic["reasons"])
 
     read_only_write_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1142,24 +1164,20 @@ def _self_test() -> None:
 
     # VS3 may pack different semantics into disjoint components of one output
     # register. The lowering plan must split that source write into two outputs.
-    packed_words = [
+    duplicate_semantic_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=0),
-        *dcl(3, REG_OUTPUT, 3, usage_index=0),  # intentionally duplicate semantic
+        *make_instruction(OP_DCL,
+            0x80000000 | (USAGE_COLOR & 0xF),
+            make_dest_token(REG_OUTPUT, 3, 0x3)),
+        *make_instruction(OP_DCL,
+            0x80000000 | (USAGE_COLOR & 0xF),
+            make_dest_token(REG_OUTPUT, 4, 0x3)),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
-        *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
     ]
-    packed = audit_vs3_bytes(shader(*packed_words))
-    assert any("is declared more than once" in reason for reason in packed["reasons"])
+    duplicate_semantic = audit_vs3_bytes(shader(*duplicate_semantic_words))
+    assert any("is declared more than once" in reason for reason in duplicate_semantic["reasons"])
 
-    packed_distinct_words = [
-        *dcl(USAGE_POSITION, REG_INPUT, 0),
-        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=0),
-        *dcl(3, REG_OUTPUT, 3, usage_index=0),
-    ]
-    # Make the second semantic distinct and give it a disjoint .zw mask.
     packed_distinct_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
@@ -1176,8 +1194,8 @@ def _self_test() -> None:
     assert packed_distinct["structural_candidate_for_manual_lowering"] is True
     assert packed_distinct["output_component_split_required"] is True
     assert packed_distinct["requires_pixel_shader_interface_remap"] is True
+    assert len(packed_distinct["output_mapping_plan"]["o3"]) == 2
 
-    # The component masks on multiple DCL declarations for one output may not overlap.
     overlapping_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
@@ -1192,6 +1210,26 @@ def _self_test() -> None:
     ]
     overlapping = audit_vs3_bytes(shader(*overlapping_words))
     assert any("overlapping DCL component masks" in reason for reason in overlapping["reasons"])
+
+    point_size_bad_mask_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_PSIZE, REG_OUTPUT, 2, usage_index=0),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 2, 0x1), make_source_token(REG_INPUT, 0)),
+    ]
+    point_size_bad_mask = audit_vs3_bytes(shader(*point_size_bad_mask_words))
+    assert any("PSIZE0 output" in reason for reason in point_size_bad_mask["reasons"])
+    assert any("point-size output must use the full" in reason for reason in point_size_bad_mask["reasons"])
+
+    packed_unwritten_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=0),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    packed_unwritten = audit_vs3_bytes(shader(*packed_unwritten_words))
+    assert any("declared output semantic" in reason and "not written" in reason for reason in packed_unwritten["reasons"])
 
     over_budget_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
