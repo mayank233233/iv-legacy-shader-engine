@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Read-only PE32 import inspection for the original GTA IV 1.0.0.0 executable.
 
-The tool reports whether GTAIV.exe directly imports d3d9.dll!Direct3DCreate9
-through its normal or delay-import table. That evidence is relevant to the
-current ASI hook, which patches the main executable's IAT. A static import
-table cannot prove that no code later resolves D3D9 dynamically.
+The tool distinguishes normal and delay imports of d3d9.dll!Direct3DCreate9.
+The current ASI hook scans only the main executable's normal import table and
+requires a non-zero OriginalFirstThunk lookup table. Static imports do not prove
+that a later dynamic GetProcAddress path is unused.
 """
 from __future__ import annotations
 
@@ -226,6 +226,8 @@ class PE32Image:
                     "dll": dll,
                     "table": "normal",
                     "descriptor_index": index,
+                    "original_first_thunk_rva": oft,
+                    "first_thunk_rva": first_thunk,
                 })
                 imports.append(item)
         if not found_terminator:
@@ -274,6 +276,66 @@ class PE32Image:
         if not found_terminator:
             raise PEFormatError("delay-import descriptor table has no null terminator")
         return imports
+
+
+def assess_factory_hook_path(
+    normal_imports: list[dict[str, Any]],
+    delay_imports: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Assess only the static import route implemented by the current ASI."""
+    def is_factory(item: dict[str, Any]) -> bool:
+        return (
+            item.get("dll", "").lower() == "d3d9.dll"
+            and item.get("name") == "Direct3DCreate9"
+        )
+
+    normal_factory = [item for item in normal_imports if is_factory(item)]
+    delay_factory = [item for item in delay_imports if is_factory(item)]
+    normal_with_lookup = [
+        item for item in normal_factory
+        if int(item.get("original_first_thunk_rva") or 0) != 0
+    ]
+
+    if normal_with_lookup:
+        if delay_factory:
+            classification = "normal_iat_candidate_plus_delay_import"
+            message = (
+                "a supported normal-IAT candidate exists, but any delay-import "
+                "call path is not hooked by the current ASI"
+            )
+        else:
+            classification = "normal_iat_candidate"
+            message = (
+                "a supported normal-IAT candidate exists; actual runtime use "
+                "and ASI load timing still need verification"
+            )
+    elif normal_factory:
+        classification = "normal_import_without_lookup_table"
+        message = (
+            "Direct3DCreate9 is a normal import, but OriginalFirstThunk is zero; "
+            "the current ASI skips this descriptor"
+        )
+    elif delay_factory:
+        classification = "delay_import_only"
+        message = (
+            "Direct3DCreate9 appears only in the delay-import table; the current "
+            "ASI scans normal imports only and will not hook this route"
+        )
+    else:
+        classification = "no_direct_normal_import"
+        message = (
+            "no direct normal Direct3DCreate9 import with a usable lookup table "
+            "was found; dynamic resolution or another module remains possible"
+        )
+
+    return {
+        "classification": classification,
+        "hook_candidate": bool(normal_with_lookup),
+        "normal_direct_import_count": len(normal_factory),
+        "delay_direct_import_count": len(delay_factory),
+        "normal_direct_imports_with_lookup_table": len(normal_with_lookup),
+        "message": message,
+    }
 
 
 def get_windows_file_version(path: Path) -> tuple[str | None, str]:
@@ -354,6 +416,13 @@ def inspect_file(path: Path) -> dict[str, Any]:
         item for item in d3d9_imports
         if item.get("name") == "Direct3DCreate9Ex"
     ]
+    normal_factory = [item for item in direct_factory if item["table"] == "normal"]
+    delay_factory = [item for item in direct_factory if item["table"] == "delay"]
+    normal_factory_with_lookup = [
+        item for item in normal_factory
+        if int(item.get("original_first_thunk_rva") or 0) != 0
+    ]
+    hook_path = assess_factory_hook_path(normal, delay)
     get_proc_address = [
         item for item in all_imports
         if item.get("name") == "GetProcAddress"
@@ -389,11 +458,23 @@ def inspect_file(path: Path) -> dict[str, Any]:
         "normal_import_count": len(normal),
         "delay_import_count": len(delay),
         "imports_d3d9_dll": [
-            {"name": x.get("name"), "kind": x["kind"], "table": x["table"],
-             "lookup_rva": f"0x{x['lookup_rva']:08X}"}
+            {
+                "name": x.get("name"),
+                "kind": x["kind"],
+                "table": x["table"],
+                "lookup_rva": f"0x{x['lookup_rva']:08X}",
+                "original_first_thunk_rva": (
+                    f"0x{x['original_first_thunk_rva']:08X}"
+                    if "original_first_thunk_rva" in x else None
+                ),
+            }
             for x in d3d9_imports
         ],
         "direct3dcreate9_normal_or_delay_import": bool(direct_factory),
+        "direct3dcreate9_normal_import": bool(normal_factory),
+        "direct3dcreate9_delay_import": bool(delay_factory),
+        "direct3dcreate9_normal_import_with_lookup_table": bool(normal_factory_with_lookup),
+        "direct3dcreate9_hook_candidate": hook_path["hook_candidate"],
         "direct3dcreate9ex_normal_or_delay_import": bool(direct_factory_ex),
         "getprocaddress_import_present": bool(get_proc_address),
         "relevant_imports": [
@@ -405,13 +486,19 @@ def inspect_file(path: Path) -> dict[str, Any]:
             }
             for x in relevant
         ],
-        "hook_assessment": (
-            "main-executable Direct3DCreate9 IAT hook has a static import target"
-            if direct_factory else
-            "no direct Direct3DCreate9 import found; current IAT hook will not attach through this route"
-        ),
+        "hook_assessment_code": hook_path["classification"],
+        "hook_assessment": hook_path["message"],
+        "hook_assessment_counts": {
+            "normal_direct_import_count": hook_path["normal_direct_import_count"],
+            "delay_direct_import_count": hook_path["delay_direct_import_count"],
+            "normal_direct_imports_with_lookup_table":
+                hook_path["normal_direct_imports_with_lookup_table"],
+        },
         "limitations": [
-            "A PE import table cannot prove whether a later GetProcAddress call resolves D3D9 dynamically.",
+            "The current ASI scans only the main executable's normal import table.",
+            "The current ASI skips a D3D9 import descriptor when OriginalFirstThunk is zero.",
+            "The current ASI does not patch delay imports or Direct3DCreate9Ex.",
+            "A PE import table cannot prove whether a later GetProcAddress call resolves D3D9 dynamically; importing GetProcAddress does not prove that it is used for D3D9.",
             "A D3D9 import from another module is outside the current main-executable IAT hook.",
             "The tool reads the executable; it never modifies the file."
         ],
@@ -464,6 +551,30 @@ def _self_test() -> None:
     assert imports[0]["dll"].lower() == "d3d9.dll"
     assert imports[0]["name"] == "Direct3DCreate9"
     assert imports[0]["table"] == "normal"
+    assert imports[0]["original_first_thunk_rva"] == 0x1040
+
+    normal_candidate = assess_factory_hook_path(imports, [])
+    assert normal_candidate["classification"] == "normal_iat_candidate"
+    assert normal_candidate["hook_candidate"] is True
+
+    delay_only = assess_factory_hook_path([], [{
+        "dll": "d3d9.dll", "name": "Direct3DCreate9", "table": "delay"
+    }])
+    assert delay_only["classification"] == "delay_import_only"
+    assert delay_only["hook_candidate"] is False
+
+    missing_lookup = assess_factory_hook_path([{
+        "dll": "d3d9.dll", "name": "Direct3DCreate9",
+        "table": "normal", "original_first_thunk_rva": 0
+    }], [])
+    assert missing_lookup["classification"] == "normal_import_without_lookup_table"
+    assert missing_lookup["hook_candidate"] is False
+
+    mixed_paths = assess_factory_hook_path(imports, [{
+        "dll": "d3d9.dll", "name": "Direct3DCreate9", "table": "delay"
+    }])
+    assert mixed_paths["classification"] == "normal_iat_candidate_plus_delay_import"
+    assert mixed_paths["hook_candidate"] is True
 
     try:
         PE32Image(b"not a PE file")
@@ -506,10 +617,15 @@ def main() -> int:
     print(f"File version: {report['file_version'] or report['file_version_status']}")
     print(f"Normal imports: {report['normal_import_count']}; delay imports: {report['delay_import_count']}")
     print(f"d3d9.dll imports: {report['imports_d3d9_dll']}")
-    print(f"Direct Direct3DCreate9 import: {report['direct3dcreate9_normal_or_delay_import']}")
+    print(
+        "Direct Direct3DCreate9 imports: "
+        f"normal={report['direct3dcreate9_normal_import']}, "
+        f"delay={report['direct3dcreate9_delay_import']}, "
+        f"normal_with_lookup_table={report['direct3dcreate9_normal_import_with_lookup_table']}"
+    )
     print(f"Direct Direct3DCreate9Ex import: {report['direct3dcreate9ex_normal_or_delay_import']}")
-    print(f"GetProcAddress import: {report['getprocaddress_import_present']}")
-    print(f"Hook assessment: {report['hook_assessment']}")
+    print(f"GetProcAddress import present: {report['getprocaddress_import_present']}")
+    print(f"Hook assessment [{report['hook_assessment_code']}]: {report['hook_assessment']}")
 
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
