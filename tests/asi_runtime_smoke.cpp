@@ -723,9 +723,9 @@ namespace
         g_fakeDeviceVTable[113] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantB);
         g_fakeDeviceVTable[23] = reinterpret_cast<void*>(FakeDeviceCreateTexture);
         g_fakeDeviceVTable[57] = reinterpret_cast<void*>(FakeDeviceSetRenderState);
-        g_fakeDeviceVTable[58] = reinterpret_cast<void*>(FakeDeviceCreateStateBlock);
-        g_fakeDeviceVTable[59] = reinterpret_cast<void*>(FakeDeviceBeginStateBlock);
-        g_fakeDeviceVTable[60] = reinterpret_cast<void*>(FakeDeviceEndStateBlock);
+        g_fakeDeviceVTable[59] = reinterpret_cast<void*>(FakeDeviceCreateStateBlock);
+        g_fakeDeviceVTable[60] = reinterpret_cast<void*>(FakeDeviceBeginStateBlock);
+        g_fakeDeviceVTable[61] = reinterpret_cast<void*>(FakeDeviceEndStateBlock);
         g_fakeDeviceVTable[67] = reinterpret_cast<void*>(FakeDeviceSetTextureStageState);
         g_fakeDeviceVTable[86] = reinterpret_cast<void*>(FakeDeviceCreateVertexDeclaration);
         g_fakeDeviceVTable[87] = reinterpret_cast<void*>(FakeDeviceSetVertexDeclaration);
@@ -849,7 +849,7 @@ int main()
         return Fail("Could not patch the synthetic host IAT to its fake D3D9 factory");
     std::printf(
         "SMOKE: fake state-block vtable slots create=%p begin=%p end=%p\\n",
-        g_fakeDeviceVTable[58], g_fakeDeviceVTable[59], g_fakeDeviceVTable[60]);
+        g_fakeDeviceVTable[59], g_fakeDeviceVTable[60], g_fakeDeviceVTable[61]);
     std::fflush(stdout);
 
     const wchar_t* iniPath = L"build\\bin\\IVLegacy.ini";
