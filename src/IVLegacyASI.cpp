@@ -384,18 +384,18 @@ namespace
                 InterlockedExchange(&g_samplerStateKnown[stage][state], 0);
         }
         InterlockedExchangePointer(&g_stateCacheDevice, device);
-    }
-
-    void InvalidateRedundantStateCache(PVOID device)
-    {
-        AcquireStateCacheLock();
-        InvalidateStateCacheLocked(device);
         InterlockedExchange(&g_stateCacheWindowFrameCount, 0);
         for (LONG index = 0; index < 3; ++index)
         {
             InterlockedExchange64(&g_stateCacheForwarded[index], 0);
             InterlockedExchange64(&g_stateCacheSkipped[index], 0);
         }
+    }
+
+    void InvalidateRedundantStateCache(PVOID device)
+    {
+        AcquireStateCacheLock();
+        InvalidateStateCacheLocked(device);
         ReleaseStateCacheLock();
     }
 
@@ -415,14 +415,24 @@ namespace
             Log("STATE_CACHE_DISABLED reason=state_block_api_used");
     }
 
-    void RecordRedundantStateCacheWindow()
+    void RecordRedundantStateCacheWindow(PVOID device)
     {
         if (!g_redundantStateCacheEnabled)
             return;
 
+        AcquireStateCacheLock();
+        if (!g_redundantStateCacheEnabled || g_stateCacheDevice != device)
+        {
+            ReleaseStateCacheLock();
+            return;
+        }
+
         const LONG frames = InterlockedIncrement(&g_stateCacheWindowFrameCount);
         if (frames < static_cast<LONG>(g_stateCacheReportFrames))
+        {
+            ReleaseStateCacheLock();
             return;
+        }
 
         InterlockedExchange(&g_stateCacheWindowFrameCount, 0);
         const LONGLONG renderForwarded =
@@ -437,6 +447,7 @@ namespace
             InterlockedExchange64(&g_stateCacheForwarded[kStateCacheSamplerState], 0);
         const LONGLONG samplerSkipped =
             InterlockedExchange64(&g_stateCacheSkipped[kStateCacheSamplerState], 0);
+        ReleaseStateCacheLock();
 
         Log(
             "D3D9_STATE_CACHE_WINDOW frames=%ld "
@@ -1682,7 +1693,7 @@ namespace
         }
         else
         {
-            RecordRedundantStateCacheWindow();
+            RecordRedundantStateCacheWindow(self);
             if (g_drawTelemetryEnabled || g_frameProfilerEnabled)
                 InterlockedIncrement(&g_presentFrameIndex);
         }
