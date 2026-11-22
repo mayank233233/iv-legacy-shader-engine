@@ -20,6 +20,16 @@ if not SMOKE_SOURCE.is_file() or not SMOKE_RESOURCE.is_file():
 source = SOURCE.read_text(encoding="utf-8")
 build = BUILD.read_text(encoding="utf-8")
 
+# Guard the fallback-path null terminators against multi-character wide literals.
+malformed_null_literal = "L'" + chr(92) + chr(92) + "0'"
+correct_null_literal = "L'" + chr(92) + "0'"
+if malformed_null_literal in source:
+    fail("fallback path contains a malformed multi-character wide null literal")
+if "g_shaderFallbackIniPath[0] == " + correct_null_literal + ")" not in source:
+    fail("fallback INI path guard must compare against the wide null character")
+if "resolvedPath[0] = " + correct_null_literal + ";" not in source:
+    fail("resolved fallback path must be initialized with the wide null character")
+
 required_source_markers = (
     "GTAIV.exe",
     "InitializePluginOnce",
