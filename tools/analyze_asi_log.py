@@ -163,6 +163,15 @@ def analyze_log(path: Path) -> dict[str, Any]:
         if "D3D9_ADAPTER " in raw_line:
             fields = parse_fields(raw_line)
             adapter_index = int_field(fields, "adapter", -1)
+            driver_version_parts = fields.get("driver_version", "").split(":")
+            try:
+                driver_version_high = int(driver_version_parts[0], 16)
+                driver_version_low = int(driver_version_parts[1], 16)
+            except (IndexError, ValueError):
+                driver_version_high = 0
+                driver_version_low = 0
+            description_match = re.search(r"\\bdescription=(.*?)\\s+driver=", raw_line)
+            driver_match = re.search(r"\\bdriver=(.*?)\\s*$", raw_line)
             if adapter_index >= 0:
                 adapters_by_index[adapter_index] = {
                     "adapter": adapter_index,
@@ -170,10 +179,10 @@ def analyze_log(path: Path) -> dict[str, Any]:
                     "device_id": int_field(fields, "device"),
                     "subsystem_id": int_field(fields, "subsys"),
                     "revision": int_field(fields, "revision"),
-                    "driver_version_high": int_field(fields, "driver_version"),
-                    "driver_version_low": int_field(fields, "driver_version_low"),
-                    "description_token": fields.get("description"),
-                    "driver_token": fields.get("driver"),
+                    "driver_version_high": driver_version_high,
+                    "driver_version_low": driver_version_low,
+                    "description": description_match.group(1) if description_match else fields.get("description"),
+                    "driver": driver_match.group(1) if driver_match else fields.get("driver"),
                     "log_line": line_number,
                 }
             continue
