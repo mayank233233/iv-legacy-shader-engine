@@ -1123,7 +1123,12 @@ def audit_vs3_bytes(
             if target[0] is None:
                 continue
             written_mask = written_outputs.get(target, 0)
-            missing_mask = declaration["component_mask"] & ~written_mask
+            required_mask = (
+                0x1
+                if declaration["usage"] == USAGE_PSIZE and declaration["usage_index"] == 0
+                else declaration["component_mask"]
+            )
+            missing_mask = required_mask & ~written_mask
             if missing_mask:
                 reasons.append(
                     f"declared output semantic {declaration['usage_name']}"
@@ -1131,12 +1136,12 @@ def audit_vs3_bytes(
                     f"has unwritten components (mask 0x{missing_mask:X})"
                 )
 
-    # VS2 point size is a scalar register but its assembler write mask must
-    # remain implicit/full (.xyzw); only x is consumed by the rasterizer.
+    # The PSIZE declaration uses a full DCL mask, but the point-size value is
+    # scalar and only its x component is consumed by the rasterizer.
     point_size_output = (REG_RASTOUT, 2)
-    if point_size_output in written_outputs and written_outputs[point_size_output] != 0xF:
+    if point_size_output in written_outputs and written_outputs[point_size_output] != 0x1:
         reasons.append(
-            "mapped point-size output must use the full xyzw write mask"
+            "mapped point-size output must write only the x component"
         )
 
     # The combined write mask for each oT# must be .x, .xy, .xyz or .xyzw;
@@ -1634,7 +1639,7 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
         *dcl(USAGE_PSIZE, REG_OUTPUT, 1),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
-        *make_instruction(1, make_dest_token(REG_OUTPUT, 1), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0x1), make_source_token(REG_INPUT, 0)),
     ]
     special_outputs = audit_vs3_bytes(shader(*special_outputs_words))
     assert special_outputs["structural_candidate_for_manual_lowering"] is True
@@ -1995,8 +2000,18 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 2, 0x1), make_source_token(REG_INPUT, 0)),
     ]
     point_size_bad_mask = audit_vs3_bytes(shader(*point_size_bad_mask_words))
-    assert any("PSIZE0 output" in reason for reason in point_size_bad_mask["reasons"])
-    assert any("point-size output must use the full" in reason for reason in point_size_bad_mask["reasons"])
+    assert any("PSIZE0 output" in reason and "full xyzw declaration mask" in reason for reason in point_size_bad_mask["reasons"])
+    assert not any("point-size output" in reason for reason in point_size_bad_mask["reasons"])
+
+    point_size_bad_write_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_PSIZE, REG_OUTPUT, 2),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 2, 0x2), make_source_token(REG_INPUT, 0)),
+    ]
+    point_size_bad_write = audit_vs3_bytes(shader(*point_size_bad_write_words))
+    assert any("point-size output must write only the x component" in reason for reason in point_size_bad_write["reasons"])
 
     packed_unwritten_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
