@@ -15,7 +15,7 @@ Prototype 0.5.5-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `shaders/flat_lod_vs20.hlsl` | Position/vertex-colour transform for flat distant geometry |
 | `shaders/flat_lod_ps20.hlsl` | Texture-free vertex-colour/fog pass |
 | `src/D3D9ShaderProbe.cpp` | Standalone x86 D3D9 capability, shader-creation, draw/present and readback probe |
-| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; main-executable D3D9 factory IAT hook, adapter/device telemetry, shader creation/binding observation and opt-in bounded capture |
+| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; D3D9 adapter/device telemetry, hardware-T&L and vertex-processing capability audit, shader/draw capture, and optional QPC frame/API timing |
 | `build/compile_shaders.bat` | FXC compilation and assembly-listing generation for all six shaders |
 | `build/build_probe.bat` | x86 MSVC standalone-probe build |
 | `build/build_asi.bat` | x86 MSVC ASI/DLL build |
@@ -244,3 +244,21 @@ The D3D9 ASI now records the render/depth surface state associated with draw sub
 This is deliberately **observability only**: it does not replace shaders, skip render targets, change D3D9 state, spoof caps, lower resolution, alter LODs, or disable game simulation. A surface is not labelled as a G-buffer, shadow map, reflection or water target from its format alone; that requires correlating shader pairs, pass order and captured contents. The synthetic tests validate parsing and hooks, not GTA IV rendering or GMA 3100 behavior.
 
 The current code still does not implement a complete VS3-to-VS2 translator or an SM3-compatible renderer. The pixel shader fallback remains opt-in and manually hash-mapped; vertex shader creation continues to pass the original shader through.
+
+## D3D9 capability audit and QPC frame profiler (development branch)
+
+The ASI's capability records now include `D3DCAPS9.DevCaps`, the `D3DDEVCAPS_HWTRANSFORMANDLIGHT` result, `VertexProcessingCaps`, stream limits and maximum vertex/primitive values. `CreateDevice` logging separately records whether the caller requested hardware, mixed or software vertex processing. The capability bit is evidence of what the driver advertises; it does not by itself prove that fixed-function rendering will be faster for GTA IV.
+
+Optional profiling is disabled by default. Enable it in `IVLegacy.ini`:
+
+```ini
+[General]
+EnableFrameProfiler=1
+FrameProfilerWindowFrames=120
+```
+
+The profiler measures successful-`Present`-return intervals, wall time spent inside `Present`, and wall time inside the four D3D9 draw methods (`DrawPrimitive`, `DrawIndexedPrimitive`, and both `UP` variants). It emits average, P50, P95, P99 and maximum frame intervals, plus draw-call and Present summaries, once per configured sample window.
+
+`draw_api_ms` is elapsed time inside the D3D9 API call, not a pure count of CPU instructions; it can include driver stalls. `unattributed_ms` is the interval remaining after subtracting measured draw and Present call durations. It includes game simulation, other D3D9 calls and other work, so it is not a direct measurement of world-simulation time. **GPU execution time is not measured** by this profiler (`gpu_time=not_measured`).
+
+The Windows synthetic smoke test enables a one-frame window, advertises a fake HW-T&L capability, requests software vertex processing, submits four synthetic draw calls and checks the profiler summary. Those values verify the instrumentation path only. They are not measurements from the physical GMA 3100 or GTA IV.
