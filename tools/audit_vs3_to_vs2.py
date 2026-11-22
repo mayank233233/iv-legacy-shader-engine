@@ -268,6 +268,20 @@ def output_mapping(usage: int, usage_index: int) -> tuple[int, int] | None:
     return None
 
 
+def output_target_semantic(register_type: int | None, register_index: int | None) -> str | None:
+    if register_type is None or register_index is None:
+        return None
+    if (register_type, register_index) == (REG_RASTOUT, 0):
+        return "POSITION0"
+    if (register_type, register_index) == (REG_RASTOUT, 2):
+        return "PSIZE0"
+    if register_type == REG_ATTROUT:
+        return f"COLOR{register_index}"
+    if register_type == REG_OUTPUT:
+        return f"TEXCOORD{register_index}"
+    return None
+
+
 def _register_operands(ins: Instruction) -> tuple[int, ...]:
     if ins.opcode == OP_DCL:
         return ins.operands[1:2]
@@ -875,6 +889,10 @@ def audit_vs3_bytes(
                 "declared_component_mask": declaration["component_mask"],
                 "vs_2_0_register_type": declaration.get("target_register_type"),
                 "vs_2_0_register_index": declaration.get("target_register_index"),
+                "vs_2_0_link_semantic": output_target_semantic(
+                    declaration.get("target_register_type"),
+                    declaration.get("target_register_index"),
+                ),
                 "requires_pixel_shader_interface_remap": declaration.get(
                     "requires_pixel_shader_interface_remap", False
                 ),
