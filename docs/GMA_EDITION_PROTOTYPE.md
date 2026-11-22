@@ -26,8 +26,11 @@ status is not approval to replay or modify a draw.
 
 ### Missing evidence before low-resolution redirection
 
-- The ASI currently has no `SetViewport` hook. Add and validate slot 47 before
-  attempting to change viewport dimensions.
+- The ASI now observes `SetViewport` (IDirect3DDevice9 slot 47) when draw
+  telemetry is enabled. This records viewport rectangles but does not modify
+  them. The synthetic x86 smoke test exercises the slot and verifies forwarding.
+- A full frame trace must correlate each viewport change with the active RT0,
+  depth surface and draw sequence before any viewport or target redirection.
 - A surface created at the backbuffer dimensions is not necessarily the main
   scene target. Establish its identity from a complete frame trace.
 - RT0 and depth must be paired by actual successful bindings, format,
@@ -70,5 +73,6 @@ bottlenecks remain possible.
 - UI-sharp upscale: not implemented or claimed.
 - Fixed-function live draw replacement: not implemented.
 - Fixed-function candidate audit: implemented, diagnostic only.
+- SetViewport telemetry: implemented, observational only; hardware/game validation pending.
 - Windows x86 CI: validates Python audit and existing ASI build; not a game/GMA
   hardware acceptance test.
