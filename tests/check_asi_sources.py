@@ -91,6 +91,7 @@ required_source_markers = (
     "StateCacheReportFrames",
     "D3D9_STATE_CACHE_WINDOW",
     "STATE_CACHE_DISABLED reason=state_block_api_used",
+    "STATE_CACHE_DISABLED reason=multiple_device_threads",
     "SetRenderStateWithCache",
     "SetTextureStageStateWithCache",
     "SetSamplerStateWithCache",
