@@ -138,13 +138,15 @@ D3DDECLUSAGE_NAMES = {
     8: "TESSFACTOR", 9: "POSITIONT", 10: "COLOR", 11: "FOG",
     12: "DEPTH", 13: "SAMPLE",
 }
+# Matrix instructions read a number of consecutive constant registers equal
+# to the result dimension (the second digit pair in mNxM).
 MATRIX_ROWS = {20: 4, 21: 3, 22: 4, 23: 3, 24: 2}
 MATRIX_DEST_MASKS = {
-    20: (0x7, 0xF),  # m4x4 permits .xyz or .xyzw
-    21: (0x7,),      # m4x3 requires .xyz
-    22: (0x7, 0xF),  # m3x4 permits .xyz or .xyzw
-    23: (0x7,),      # m3x3 requires .xyz
-    24: (0x3,),      # m3x2 requires .xy
+    20: (0xF,),  # m4x4 requires .xyzw
+    21: (0x7,),  # m4x3 requires .xyz
+    22: (0xF,),  # m3x4 requires .xyzw
+    23: (0x7,),  # m3x3 requires .xyz
+    24: (0x3,),  # m3x2 requires .xy
 }
 IDENTITY_SWIZZLE = 0xE4
 
@@ -665,6 +667,12 @@ def audit_vs3_bytes(
                 reasons.append(
                     f"{name} at DWORD {ins.offset} requires destination mask "
                     f"{expected_text}, got 0x{actual_mask:X}"
+                )
+            destination = decode_register(ins.operands[0])
+            vector_source = decode_register(ins.operands[1])
+            if destination is not None and vector_source == destination:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} destination and vector source must not alias"
                 )
             matrix_token = ins.operands[2]
             matrix_register = decode_register(matrix_token)
@@ -1443,6 +1451,55 @@ def _self_test() -> None:
     ]
     matrix_bad = audit_vs3_bytes(shader(*matrix_bad_words))
     assert any("requires a float-constant matrix source" in reason for reason in matrix_bad["reasons"])
+
+    matrix_mask_bad_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(20, make_dest_token(REG_TEMP, 0, 0x7), make_source_token(REG_INPUT, 0), make_source_token(REG_CONST, 4)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    matrix_mask_bad = audit_vs3_bytes(shader(*matrix_mask_bad_words))
+    assert any("requires destination mask 0xF" in reason for reason in matrix_mask_bad["reasons"])
+
+    m4x3_valid = audit_vs3_bytes(shader(
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(21, make_dest_token(REG_TEMP, 0, 0x7), make_source_token(REG_INPUT, 0), make_source_token(REG_CONST, 4)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ))
+    assert m4x3_valid["structural_candidate_for_manual_lowering"] is True
+
+    m3x4_valid = audit_vs3_bytes(shader(
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(22, make_dest_token(REG_TEMP, 0, 0xF), make_source_token(REG_INPUT, 0), make_source_token(REG_CONST, 252)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ))
+    assert m3x4_valid["structural_candidate_for_manual_lowering"] is True
+
+    m3x4_overflow = audit_vs3_bytes(shader(
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(22, make_dest_token(REG_TEMP, 0, 0xF), make_source_token(REG_INPUT, 0), make_source_token(REG_CONST, 253)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ))
+    assert any("reads past configured" in reason for reason in m3x4_overflow["reasons"])
+
+    m3x2_valid = audit_vs3_bytes(shader(
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(24, make_dest_token(REG_TEMP, 0, 0x3), make_source_token(REG_INPUT, 0), make_source_token(REG_CONST, 254)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ))
+    assert m3x2_valid["structural_candidate_for_manual_lowering"] is True
+
+    matrix_alias = audit_vs3_bytes(shader(
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(20, make_dest_token(REG_TEMP, 0, 0xF), make_source_token(REG_TEMP, 0), make_source_token(REG_CONST, 4)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ))
+    assert any("destination and vector source must not alias" in reason for reason in matrix_alias["reasons"])
 
     # Baseline vs_2_0 does not provide the vs_3_0 _sat instruction modifier.
     sat_words = [
