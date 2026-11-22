@@ -1583,6 +1583,31 @@ def _self_test() -> None:
     lowered_move = next(ins for ins in lowered_instructions if ins.opcode == 1)
     assert decode_register(lowered_move.operands[0]) == (REG_RASTOUT, 0)
 
+    with tempfile.TemporaryDirectory() as temporary:
+        temporary_path = Path(temporary)
+        source_path = temporary_path / "basic.vso"
+        source_path.write_bytes(basic_shader_bytes)
+        emit_directory = temporary_path / "emitted"
+        emitted_report = inspect_file(
+            source_path,
+            emit_dir=emit_directory,
+            fallback_prefix="IVLegacyFallbacks",
+        )
+        assert emitted_report["status"] == "vs2_candidate_emitted"
+        assert emitted_report["source_fnv1a64"] == fnv1a64(basic_shader_bytes)
+        emitted_path = Path(emitted_report["output_file"])
+        assert emitted_path.is_file()
+        assert emitted_path.read_bytes() == basic_lowered["output_bytecode"]
+        assert emitted_report["fallback_relative_path"] == (
+            "IVLegacyFallbacks\\basic.vs20.vso"
+        )
+        ini_path = temporary_path / "IVLegacyShaderFallbacks.ini"
+        mapping_count = write_vertex_fallback_ini(ini_path, [emitted_report])
+        assert mapping_count == 1
+        ini_text = ini_path.read_text(encoding="utf-8")
+        assert "[VertexShaderFallbacks]" in ini_text
+        assert emitted_report["source_fnv1a64"] + "=" in ini_text
+
     temp12_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
