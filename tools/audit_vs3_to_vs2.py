@@ -1232,7 +1232,11 @@ def _self_test() -> None:
     point_size_bad_mask_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(USAGE_PSIZE, REG_OUTPUT, 2, usage_index=0),
+        *make_instruction(
+            OP_DCL,
+            0x80000000 | (USAGE_PSIZE & 0xF),
+            make_dest_token(REG_OUTPUT, 2, 0x1),
+        ),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 2, 0x1), make_source_token(REG_INPUT, 0)),
     ]
