@@ -251,8 +251,10 @@ The initial subset explicitly rejects:
 - Static flow control until the IF/loop/subroutine structure and cost can be validated.
 - The two-operand VS3 `sincos` form, because VS2 uses a different four-operand form.
 - Vertex texture sampling, predicate registers and VS3-only instructions.
-- Relative register addressing and output semantics without a verified VS2 register mapping.
-- Missing writes to the required position output.
+- Relative register addressing and pre-transformed `POSITIONT` outputs.
+- Missing writes to the required full-width position output.
+
+The output interface is not treated as a one-source-register/one-destination-register mapping. VS3 permits distinct semantics to occupy disjoint component masks of one output register. The audit retains these declarations as separate entries, checks that masks do not overlap and that repeated semantic identifiers are not used, then assigns each semantic to one of the ten generic VS2 outputs (`oD0/oD1`, `oT0-oT7`). Standard `COLOR0/1` and `TEXCOORD0-7` mappings are preserved where possible; other semantics (including VS3 `FOG`) are remapped and flagged so a paired pixel-shader input rewrite is required. Position and point size remain special outputs. The analyzer makes no claim that this interface rewrite has been implemented in bytecode.
 
 This analyzer is a triage tool for future shader-family work, not a translator or compatibility fix. The CI fixtures are synthetic. No claim is made about the actual GTA IV vertex-shader inventory or GMA 3100 driver.
 
