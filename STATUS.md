@@ -287,3 +287,12 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - The report now includes both the VS3 declared component mask and the target VS2 component mask. `PSIZE0` maps its scalar source `.x` to `oPts.x`; its VS3 declaration still requires the full mask.
 - Standalone vertex-audit CI run #219 passed the self-test job after these changes. The run's separate Windows x86 build job was still in progress at the last status check.
 - The analyzer remains report-only: no output-splitting or pixel-shader relink bytecode is generated, and no real GTA IV shaders have been audited.
+
+
+## VS3 special output slot and arbitrary-index boundary checks — 2026-11-22
+
+- Enforced that the `POSITION0` and optional `PSIZE0` source registers are exclusive and cannot share their source `o#` with another semantic.
+- Added boundary fixtures for ten generic interpolators plus position and point size, ten interpolators plus position with no point-size declaration, and an over-capacity case with eleven generic interpolators.
+- The valid full-bank fixture deliberately places `POSITION0` at `o1`, `PSIZE0` at `o10`, and spreads the ten general interpolators across other nonconsecutive indices, verifying that source register numbers are not hard-wired to output classes.
+- Standalone vertex-audit CI run #224 passed. Its Windows x86 build job was still running environment setup at the last status check.
+- This validates synthetic declaration and write-mask layouts only. No actual GTA IV shader or target GPU has been tested.
