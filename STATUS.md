@@ -226,3 +226,15 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 | Render original GTA IV scenes on Intel GMA 3100 | NOT TESTED |
 | Measure average / 1% low FPS against the 30 FPS objective | NOT TESTED |
 
+
+
+## Vertex-stage audit development — 2026-11-22
+
+- Added `tools/audit_vs3_to_vs2.py` on development branch `feature/vs3-vs2-vertex-audit`.
+- It parses VS3.0 token streams and compares a conservative straight-line subset against baseline VS2.0 instruction slots, temporary/input/float-constant register bounds, sampler/predicate restrictions and output semantic mapping.
+- It requires a real write to the mapped position output; a DCL declaration alone is not treated as a write.
+- It rejects static flow control, the VS3.0 `sincos` operand form, vertex texture sampling, relative addressing and unhandled output semantics rather than guessing.
+- It emits an audit report and mapping plan only. It does **not** emit VS2 bytecode or demonstrate compatibility with any GTA IV shader.
+- Synthetic self-tests cover a simple candidate, excessive temporary register, vertex sampler, VS3-only texture lookup, unsupported output semantic, declaration-without-write, output register overflow, version-sensitive `sincos`, slot-budget overflow and truncated bytecode.
+- The new self-test is wired into the Windows x86 source-sanity workflow. CI result for this feature commit is pending.
+- All fixtures are synthetic; no original GTA IV shader or GMA 3100 device has been inspected.
