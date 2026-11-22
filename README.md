@@ -22,6 +22,7 @@ Prototype 0.5.5-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `tools/analyze_d3d9_shaders.py` | Offline D3D9 SM2/SM3 token-stream inventory for compiled or captured shaders |
 | `tools/audit_sm3_to_sm2.py` | Conservative offline audit/lowering candidate generator for a restricted `ps_3_0` pixel-shader subset; unsupported shaders are rejected, not guessed |
 | `tools/audit_vs3_to_vs2.py` | Conservative `vs_3_0` to `vs_2_0` structural audit; reports blockers and output-mapping plans but emits no bytecode |
+| `tools/audit_shader_pairs.py` | Read-only draw-level VS3/PS3 pairing audit: semantic/component linkage, vertex declaration/FVF layout, captured texture bindings and render-target caps; emits no bytecode |
 | `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls in `IVLegacy.log` |
 | `tools/inspect_gtaiv_executable.py` | Read-only PE32 import/version inspector for the original `GTAIV.exe`; reports normal and delay imports without modifying the file |
 | `tools/analyze_asi_constants.py` | Validates float, integer and boolean shader-constant sidecars and resolves them to shader hashes from `IVLegacy.log` |
@@ -39,6 +40,28 @@ All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs
 - Windows x86 CI run #172 checks both buffer descriptors are present and correctly associated with the first draw. It also retains the declaration/FVF, stream, material-state and shader/constant correlation checks.
 
 These descriptors are synthetic test allocations. They do not describe GTA IV's actual vertex/index buffers.
+
+## Draw-level paired shader compatibility audit (development branch)
+
+The new `tools/audit_shader_pairs.py` joins each captured draw's VS/PS object hashes to the captured bytecode and checks the pair as a unit. It reuses the conservative VS3 and PS3 auditors, compares output/input semantics and component masks, reports when the independent VS2/PS2 register allocations require a coordinated relink, and flags packed PS3 input registers that the current PS2 lowerer cannot split.
+
+For each draw it also checks the vertex shader's declared inputs against the captured `D3DVERTEXELEMENT9` layout (or a deliberately limited common FVF decoder), bound stream/stride and recorded vertex-buffer span; checks that declared/used pixel samplers have non-null texture bindings; and compares the number of bound render targets with the latest captured device capability snapshot.
+
+**Important limits:** the tool is diagnostic-only. It does not rewrite bytecode, change render state, or establish runtime driver acceptance or image equivalence. The present log stores hashes/counts for sampler/render/texture-stage states rather than every individual blend, depth, alpha-test and sampler-state value; each result therefore warns that these state semantics still need manual review. FVF support is intentionally partial and rejects unknown layouts. The initial audit targets VS3.0 + PS3.0 pairs; unresolved shader captures or missing draw state are reported as incomplete rather than guessed.
+
+Run the synthetic tests with:
+
+```sh
+python tools/audit_shader_pairs.py --self-test
+```
+
+To audit a real capture:
+
+```sh
+python tools/audit_shader_pairs.py IVLegacy.log IVLegacyCaptures --report paired_shader_audit.json
+```
+
+The log and bytecode directory must come from the same game process/session. Hash correlation uses the plugin's FNV-1a 64-bit content hash. Synthetic tests validate parser and decision logic only; they are not captures from GTA IV or an Intel GMA 3100.
 
 ## Vertex-stage compatibility audit (development branch)
 
