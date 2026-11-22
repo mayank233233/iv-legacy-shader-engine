@@ -3,7 +3,7 @@
 **Target game:** Grand Theft Auto IV PC 1.0.0.0  
 **Target machine:** ASUS P5KPL-AM IN; Intel GMA 3100 (PCI VEN_8086 / DEV_29C2); Pentium Dual-Core E5200 2.50 GHz; 3 GB DDR2; Windows 8.1 32-bit; 1440×900  
 **Objective:** an installable, game-loaded compatibility/optimization mod, with a long-term 30 FPS target.  
-**Current baseline:** Prototype 0.5.4-alpha: a standalone SM2 D3D9 probe, an original-version-gated x86 ASI telemetry module, and offline shader, material-state, constant and vertex-input analysis tools. It is not yet a playable GTA IV mod.
+**Current baseline:** Prototype 0.5.7-alpha: a standalone SM2 D3D9 probe, an original-version-gated x86 ASI telemetry module, offline PS3/VS3-to-SM2 downlevelers, explicit hash-mapped PS2/VS2 shader fallback hooks, material/draw telemetry and an experimental scalar state cache. It is still not a verified playable GTA IV mod.
 
 ## 1. Executive finding
 
@@ -358,3 +358,45 @@ Windows x86 workflow run #239 passed on commit `8034e2508b3a9c71d7a9ec91311de446
 Artifact: `iv-legacy-shader-engine-windows-x86`, 237,403 bytes, SHA-256 `baaf821d66560a20d2aafebe34982aec5e307ede6e4fa4ce338105f34c8ca556`.
 
 This verifies compilation and synthetic integration only. It does not verify GTA IV 1.0.0.0 startup, render correctness, the GMA 3100 driver's D3D9 capabilities, or frame rate.
+
+## Restricted SM3-to-SM2 emission and runtime vertex fallback — 2026-11-22
+
+### Vertex shader bytecode emission
+
+- Added `lower_vs3_to_vs2()` to `tools/audit_vs3_to_vs2.py`. It calls the existing strict static audit first and emits nothing unless the VS3 token stream passes the baseline VS2 instruction, register, data-flow and output-write checks.
+- The emitted stream changes the version token to `vs_2_0`, preserves validated input declarations and straight-line instructions, removes VS3 output DCL records (VS2 uses fixed output registers), and rewrites each VS3 output destination to the register selected by the output semantic plan.
+- Output registers with more than one semantic are rejected by the emitter. Correctly splitting a register's component writes requires rewriting individual destination masks; changing only the register type would corrupt the interface.
+- Output semantics requiring a changed TEXCOORD/generic register allocation are not auto-added to the runtime fallback map. The paired PS2 input declaration must use the corresponding register for that draw.
+- The emitter reports source FNV-1a and output SHA-256, can write `.vs20.vso` candidates with `--emit-dir`, and can preserve the existing pixel-stage section when updating the same INI.
+
+### Runtime VS replacement
+
+- The ASI now intercepts `IDirect3DDevice9::CreateVertexShader` and can look up an original VS3 source hash under `[VertexShaderFallbacks]`.
+- It checks the replacement bytecode envelope/profile, attempts to create the VS2 object, records the original/replacement hash and COM object correlation, and falls back to the original VS3 bytecode if the replacement fails.
+- The PS and VS map writers now require the operator to explicitly supply an emitted source hash using `--approved-source-hash`. This is a deliberate gate: individual-stage eligibility does not prove the paired shader's interpolator linkage, vertex declaration, constants, texture state, blend/depth semantics or visual equivalence.
+- The Windows synthetic runtime test now creates an SM3 vertex shader and verifies that the configured hash maps it to an SM2 vertex shader. The CI workflow also runs the VS emitter against the synthetic capture and checks that an output file is produced.
+
+### Critical boundary: SM2 bytecode is not a GPU feature emulator
+
+This implementation does **not** remove the game's initial shader-model capability check. If GTA IV reads `D3DCAPS9.VertexShaderVersion` or `PixelShaderVersion` and exits before creating programmable shaders, a `CreateVertexShader`/`CreatePixelShader` fallback hook is never reached. The ASI still does not spoof those caps. We must establish the actual startup path on the GMA 3100 before choosing whether a narrowly scoped capability compatibility layer is necessary.
+
+Even after the game reaches shader creation, converting selected shaders does not automatically reproduce:
+- all PS3/VS3 instructions, flow control, texture operations or register capacities;
+- vertex/pixel semantic linkage and packed interpolators;
+- the game's constant-register conventions and per-draw updates;
+- vertex declaration/FVF layouts, texture/sampler bindings and render/depth/blend state;
+- render-target count/formats, depth textures, shadow/deferred passes or other D3D9/device features.
+
+Only a strict straight-line subset currently emits VS2 bytecode. Dynamic/static flow control, vertex texture sampling, relative addressing, version-sensitive `sincos`, packed output splitting and many material-specific behaviours still require manual rewrite or a different rendering path. The PS2 converter also supports only its own restricted opcode/register subset.
+
+### Verification status
+
+- **Source implementation:** committed on `feature/redundant-d3d9-state-cache`; `main` remains unchanged.
+- **Synthetic tests:** added for VS emission, packed output rejection, hash-map preservation and ASI VS fallback. The Windows workflow is configured to run them and emit the test shader candidate.
+- **Windows CI:** pending confirmation for the new commits.
+- **Actual GTA IV:** not tested.
+- **Intel GMA 3100 D3D9 driver:** not tested.
+- **Image equivalence, gameplay correctness and genuine FPS:** not established.
+
+The bytecode emitter should be treated as a candidate-generation tool, not a complete SM3 compatibility layer. The next meaningful evidence is a real GTA IV shader/draw capture and a controlled test of one paired material on the target driver.
+
