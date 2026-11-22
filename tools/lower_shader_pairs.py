@@ -577,6 +577,117 @@ def _self_test() -> None:
     else:
         raise AssertionError("unpaired shader usage must prevent runtime map approval")
 
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        capture_dir = root / "captures"
+        emit_dir = root / "emitted"
+        capture_dir.mkdir()
+
+        vs_words = [audit_vs3_to_vs2.VS3_VERSION]
+
+        def vs_dcl(usage: int, register_type: int, register: int) -> list[int]:
+            declaration = 0x80000000 | (usage & 0xF)
+            return audit_vs3_to_vs2.make_instruction(
+                audit_vs3_to_vs2.OP_DCL,
+                declaration,
+                audit_vs3_to_vs2.make_dest_token(register_type, register),
+            )
+
+        vs_words.extend(vs_dcl(
+            audit_vs3_to_vs2.USAGE_POSITION,
+            audit_vs3_to_vs2.REG_INPUT,
+            0,
+        ))
+        vs_words.extend(vs_dcl(
+            audit_vs3_to_vs2.USAGE_POSITION,
+            audit_vs3_to_vs2.REG_OUTPUT,
+            0,
+        ))
+        vs_words.extend(vs_dcl(
+            audit_vs3_to_vs2.USAGE_COLOR,
+            audit_vs3_to_vs2.REG_OUTPUT,
+            1,
+        ))
+        vs_words.extend(audit_vs3_to_vs2.make_instruction(
+            1,
+            audit_vs3_to_vs2.make_dest_token(audit_vs3_to_vs2.REG_OUTPUT, 0),
+            audit_vs3_to_vs2.make_source_token(audit_vs3_to_vs2.REG_INPUT, 0),
+        ))
+        vs_words.extend(audit_vs3_to_vs2.make_instruction(
+            1,
+            audit_vs3_to_vs2.make_dest_token(audit_vs3_to_vs2.REG_OUTPUT, 1),
+            audit_vs3_to_vs2.make_source_token(audit_vs3_to_vs2.REG_INPUT, 0),
+        ))
+        vs_words.append(audit_vs3_to_vs2.OP_END)
+        vs_bytes = audit_vs3_to_vs2.struct.pack(
+            "<" + "I" * len(vs_words), *vs_words
+        )
+
+        ps_words = [audit_sm3_to_sm2.PS3_VERSION]
+        audit_sm3_to_sm2.emit_instruction(
+            ps_words,
+            audit_sm3_to_sm2.OP_DCL,
+            audit_sm3_to_sm2.USAGE_COLOR,
+            audit_sm3_to_sm2.make_register(audit_sm3_to_sm2.REG_INPUT, 0),
+        )
+        audit_sm3_to_sm2.emit_instruction(
+            ps_words,
+            audit_sm3_to_sm2.OP_MOV,
+            audit_sm3_to_sm2.make_register(audit_sm3_to_sm2.REG_TEMP, 0),
+            audit_sm3_to_sm2.make_source(audit_sm3_to_sm2.REG_INPUT, 0),
+        )
+        audit_sm3_to_sm2.emit_instruction(
+            ps_words,
+            audit_sm3_to_sm2.OP_MOV,
+            audit_sm3_to_sm2.make_register(audit_sm3_to_sm2.REG_COLOROUT, 0),
+            audit_sm3_to_sm2.make_source(audit_sm3_to_sm2.REG_TEMP, 0),
+        )
+        ps_words.append(audit_sm3_to_sm2.OP_END)
+        ps_bytes = audit_sm3_to_sm2.struct.pack(
+            "<" + "I" * len(ps_words), *ps_words
+        )
+
+        vs_capture_hash = audit_shader_pairs.fnv1a64(vs_bytes)
+        ps_capture_hash = audit_shader_pairs.fnv1a64(ps_bytes)
+        assert vs_capture_hash == vertex_hash
+        assert ps_capture_hash == pixel_hash
+        (capture_dir / f"VS_3_0_{vs_capture_hash}.bin").write_bytes(vs_bytes)
+        (capture_dir / f"PS_3_0_{ps_capture_hash}.bin").write_bytes(ps_bytes)
+
+        pair_record = {
+            "vertex_shader_hash": vertex_hash,
+            "pixel_shader_hash": pixel_hash,
+            "structural_pair_candidate": True,
+            "device_limits": {
+                "vs20_temporary_registers": 12,
+                "max_vertex_shader_constants": 96,
+            },
+            "emitted": False,
+        }
+        emitted_pairs, vertex_outputs, pixel_outputs = emit_pair_candidates(
+            [pair_record], capture_dir, emit_dir, "IVLegacyFallbacks"
+        )
+        assert emitted_pairs[0]["emitted"], emitted_pairs[0].get("emission_reasons")
+        assert vertex_hash in vertex_outputs and pixel_hash in pixel_outputs
+        vertex_output_bytes = Path(vertex_outputs[vertex_hash]["output_file"]).read_bytes()
+        pixel_output_bytes = Path(pixel_outputs[pixel_hash]["output_file"]).read_bytes()
+        assert audit_vs3_to_vs2.struct.unpack_from("<I", vertex_output_bytes)[0] == audit_vs3_to_vs2.VS2_VERSION
+        assert audit_sm3_to_sm2.struct.unpack_from("<I", pixel_output_bytes)[0] == audit_sm3_to_sm2.PS2_VERSION
+
+        pair_map_path = root / "IVLegacyShaderFallbacks.ini"
+        approved_vs, approved_ps = validate_approved_pairs(
+            emitted_pairs, {(vertex_hash, pixel_hash)}
+        )
+        assert audit_vs3_to_vs2.write_vertex_fallback_ini(
+            pair_map_path, list(vertex_outputs.values()), approved_vs
+        ) == 1
+        assert audit_sm3_to_sm2.write_fallback_ini(
+            pair_map_path, list(pixel_outputs.values()), approved_ps
+        ) == 1
+        pair_map_text = pair_map_path.read_text(encoding="utf-8")
+        assert "[VertexShaderFallbacks]" in pair_map_text
+        assert "[ShaderFallbacks]" in pair_map_text
+
     print("PASS: conservative paired VS2/PS2 lowering and explicit pair approval tests")
 
 
