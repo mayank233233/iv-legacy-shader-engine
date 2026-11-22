@@ -3,7 +3,7 @@
 **Target game:** Grand Theft Auto IV PC 1.0.0.0  
 **Target machine:** ASUS P5KPL-AM IN; Intel GMA 3100 (PCI VEN_8086 / DEV_29C2); Pentium Dual-Core E5200 2.50 GHz; 3 GB DDR2; Windows 8.1 32-bit; 1440×900  
 **Objective:** an installable, game-loaded compatibility/optimization mod, with a long-term 30 FPS target.  
-**Current baseline:** Prototype 0.5.7-alpha: a standalone SM2 D3D9 probe, an original-version-gated x86 ASI telemetry module, offline PS3/VS3-to-SM2 downlevelers, explicit hash-mapped PS2/VS2 shader fallback hooks, material/draw telemetry and an experimental scalar state cache. It is still not a verified playable GTA IV mod.
+**Current baseline:** Prototype 0.5.8-alpha: a standalone SM2 D3D9 probe, an original-version-gated x86 ASI telemetry module, offline PS3/VS3-to-SM2 downlevelers, explicit hash-mapped PS2/VS2 shader fallback hooks, material/draw telemetry and an experimental scalar state cache. It is still not a verified playable GTA IV mod.
 
 ## 1. Executive finding
 
@@ -399,4 +399,21 @@ Only a strict straight-line subset currently emits VS2 bytecode. Dynamic/static 
 - **Image equivalence, gameplay correctness and genuine FPS:** not established.
 
 The bytecode emitter should be treated as a candidate-generation tool, not a complete SM3 compatibility layer. The next meaningful evidence is a real GTA IV shader/draw capture and a controlled test of one paired material on the target driver.
+
+
+## 12. Smoke-test execution-order findings (2026-11-22)
+
+The failed Windows smoke run #295 was traced to a vtable-index error in the state-block hooks. The D3D9 device interface uses `GetRenderState=58`, `CreateStateBlock=59`, `BeginStateBlock=60`, and `EndStateBlock=61`. The failed commit instead hooked Create/Begin/End at 58/59/60, so a GetRenderState call entered the CreateStateBlock wrapper and the remaining calls used mismatched signatures. The current source uses the correct 59/60/61 hook slots.
+
+Windows CI run #312 passed the complete x86 pipeline and synthetic runtime smoke test: [workflow run #312](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45026226124). The actual 105-line `IVLegacy.log` ends with this sequence:
+
+1. `DEVICE_RESET_RESULT hr=0` and post-reset `SET_RENDER_STATE ... cached=0`.
+2. `STATE_BLOCK_BEGIN_ENTER`.
+3. `STATE_CACHE_DISABLED reason=state_block_api_used`.
+4. `STATE_BLOCK_BEGIN_FORWARD` and `STATE_BLOCK_BEGIN_RETURN ... hr=0`.
+5. The next `SET_RENDER_STATE` call is forwarded with `cached=0`.
+
+The test host then prints PASS and the workflow uploads the artifact. The current follow-up test additionally calls GetRenderState before cache suppression and exercises CreateStateBlock/EndStateBlock; those newest assertions require their own passing CI run.
+
+This does not establish real GTA IV startup or rendering. The adapter is synthetic test data, the one-sample frame profiler has `gpu_time=not_measured`, and no physical GMA 3100, GTA IV shader pair or gameplay run has been tested. The full 30 FPS objective remains unverified.
 
