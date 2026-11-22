@@ -1010,11 +1010,16 @@ def _self_test() -> None:
     sampler_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(0, REG_SAMPLER, 0),
+        *make_instruction(
+            OP_DCL,
+            0x80000000 | (2 << 27),  # D3DSTT_2D
+            make_dest_token(REG_SAMPLER, 0),
+        ),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     sampler = audit_vs3_bytes(shader(*sampler_words))
-    assert any("vertex sampler" in reason for reason in sampler["reasons"])
+    assert any("vertex sampler s0 is not supported" in reason for reason in sampler["reasons"])
+    assert not any("unknown texture type" in reason for reason in sampler["reasons"])
 
     declaration_only = audit_vs3_bytes(shader(
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1022,6 +1027,15 @@ def _self_test() -> None:
     ))
     assert declaration_only["structural_candidate_for_manual_lowering"] is False
     assert any("write all four position components" in reason for reason in declaration_only["reasons"])
+
+    late_dcl_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *dcl(USAGE_TEXCOORD, REG_INPUT, 1, usage_index=0),
+    ]
+    late_dcl = audit_vs3_bytes(shader(*late_dcl_words))
+    assert any("DCL at DWORD" in reason and "after the first executable" in reason for reason in late_dcl["reasons"])
 
     output12 = audit_vs3_bytes(shader(
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1056,6 +1070,8 @@ def _self_test() -> None:
     output_semantic = audit_vs3_bytes(shader(*output_semantic_words))
     assert output_semantic["requires_pixel_shader_interface_remap"] is True
     assert output_semantic["structural_candidate_for_manual_lowering"] is False
+    assert output_semantic["output_mapping_plan"]["o0"][0]["vs_2_0_link_semantic"] == "COLOR0"
+    assert output_semantic["output_mapping_plan"]["o0"][0]["requires_pixel_shader_interface_remap"] is True
     assert any("position components" in reason for reason in output_semantic["reasons"])
 
     read_only_write_words = [
@@ -1129,6 +1145,17 @@ def _self_test() -> None:
     ]
     mova_wrong_destination = audit_vs3_bytes(shader(*mova_wrong_destination_words))
     assert any("MOVA" in reason and "must target address register" in reason for reason in mova_wrong_destination["reasons"])
+
+    special_outputs_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_PSIZE, REG_OUTPUT, 1),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 1), make_source_token(REG_INPUT, 0)),
+    ]
+    special_outputs = audit_vs3_bytes(shader(*special_outputs_words))
+    assert special_outputs["structural_candidate_for_manual_lowering"] is True
+    assert special_outputs["output_mapping_plan"]["o1"][0]["vs_2_0_link_semantic"] == "PSIZE0"
 
     partial_position_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
