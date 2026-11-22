@@ -100,7 +100,7 @@ VS2_PARAMETER_COUNTS = {
     10: 3, 11: 3, 12: 3, 13: 3, 14: 2, 15: 2, 16: 2, 17: 3,
     18: 4, 19: 2, 20: 3, 21: 3, 22: 3, 23: 3, 24: 3,
     25: 1, 26: 2, 27: 2, 28: 0, 29: 0, 30: 1, 31: 2,
-    32: 3, 33: 3, 34: 4, 35: 2, 36: 2,
+    32: 3, 33: 3, 34: 4, 35: 2, 36: 2, 37: 2,
     38: 1, 39: 0, 40: 1, 42: 0, 43: 0, 46: 2,
     47: 2, 48: 5, 78: 2, 79: 2, 81: 5,
 }
@@ -302,6 +302,10 @@ def audit_vs3_bytes(
                 "usage": usage, "usage_index": usage_index
             }
         elif register_type == REG_OUTPUT:
+            if register_number >= 12:
+                reasons.append(
+                    f"output o{register_number} exceeds the vs_3_0 o0-o11 declaration range"
+                )
             target = output_mapping(usage, usage_index)
             semantic = {
                 "usage": usage,
@@ -380,6 +384,11 @@ def audit_vs3_bytes(
             reasons.append(
                 f"{name} at DWORD {ins.offset} uses unvalidated control bits 0x{controls:02X}"
             )
+
+        # DCL was fully handled in the declaration pass above. In particular,
+        # declaring oPos must not be mistaken for writing oPos.
+        if opcode == OP_DCL:
+            continue
 
         if opcode in UNVALIDATED_STATIC_FLOW:
             reasons.append(
@@ -628,6 +637,29 @@ def _self_test() -> None:
     ]
     sampler = audit_vs3_bytes(shader(*sampler_words))
     assert any("vertex sampler" in reason for reason in sampler["reasons"])
+
+    declaration_only = audit_vs3_bytes(shader(
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+    ))
+    assert declaration_only["structural_candidate_for_manual_lowering"] is False
+    assert any("does not write" in reason for reason in declaration_only["reasons"])
+
+    output12 = audit_vs3_bytes(shader(
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 12),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 12), make_parameter_token(REG_INPUT, 0)),
+    ))
+    assert any("o12 exceeds" in reason for reason in output12["reasons"])
+
+    sincos_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(37, make_parameter_token(REG_TEMP, 0), make_parameter_token(REG_INPUT, 0)),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+    ]
+    sincos = audit_vs3_bytes(shader(*sincos_words))
+    assert any("different four-operand form" in reason for reason in sincos["reasons"])
 
     dynamic_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
