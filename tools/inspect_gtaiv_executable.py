@@ -616,6 +616,8 @@ def _self_test() -> None:
     assert imports[0]["table"] == "normal"
     assert imports[0]["original_first_thunk_rva"] == 0x1040
     assert imports[0]["first_thunk_rva"] == 0x1060
+    assert imports[0]["iat_rva"] == 0x1060
+    assert imports[0]["descriptor_index"] == 0
 
     # Exercise the real PE parser's OFT==0 fallback to FirstThunk. The
     # on-disk IAT contains name RVAs before the Windows loader resolves it.
@@ -682,6 +684,7 @@ def _self_test() -> None:
         "normal_iat_candidate_with_unsupported_normal_imports"
     )
     assert mixed_normal_paths["hook_candidate"] is True
+    assert mixed_normal_paths["normal_direct_imports_unhookable"] == 1
 
     mixed_normal_and_delay_paths = assess_factory_hook_path(
         imports + oft_zero_imports,
@@ -691,6 +694,14 @@ def _self_test() -> None:
         "normal_iat_candidate_with_unsupported_imports"
     )
     assert mixed_normal_and_delay_paths["hook_candidate"] is True
+    assert mixed_normal_and_delay_paths["normal_direct_imports_unhookable"] == 1
+
+    both_thunks_missing = assess_factory_hook_path([{
+        "dll": "d3d9.dll", "name": "Direct3DCreate9", "table": "normal",
+        "original_first_thunk_rva": 0, "first_thunk_rva": 0
+    }], [])
+    assert both_thunks_missing["classification"] == "normal_import_without_required_thunks"
+    assert both_thunks_missing["normal_direct_imports_unhookable"] == 1
 
     try:
         PE32Image(b"not a PE file")
