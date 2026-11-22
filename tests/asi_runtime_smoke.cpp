@@ -29,6 +29,8 @@ namespace
     DWORD g_fakeLastPixelShaderVersion = 0;
     volatile LONG g_fakePixelShaderCreateCount = 0;
     volatile LONG g_fakePixelShaderObjectCount = 0;
+    volatile LONG g_fakeGetRenderTargetCount = 0;
+    volatile LONG g_fakeGetDepthStencilSurfaceCount = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
 
@@ -359,6 +361,29 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceGetRenderTarget(
+        IDirect3DDevice9*,
+        DWORD,
+        IDirect3DSurface9** surface)
+    {
+        InterlockedIncrement(&g_fakeGetRenderTargetCount);
+        if (!surface)
+            return D3DERR_INVALIDCALL;
+        *surface = NULL;
+        return D3DERR_NOTFOUND;
+    }
+
+    HRESULT WINAPI FakeDeviceGetDepthStencilSurface(
+        IDirect3DDevice9*,
+        IDirect3DSurface9** surface)
+    {
+        InterlockedIncrement(&g_fakeGetDepthStencilSurfaceCount);
+        if (!surface)
+            return D3DERR_INVALIDCALL;
+        *surface = NULL;
+        return D3DERR_NOTFOUND;
+    }
+
     HRESULT WINAPI FakeDeviceCreateVertexShader(
         IDirect3DDevice9*,
         const DWORD*,
@@ -617,7 +642,9 @@ namespace
         g_fakeDeviceVTable[28] = reinterpret_cast<void*>(FakeDeviceCreateRenderTarget);
         g_fakeDeviceVTable[29] = reinterpret_cast<void*>(FakeDeviceCreateDepthStencilSurface);
         g_fakeDeviceVTable[37] = reinterpret_cast<void*>(FakeDeviceSetRenderTarget);
+        g_fakeDeviceVTable[38] = reinterpret_cast<void*>(FakeDeviceGetRenderTarget);
         g_fakeDeviceVTable[39] = reinterpret_cast<void*>(FakeDeviceSetDepthStencilSurface);
+        g_fakeDeviceVTable[40] = reinterpret_cast<void*>(FakeDeviceGetDepthStencilSurface);
         g_fakeDeviceVTable[81] = reinterpret_cast<void*>(FakeDeviceDrawPrimitive);
         g_fakeDeviceVTable[82] = reinterpret_cast<void*>(FakeDeviceDrawIndexedPrimitive);
         g_fakeDeviceVTable[83] = reinterpret_cast<void*>(FakeDeviceDrawPrimitiveUP);
@@ -876,11 +903,17 @@ int main()
 
     if (FAILED(createDeviceHr) || !device)
         return Fail("Synthetic IDirect3D9::CreateDevice hook returned failure");
+    if (InterlockedCompareExchange(&g_fakeGetRenderTargetCount, 0, 0) < 4 ||
+        InterlockedCompareExchange(&g_fakeGetDepthStencilSurfaceCount, 0, 0) < 1)
+        return Fail("initial surface inventory did not call the typed D3D9 getter slots");
 
     D3DCAPS9 deviceCaps = {};
     const HRESULT deviceCapsHr = device->GetDeviceCaps(&deviceCaps);
 
     HRESULT resetHr = device->Reset(&parameters);
+    if (InterlockedCompareExchange(&g_fakeGetRenderTargetCount, 0, 0) < 8 ||
+        InterlockedCompareExchange(&g_fakeGetDepthStencilSurfaceCount, 0, 0) < 2)
+        return Fail("surface inventory was not refreshed after successful Reset");
     HRESULT presentHr = device->Present(NULL, NULL, NULL, NULL);
 
     IDirect3DSurface9* renderTarget = NULL;
