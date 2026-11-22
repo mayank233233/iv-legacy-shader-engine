@@ -9,11 +9,12 @@ Runtime mappings require explicit approval of the *pair* (VS hash:PS hash).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -278,11 +279,18 @@ def emit_pair_candidates(
         vertex_output.write_bytes(vertex_result["output_bytecode"])
         pixel_output.write_bytes(pixel_result["output_bytecode"])
 
+        vertex_output_sha256 = hashlib.sha256(
+            vertex_result["output_bytecode"]
+        ).hexdigest()
+        pixel_output_sha256 = hashlib.sha256(
+            pixel_result["output_bytecode"]
+        ).hexdigest()
         vertex_record = {
             **vertex_result,
             "status": "vs2_candidate_emitted",
             "source_fnv1a64": vertex_hash,
             "output_file": str(vertex_output),
+            "output_sha256": vertex_output_sha256,
             "fallback_relative_path": (
                 audit_vs3_to_vs2.validate_fallback_prefix(fallback_prefix)
                 + "\\"
@@ -293,6 +301,7 @@ def emit_pair_candidates(
             **pixel_result,
             "source_fnv1a64": pixel_hash,
             "output_file": str(pixel_output),
+            "output_sha256": pixel_output_sha256,
             "fallback_relative_path": (
                 audit_sm3_to_sm2.validate_fallback_prefix(fallback_prefix)
                 + "\\"
@@ -302,19 +311,13 @@ def emit_pair_candidates(
 
         existing_vertex = vertex_records.get(vertex_hash)
         existing_pixel = pixel_records.get(pixel_hash)
-        if existing_vertex and existing_vertex["output_sha256"] != vertex_result.get(
-            "output_sha256", audit_vs3_to_vs2.hashlib.sha256(
-                vertex_result["output_bytecode"]
-            ).hexdigest()
-        ):
+        if existing_vertex and existing_vertex["output_sha256"] != vertex_output_sha256:
             pair["emission_reasons"] = [
                 "the same VS source hash produced conflicting VS2 output candidates"
             ]
             pair["emitted"] = False
             continue
-        if existing_pixel and existing_pixel["output_sha256"] != audit_sm3_to_sm2.hashlib.sha256(
-            pixel_result["output_bytecode"]
-        ).hexdigest():
+        if existing_pixel and existing_pixel["output_sha256"] != pixel_output_sha256:
             pair["emission_reasons"] = [
                 "the same PS source hash produced conflicting PS2 output candidates"
             ]
@@ -325,15 +328,11 @@ def emit_pair_candidates(
         pixel_records[pixel_hash] = pixel_record
         pair["vertex_output"] = {
             "file": str(vertex_output),
-            "sha256": audit_vs3_to_vs2.hashlib.sha256(
-                vertex_result["output_bytecode"]
-            ).hexdigest(),
+            "sha256": vertex_output_sha256,
         }
         pair["pixel_output"] = {
             "file": str(pixel_output),
-            "sha256": audit_sm3_to_sm2.hashlib.sha256(
-                pixel_result["output_bytecode"]
-            ).hexdigest(),
+            "sha256": pixel_output_sha256,
         }
         pair["emission_reasons"] = []
         pair["emitted"] = True
@@ -368,9 +367,7 @@ def build_pair_records(
             )),
             "device_limits": limits,
             "status_counts": dict(sorted(
-                __import__("collections").Counter(
-                    str(draw.get("status", "unknown")) for draw in pair_draws
-                ).items()
+                Counter(str(draw.get("status", "unknown")) for draw in pair_draws).items()
             )),
             "emitted": False,
         })
