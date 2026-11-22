@@ -293,7 +293,10 @@ def assess_factory_hook_path(
     delay_factory = [item for item in delay_imports if is_factory(item)]
     normal_with_lookup = [
         item for item in normal_factory
-        if int(item.get("original_first_thunk_rva") or 0) != 0
+        if (
+            int(item.get("original_first_thunk_rva") or 0) != 0
+            and int(item.get("first_thunk_rva") or 0) != 0
+        )
     ]
 
     if normal_with_lookup:
@@ -420,7 +423,10 @@ def inspect_file(path: Path) -> dict[str, Any]:
     delay_factory = [item for item in direct_factory if item["table"] == "delay"]
     normal_factory_with_lookup = [
         item for item in normal_factory
-        if int(item.get("original_first_thunk_rva") or 0) != 0
+        if (
+            int(item.get("original_first_thunk_rva") or 0) != 0
+            and int(item.get("first_thunk_rva") or 0) != 0
+        )
     ]
     hook_path = assess_factory_hook_path(normal, delay)
     get_proc_address = [
@@ -466,6 +472,10 @@ def inspect_file(path: Path) -> dict[str, Any]:
                 "original_first_thunk_rva": (
                     f"0x{x['original_first_thunk_rva']:08X}"
                     if "original_first_thunk_rva" in x else None
+                ),
+                "first_thunk_rva": (
+                    f"0x{x['first_thunk_rva']:08X}"
+                    if "first_thunk_rva" in x else None
                 ),
             }
             for x in d3d9_imports
@@ -552,6 +562,7 @@ def _self_test() -> None:
     assert imports[0]["name"] == "Direct3DCreate9"
     assert imports[0]["table"] == "normal"
     assert imports[0]["original_first_thunk_rva"] == 0x1040
+    assert imports[0]["first_thunk_rva"] == 0x1060
 
     # Exercise the real PE parser's OFT==0 fallback to FirstThunk. The
     # on-disk IAT contains name RVAs before the Windows loader resolves it.
@@ -564,6 +575,18 @@ def _self_test() -> None:
     oft_zero_assessment = assess_factory_hook_path(oft_zero_imports, [])
     assert oft_zero_assessment["classification"] == "normal_import_without_lookup_table"
     assert oft_zero_assessment["hook_candidate"] is False
+
+    # A non-zero OriginalFirstThunk is not enough if the actual IAT RVA is
+    # absent: the current ASI writes its replacement into FirstThunk.
+    missing_iat_image = bytearray(_synthetic_pe32())
+    struct.pack_into("<I", missing_iat_image, 0x210, 0)
+    missing_iat_imports = PE32Image(bytes(missing_iat_image)).normal_imports()
+    assert len(missing_iat_imports) == 1
+    assert missing_iat_imports[0]["original_first_thunk_rva"] == 0x1040
+    assert missing_iat_imports[0]["first_thunk_rva"] == 0
+    missing_iat_assessment = assess_factory_hook_path(missing_iat_imports, [])
+    assert missing_iat_assessment["classification"] == "normal_import_without_lookup_table"
+    assert missing_iat_assessment["hook_candidate"] is False
 
     normal_candidate = assess_factory_hook_path(imports, [])
     assert normal_candidate["classification"] == "normal_iat_candidate"
