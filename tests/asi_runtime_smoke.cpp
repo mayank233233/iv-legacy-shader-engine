@@ -31,6 +31,10 @@ namespace
     volatile LONG g_fakePixelShaderObjectCount = 0;
     volatile LONG g_fakeGetRenderTargetCount = 0;
     volatile LONG g_fakeGetDepthStencilSurfaceCount = 0;
+    volatile LONG g_fakeSetRenderStateCalls = 0;
+    volatile LONG g_fakeSetTextureStageStateCalls = 0;
+    volatile LONG g_fakeSetSamplerStateCalls = 0;
+    volatile LONG g_fakeBeginStateBlockCalls = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
 
@@ -544,12 +548,14 @@ namespace
     HRESULT WINAPI FakeDeviceSetRenderState(
         IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD)
     {
+        InterlockedIncrement(&g_fakeSetRenderStateCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetTextureStageState(
         IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD)
     {
+        InterlockedIncrement(&g_fakeSetTextureStageStateCalls);
         return D3D_OK;
     }
 
@@ -562,7 +568,30 @@ namespace
     HRESULT WINAPI FakeDeviceSetSamplerState(
         IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD)
     {
+        InterlockedIncrement(&g_fakeSetSamplerStateCalls);
         return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceCreateStateBlock(
+        IDirect3DDevice9*, D3DSTATEBLOCKTYPE, IDirect3DStateBlock9** stateBlock)
+    {
+        if (stateBlock)
+            *stateBlock = NULL;
+        return D3DERR_INVALIDCALL;
+    }
+
+    HRESULT WINAPI FakeDeviceBeginStateBlock(IDirect3DDevice9*)
+    {
+        InterlockedIncrement(&g_fakeBeginStateBlockCalls);
+        return D3D_OK;
+    }
+
+    HRESULT WINAPI FakeDeviceEndStateBlock(
+        IDirect3DDevice9*, IDirect3DStateBlock9** stateBlock)
+    {
+        if (stateBlock)
+            *stateBlock = NULL;
+        return D3DERR_INVALIDCALL;
     }
 
     HRESULT WINAPI FakeDeviceSetVertexShaderConstantF(
@@ -667,6 +696,9 @@ namespace
         g_fakeDeviceVTable[113] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantB);
         g_fakeDeviceVTable[23] = reinterpret_cast<void*>(FakeDeviceCreateTexture);
         g_fakeDeviceVTable[57] = reinterpret_cast<void*>(FakeDeviceSetRenderState);
+        g_fakeDeviceVTable[58] = reinterpret_cast<void*>(FakeDeviceCreateStateBlock);
+        g_fakeDeviceVTable[59] = reinterpret_cast<void*>(FakeDeviceBeginStateBlock);
+        g_fakeDeviceVTable[60] = reinterpret_cast<void*>(FakeDeviceEndStateBlock);
         g_fakeDeviceVTable[67] = reinterpret_cast<void*>(FakeDeviceSetTextureStageState);
         g_fakeDeviceVTable[86] = reinterpret_cast<void*>(FakeDeviceCreateVertexDeclaration);
         g_fakeDeviceVTable[87] = reinterpret_cast<void*>(FakeDeviceSetVertexDeclaration);
@@ -805,6 +837,10 @@ int main()
         L"General", L"EnableFrameProfiler", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"FrameProfilerWindowFrames", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"EnableRedundantStateCache", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"StateCacheReportFrames", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"CaptureShaderConstants", L"1", iniPath);
     WritePrivateProfileStringW(
@@ -1047,6 +1083,39 @@ int main()
         D3DRS_ALPHABLENDENABLE, TRUE);
     const HRESULT setTextureStageStateHr = device->SetTextureStageState(
         0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+
+    // Each group submits one new value, repeats it (cache hit), changes it,
+    // then repeats the changed value (second cache hit).
+    const LONG renderCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0);
+    device->SetRenderState(D3DRS_ZENABLE, TRUE);
+    device->SetRenderState(D3DRS_ZENABLE, TRUE);
+    device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    if (InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0) -
+        renderCallsBeforeCacheTest != 2)
+        return Fail("redundant render-state calls were not suppressed exactly twice");
+
+    const LONG stageCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetTextureStageStateCalls, 0, 0);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_ADD);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_ADD);
+    if (InterlockedCompareExchange(&g_fakeSetTextureStageStateCalls, 0, 0) -
+        stageCallsBeforeCacheTest != 2)
+        return Fail("redundant texture-stage calls were not suppressed exactly twice");
+
+    const LONG samplerCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetSamplerStateCalls, 0, 0);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+    if (InterlockedCompareExchange(&g_fakeSetSamplerStateCalls, 0, 0) -
+        samplerCallsBeforeCacheTest != 2)
+        return Fail("redundant sampler-state calls were not suppressed exactly twice");
+
     const HRESULT setVertexConstantsHr = device->SetVertexShaderConstantF(
         4, vertexConstants, 1);
     const HRESULT setPixelConstantsHr = device->SetPixelShaderConstantF(
@@ -1104,6 +1173,29 @@ int main()
     const HRESULT profilerPresentHr = device->Present(NULL, NULL, NULL, NULL);
     if (FAILED(profilerPresentHr))
         return Fail("Frame-profiler verification Present call failed");
+
+    // Reset must discard the shadowed values; the same value after Reset must
+    // reach the original D3D9 setter again.
+    const LONG renderCallsBeforeReset =
+        InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0);
+    const HRESULT cacheResetHr = device->Reset(&parameters);
+    if (FAILED(cacheResetHr))
+        return Fail("State-cache reset invalidation test could not Reset the fake device");
+    const HRESULT resetStateHr = device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    if (FAILED(resetStateHr) ||
+        InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0) -
+            renderCallsBeforeReset != 1)
+        return Fail("successful Reset did not invalidate cached render-state values");
+
+    const LONG renderCallsBeforeStateBlock =
+        InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0);
+    const HRESULT beginStateBlockHr = device->BeginStateBlock();
+    const HRESULT stateBlockStateHr = device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    if (FAILED(beginStateBlockHr) || FAILED(stateBlockStateHr) ||
+        InterlockedCompareExchange(&g_fakeBeginStateBlockCalls, 0, 0) != 1 ||
+        InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0) -
+            renderCallsBeforeStateBlock != 1)
+        return Fail("state-block API use did not disable redundant state suppression");
 
     if (vertexBytecode)
         HeapFree(GetProcessHeap(), 0, vertexBytecode);
@@ -1183,6 +1275,14 @@ int main()
         !HasText("avg_draw_calls=4.00") ||
         !HasText("gpu_time=not_measured"))
         return Fail("Frame-profiler summary did not record the synthetic frame and four draw calls");
+    if (!HasText("REDUNDANT_STATE_CACHE_ENABLED") ||
+        !HasText("D3D9_STATE_CACHE_WINDOW") ||
+        !HasText("render_forwarded=3 render_skipped=2") ||
+        !HasText("texture_stage_forwarded=3 texture_stage_skipped=2") ||
+        !HasText("sampler_forwarded=3 sampler_skipped=2"))
+        return Fail("State-cache counters did not report the expected forwarded and skipped setter calls");
+    if (!HasText("STATE_CACHE_DISABLED reason=state_block_api_used"))
+        return Fail("State-block use did not disable the redundant state cache");
     if (!HasText("DRAW_TELEMETRY_ENABLED") ||
         !HasText("frame=1") ||
         !HasText("kind=DrawPrimitive") ||
