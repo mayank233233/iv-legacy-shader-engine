@@ -534,6 +534,20 @@ def audit_vs3_bytes(
             }
             entries = output_declarations.setdefault(register_number, [])
             existing_mask = 0
+            existing_special = any(
+                (existing["usage"] == USAGE_POSITION and existing["usage_index"] == 0)
+                or (existing["usage"] == USAGE_PSIZE and existing["usage_index"] == 0)
+                for existing in entries
+            )
+            new_special = (
+                (usage == USAGE_POSITION and usage_index == 0)
+                or (usage == USAGE_PSIZE and usage_index == 0)
+            )
+            if entries and (existing_special or new_special):
+                reasons.append(
+                    f"special POSITION0/PSIZE0 output o{register_number} "
+                    "cannot share its register with another semantic"
+                )
             for existing in entries:
                 existing_mask |= existing["component_mask"]
             if existing_mask & declared_mask:
@@ -2183,7 +2197,8 @@ def _self_test() -> None:
     # The 12 VS3 output slots are semantic slots, not fixed legacy classes:
     # ten generic interpolators plus position and optional point size may occupy
     # arbitrary VS3 o# indices. COLOR0/1 and TEXCOORD0-7 fill all ten generic
-    # VS2 outputs in this boundary fixture.
+    # VS2 outputs in this boundary fixture. Position and point size have their
+    # own exclusive source registers.
     max_output_bank_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 11),
@@ -2221,6 +2236,20 @@ def _self_test() -> None:
     assert max_output_bank["structural_candidate_for_manual_lowering"] is True
     assert max_output_bank["output_mapping_plan"]["o11"][0]["vs_2_0_link_semantic"] == "POSITION0"
     assert max_output_bank["output_mapping_plan"]["o10"][0]["vs_2_0_link_semantic"] == "PSIZE0"
+
+    # Position and PSIZE cannot be co-declared with other semantics, even
+    # when the general semantic requests a disjoint mask.
+    shared_special_output_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 11),
+        *dcl(USAGE_PSIZE, REG_OUTPUT, 10),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 10, usage_index=0, component_mask=0x1),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 11), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 10), make_source_token(REG_INPUT, 0)),
+    ]
+    shared_special_output = audit_vs3_bytes(shader(*shared_special_output_words))
+    assert any("special POSITION0/PSIZE0 output o10 cannot share" in reason
+               for reason in shared_special_output["reasons"])
     assert len({
         (entry["vs_2_0_register_type"], entry["vs_2_0_register_index"])
         for declarations in max_output_bank["output_mapping_plan"].values()
