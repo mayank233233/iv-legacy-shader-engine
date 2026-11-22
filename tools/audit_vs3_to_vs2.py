@@ -693,8 +693,8 @@ def audit_vs3_bytes(
             continue
 
         # Track definite temporary-component initialization in straight-line
-        # programs. Source reads are checked before the current instruction's
-        # destination and SGN scratch registers are marked as written.
+        # programs. Source reads are checked before destinations are updated;
+        # SGN's scratch registers are invalidated after the instruction.
         if opcode not in (OP_DEF, OP_DEFB, OP_DEFI, 0):
             source_indices = list(range(1, len(ins.operands)))
             if opcode == 34:
@@ -729,7 +729,9 @@ def audit_vs3_bytes(
             for scratch_token in ins.operands[2:4]:
                 scratch = decode_register(scratch_token)
                 if scratch is not None and scratch[0] == REG_TEMP:
-                    temporary_component_write_masks[scratch[1]] = 0xF
+                    # SGN's src1/src2 are scratch registers; their contents
+                    # are explicitly undefined after the instruction.
+                    temporary_component_write_masks[scratch[1]] = 0
 
         # Matrix instructions have a specific constant-file matrix operand and
         # fixed destination masks. The matrix source cannot be modified/swizzled.
@@ -1580,6 +1582,28 @@ def _self_test() -> None:
     ]
     sgn_duplicate_scratch = audit_vs3_bytes(shader(*sgn_duplicate_scratch_words))
     assert any("two different temporary scratch registers" in reason for reason in sgn_duplicate_scratch["reasons"])
+
+    sgn_scratch_invalidation_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1), make_source_token(REG_INPUT, 0)),
+        *make_instruction(
+            34,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_INPUT, 0),
+            make_source_token(REG_TEMP, 1),
+            make_source_token(REG_TEMP, 2),
+        ),
+        *make_instruction(
+            1,
+            make_dest_token(REG_TEMP, 3, 0x1),
+            make_source_token(REG_TEMP, 1, 0x00),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    sgn_scratch_invalidation = audit_vs3_bytes(shader(*sgn_scratch_invalidation_words))
+    assert any("reads r1.x before those temporary components are initialized" in reason for reason in sgn_scratch_invalidation["reasons"])
+    assert sgn_scratch_invalidation["temporary_component_write_masks"]["1"] == 0
 
     matrix_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
