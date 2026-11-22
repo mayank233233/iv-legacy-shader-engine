@@ -711,6 +711,28 @@ def audit_vs3_bytes(
         if opcode == OP_DCL:
             continue
 
+        if opcode == 27:
+            # LOOP has two source operands: aL and i#. Validate those token
+            # classes even though this first audit rejects flow-control code.
+            loop_register = decode_register(ins.operands[0])
+            integer_register = decode_register(ins.operands[1])
+            if loop_register is None or loop_register[0] != REG_LOOP:
+                reasons.append(
+                    f"LOOP at DWORD {ins.offset} requires aL as its first operand"
+                )
+            elif source_swizzle(ins.operands[0]) != IDENTITY_SWIZZLE:
+                reasons.append(
+                    f"LOOP at DWORD {ins.offset} requires the default .xyzw swizzle on aL"
+                )
+            if integer_register is None or integer_register[0] != REG_CONSTINT:
+                reasons.append(
+                    f"LOOP at DWORD {ins.offset} requires an integer constant i# as its second operand"
+                )
+            if any(operand & 0xC000 for operand in ins.operands):
+                reasons.append(
+                    f"LOOP at DWORD {ins.offset} sets reserved parameter-token bits"
+                )
+
         if opcode in UNVALIDATED_STATIC_FLOW:
             reasons.append(
                 f"{name} at DWORD {ins.offset} uses static flow control; "
@@ -1651,7 +1673,7 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
         *make_instruction(
             27,
-            make_dest_token(REG_LOOP, 0),
+            make_source_token(REG_LOOP, 0),
             make_source_token(REG_CONSTINT, 0),
         ),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
@@ -1659,6 +1681,33 @@ def _self_test() -> None:
     loop = audit_vs3_bytes(shader(*loop_words))
     assert any("static flow control" in reason for reason in loop["reasons"])
     assert not any("expected 2" in reason for reason in loop["reasons"])
+    assert not any("requires aL" in reason or "requires an integer constant" in reason for reason in loop["reasons"])
+
+    loop_wrong_counter_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            27,
+            make_source_token(REG_TEMP, 0),
+            make_source_token(REG_CONSTINT, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    loop_wrong_counter = audit_vs3_bytes(shader(*loop_wrong_counter_words))
+    assert any("requires aL as its first operand" in reason for reason in loop_wrong_counter["reasons"])
+
+    loop_wrong_integer_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            27,
+            make_source_token(REG_LOOP, 0),
+            make_source_token(REG_CONSTBOOL, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    loop_wrong_integer = audit_vs3_bytes(shader(*loop_wrong_integer_words))
+    assert any("requires an integer constant i#" in reason for reason in loop_wrong_integer["reasons"])
 
     # a0 is write-only; baseline vs_2_0 uses MOVA (not MOV) to update it.
     address_read_words = [
