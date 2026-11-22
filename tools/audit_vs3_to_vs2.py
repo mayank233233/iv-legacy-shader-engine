@@ -649,6 +649,14 @@ def audit_vs3_bytes(
 
         # Matrix instructions have a specific constant-file matrix operand and
         # fixed destination masks. The matrix source cannot be modified/swizzled.
+        if opcode == 46:
+            # VS2.0 exposes a scalar address register; arbitrary component
+            # write masks are documented only for vs_2_x and later.
+            if destination_mask(ins.operands[0]) != 0x1:
+                reasons.append(
+                    f"MOVA at DWORD {ins.offset} must use the baseline vs_2_0 a0.x mask"
+                )
+
         if opcode in MATRIX_ROWS:
             expected_masks = MATRIX_DEST_MASKS[opcode]
             actual_mask = destination_mask(ins.operands[0])
@@ -1250,6 +1258,15 @@ def _self_test() -> None:
     ]
     address_write = audit_vs3_bytes(shader(*address_write_words))
     assert address_write["structural_candidate_for_manual_lowering"] is True
+
+    mova_vector_mask_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(46, make_dest_token(REG_ADDR, 0, 0x3), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    mova_vector_mask = audit_vs3_bytes(shader(*mova_vector_mask_words))
+    assert any("baseline vs_2_0 a0.x mask" in reason for reason in mova_vector_mask["reasons"])
 
     mov_to_address_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
