@@ -2495,7 +2495,7 @@ namespace
             _countof(depthTargetBinding),
             FALSE,
             0);
-        if (depthTargetBinding[0] == '\\0')
+        if (depthTargetBinding[0] == '\0')
             strcpy_s(depthTargetBinding, _countof(depthTargetBinding), "unknown");
 
         const DWORD currentFVF = static_cast<DWORD>(
