@@ -1055,7 +1055,7 @@ def _self_test() -> None:
     output_semantic = audit_vs3_bytes(shader(*output_semantic_words))
     assert output_semantic["requires_pixel_shader_interface_remap"] is True
     assert output_semantic["structural_candidate_for_manual_lowering"] is False
-    assert any("position output" in reason for reason in output_semantic["reasons"])
+    assert any("position components" in reason for reason in output_semantic["reasons"])
 
     read_only_write_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
