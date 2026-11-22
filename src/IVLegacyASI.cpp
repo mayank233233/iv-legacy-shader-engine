@@ -4,6 +4,7 @@
 #include <winver.h>
 #include <d3d9.h>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -93,6 +94,21 @@ namespace
     volatile LONG g_materialStateLogCount = 0;
     volatile LONG g_textureCreateLogCount = 0;
     volatile LONG g_bufferCreateLogCount = 0;
+    BOOL g_frameProfilerEnabled = FALSE;
+    DWORD g_frameProfilerWindowFrames = 120;
+    LONGLONG g_qpcFrequency = 0;
+    volatile LONG64 g_frameDrawQpcTicks = 0;
+    volatile LONG g_frameDrawCalls = 0;
+    volatile LONG g_frameDrawFailures = 0;
+    volatile LONG64 g_previousPresentEndQpc = 0;
+    static const LONG kMaxFrameProfilerWindow = 600;
+    LONGLONG g_profileFrameTicks[kMaxFrameProfilerWindow] = {};
+    LONGLONG g_profilePresentTicks[kMaxFrameProfilerWindow] = {};
+    LONGLONG g_profileDrawTicks[kMaxFrameProfilerWindow] = {};
+    LONGLONG g_profileOtherTicks[kMaxFrameProfilerWindow] = {};
+    LONG g_profileDrawCalls[kMaxFrameProfilerWindow] = {};
+    LONG g_profileDrawFailures[kMaxFrameProfilerWindow] = {};
+    LONG g_profileSampleCount = 0;
     struct SurfaceSnapshot
     {
         PVOID volatile object;
@@ -783,6 +799,10 @@ namespace
                 L"General", L"CaptureShaderConstantMaxRecords", L"2048", g_iniPath);
             WritePrivateProfileStringW(
                 L"General", L"EnableShaderFallbacks", L"0", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"EnableFrameProfiler", L"0", g_iniPath);
+            WritePrivateProfileStringW(
+                L"General", L"FrameProfilerWindowFrames", L"120", g_iniPath);
         }
     }
 
@@ -879,7 +899,10 @@ namespace
                 "MaxSimTextures=%u MaxTextureStages=%u MaxRTs=%u MaxVSConst=%u "
                 "VS20Temps=%u VS20DynamicFlow=%u VS20StaticFlow=%u "
                 "PS20Caps=0x%08lX PS20Temps=%u PS20Slots=%u "
-                "PS20DynamicFlow=%u PS20StaticFlow=%u",
+                "PS20DynamicFlow=%u PS20StaticFlow=%u "
+                "DevCaps=0x%08lX HWTransformAndLight=%u "
+                "VertexProcessingCaps=0x%08lX MaxStreams=%u MaxStreamStride=%u "
+                "MaxVertexIndex=%lu MaxPrimitiveCount=%lu",
                 adapter,
                 static_cast<unsigned>(deviceType),
                 static_cast<unsigned long>(caps->VertexShaderVersion),
@@ -895,7 +918,14 @@ namespace
                 caps->PS20Caps.NumTemps,
                 caps->PS20Caps.NumInstructionSlots,
                 caps->PS20Caps.DynamicFlowControlDepth,
-                caps->PS20Caps.StaticFlowControlDepth);
+                caps->PS20Caps.StaticFlowControlDepth,
+                static_cast<unsigned long>(caps->DevCaps),
+                (caps->DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) ? 1 : 0,
+                static_cast<unsigned long>(caps->VertexProcessingCaps),
+                caps->MaxStreams,
+                caps->MaxStreamStride,
+                static_cast<unsigned long>(caps->MaxVertexIndex),
+                static_cast<unsigned long>(caps->MaxPrimitiveCount));
         }
         else if (FAILED(hr))
         {
@@ -1015,7 +1045,10 @@ namespace
             Log(
                 "DEVICE_GET_DEVICE_CAPS VS=0x%08lX PS=0x%08lX MaxRTs=%u "
                 "PS20Caps=0x%08lX PS20Temps=%u PS20Slots=%u "
-                "PS20DynamicFlow=%u PS20StaticFlow=%u",
+                "PS20DynamicFlow=%u PS20StaticFlow=%u "
+                "DevCaps=0x%08lX HWTransformAndLight=%u "
+                "VertexProcessingCaps=0x%08lX MaxStreams=%u MaxStreamStride=%u "
+                "MaxVertexIndex=%lu MaxPrimitiveCount=%lu",
                 static_cast<unsigned long>(caps->VertexShaderVersion),
                 static_cast<unsigned long>(caps->PixelShaderVersion),
                 caps->NumSimultaneousRTs,
@@ -1023,7 +1056,14 @@ namespace
                 caps->PS20Caps.NumTemps,
                 caps->PS20Caps.NumInstructionSlots,
                 caps->PS20Caps.DynamicFlowControlDepth,
-                caps->PS20Caps.StaticFlowControlDepth);
+                caps->PS20Caps.StaticFlowControlDepth,
+                static_cast<unsigned long>(caps->DevCaps),
+                (caps->DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) ? 1 : 0,
+                static_cast<unsigned long>(caps->VertexProcessingCaps),
+                caps->MaxStreams,
+                caps->MaxStreamStride,
+                static_cast<unsigned long>(caps->MaxVertexIndex),
+                static_cast<unsigned long>(caps->MaxPrimitiveCount));
         }
         return hr;
     }
@@ -1055,6 +1095,11 @@ namespace
                 ClearSurfaceSnapshot(&g_renderTargetSnapshots[target]);
             ClearSurfaceSnapshot(&g_depthStencilSnapshot);
             CaptureCurrentSurfaceState(self);
+            InterlockedExchange64(&g_previousPresentEndQpc, 0);
+            InterlockedExchange64(&g_frameDrawQpcTicks, 0);
+            InterlockedExchange(&g_frameDrawCalls, 0);
+            InterlockedExchange(&g_frameDrawFailures, 0);
+            g_profileSampleCount = 0;
             for (DWORD stream = 0; stream < 16; ++stream)
             {
                 InterlockedExchangePointer(&g_streamBuffers[stream], NULL);
@@ -1086,6 +1131,165 @@ namespace
         return hr;
     }
 
+    double QpcTicksToMilliseconds(LONGLONG ticks)
+    {
+        if (ticks <= 0 || g_qpcFrequency <= 0)
+            return 0.0;
+        return (static_cast<double>(ticks) * 1000.0) /
+            static_cast<double>(g_qpcFrequency);
+    }
+
+    void SummarizeFrameMetric(
+        const LONGLONG* samples,
+        LONG count,
+        double* averageMs,
+        double* p50Ms,
+        double* p95Ms,
+        double* p99Ms,
+        double* maximumMs)
+    {
+        if (!samples || count <= 0 || count > kMaxFrameProfilerWindow ||
+            !averageMs || !p50Ms || !p95Ms || !p99Ms || !maximumMs)
+            return;
+
+        LONGLONG sorted[kMaxFrameProfilerWindow] = {};
+        LONGLONG total = 0;
+        for (LONG i = 0; i < count; ++i)
+        {
+            sorted[i] = samples[i];
+            total += samples[i];
+        }
+        std::sort(sorted, sorted + count);
+
+        const LONG p50Index = ((count * 50 + 99) / 100) - 1;
+        const LONG p95Index = ((count * 95 + 99) / 100) - 1;
+        const LONG p99Index = ((count * 99 + 99) / 100) - 1;
+        *averageMs = QpcTicksToMilliseconds(total / count);
+        *p50Ms = QpcTicksToMilliseconds(sorted[p50Index < 0 ? 0 : p50Index]);
+        *p95Ms = QpcTicksToMilliseconds(sorted[p95Index < 0 ? 0 : p95Index]);
+        *p99Ms = QpcTicksToMilliseconds(sorted[p99Index < 0 ? 0 : p99Index]);
+        *maximumMs = QpcTicksToMilliseconds(sorted[count - 1]);
+    }
+
+    void LogFrameProfilerWindow()
+    {
+        const LONG count = g_profileSampleCount;
+        if (count <= 0)
+            return;
+
+        double frameAverage = 0.0, frameP50 = 0.0, frameP95 = 0.0;
+        double frameP99 = 0.0, frameMaximum = 0.0;
+        double presentAverage = 0.0, presentP50 = 0.0, presentP95 = 0.0;
+        double presentP99 = 0.0, presentMaximum = 0.0;
+        double drawAverage = 0.0, drawP50 = 0.0, drawP95 = 0.0;
+        double drawP99 = 0.0, drawMaximum = 0.0;
+        double otherAverage = 0.0, otherP50 = 0.0, otherP95 = 0.0;
+        double otherP99 = 0.0, otherMaximum = 0.0;
+        LONGLONG drawCalls = 0;
+        LONGLONG drawFailures = 0;
+
+        SummarizeFrameMetric(g_profileFrameTicks, count, &frameAverage,
+            &frameP50, &frameP95, &frameP99, &frameMaximum);
+        SummarizeFrameMetric(g_profilePresentTicks, count, &presentAverage,
+            &presentP50, &presentP95, &presentP99, &presentMaximum);
+        SummarizeFrameMetric(g_profileDrawTicks, count, &drawAverage,
+            &drawP50, &drawP95, &drawP99, &drawMaximum);
+        SummarizeFrameMetric(g_profileOtherTicks, count, &otherAverage,
+            &otherP50, &otherP95, &otherP99, &otherMaximum);
+
+        for (LONG i = 0; i < count; ++i)
+        {
+            drawCalls += g_profileDrawCalls[i];
+            drawFailures += g_profileDrawFailures[i];
+        }
+
+        Log(
+            "FRAME_PROFILE_WINDOW samples=%ld target_30fps_ms=33.333 "
+            "avg_frame_ms=%.3f p50_frame_ms=%.3f p95_frame_ms=%.3f "
+            "p99_frame_ms=%.3f max_frame_ms=%.3f "
+            "avg_present_ms=%.3f p95_present_ms=%.3f "
+            "avg_draw_cpu_ms=%.3f p95_draw_cpu_ms=%.3f "
+            "avg_unattributed_ms=%.3f p95_unattributed_ms=%.3f "
+            "avg_draw_calls=%.2f draw_failures=%lld gpu_time=not_measured",
+            count,
+            frameAverage, frameP50, frameP95, frameP99, frameMaximum,
+            presentAverage, presentP95,
+            drawAverage, drawP95,
+            otherAverage, otherP95,
+            static_cast<double>(drawCalls) / static_cast<double>(count),
+            static_cast<long long>(drawFailures));
+        g_profileSampleCount = 0;
+    }
+
+    void RecordFrameProfile(
+        LONGLONG presentStartQpc,
+        LONGLONG presentEndQpc,
+        HRESULT presentResult)
+    {
+        if (!g_frameProfilerEnabled || g_qpcFrequency <= 0)
+            return;
+
+        const LONGLONG drawTicks = InterlockedExchange64(&g_frameDrawQpcTicks, 0);
+        const LONG drawCalls = InterlockedExchange(&g_frameDrawCalls, 0);
+        const LONG drawFailures = InterlockedExchange(&g_frameDrawFailures, 0);
+
+        if (FAILED(presentResult))
+        {
+            InterlockedExchange64(&g_previousPresentEndQpc, 0);
+            g_profileSampleCount = 0;
+            Log("FRAME_PROFILE_DISCONTINUITY reason=present_failed hr=0x%08lX",
+                static_cast<unsigned long>(presentResult));
+            return;
+        }
+
+        const LONGLONG previousEnd =
+            InterlockedExchange64(&g_previousPresentEndQpc, presentEndQpc);
+        if (previousEnd <= 0 || presentEndQpc <= previousEnd ||
+            presentStartQpc < previousEnd)
+            return;
+
+        const LONGLONG frameTicks = presentEndQpc - previousEnd;
+        const LONGLONG presentTicks = presentEndQpc - presentStartQpc;
+        const LONGLONG safeDrawTicks = drawTicks > 0 ? drawTicks : 0;
+        const LONGLONG occupiedTicks = presentTicks + safeDrawTicks;
+        const LONGLONG otherTicks =
+            frameTicks > occupiedTicks ? frameTicks - occupiedTicks : 0;
+
+        if (g_profileSampleCount >= kMaxFrameProfilerWindow)
+            g_profileSampleCount = 0;
+        const LONG index = g_profileSampleCount++;
+        g_profileFrameTicks[index] = frameTicks;
+        g_profilePresentTicks[index] = presentTicks;
+        g_profileDrawTicks[index] = safeDrawTicks;
+        g_profileOtherTicks[index] = otherTicks;
+        g_profileDrawCalls[index] = drawCalls;
+        g_profileDrawFailures[index] = drawFailures;
+
+        if (g_profileSampleCount >= static_cast<LONG>(g_frameProfilerWindowFrames))
+            LogFrameProfilerWindow();
+    }
+
+    BOOL BeginDrawTiming(LARGE_INTEGER* start)
+    {
+        return g_frameProfilerEnabled && start &&
+            QueryPerformanceCounter(start) ? TRUE : FALSE;
+    }
+
+    void EndDrawTiming(BOOL started, const LARGE_INTEGER* start, HRESULT drawResult)
+    {
+        if (!started || !start)
+            return;
+
+        LARGE_INTEGER end = {};
+        if (!QueryPerformanceCounter(&end) || end.QuadPart < start->QuadPart)
+            return;
+
+        InterlockedExchangeAdd64(&g_frameDrawQpcTicks, end.QuadPart - start->QuadPart);
+        InterlockedIncrement(&g_frameDrawCalls);
+        if (FAILED(drawResult))
+            InterlockedIncrement(&g_frameDrawFailures);
+    }
+
     HRESULT WINAPI HookDevicePresent(
         IDirect3DDevice9* self,
         const RECT* source,
@@ -1093,13 +1297,24 @@ namespace
         HWND overrideWindow,
         const RGNDATA* dirtyRegion)
     {
+        LARGE_INTEGER presentStart = {};
+        const BOOL profilePresent =
+            g_frameProfilerEnabled && QueryPerformanceCounter(&presentStart);
+
         const HRESULT hr = g_realDevicePresent
             ? g_realDevicePresent(self, source, destination, overrideWindow, dirtyRegion)
             : D3DERR_INVALIDCALL;
 
+        if (profilePresent)
+        {
+            LARGE_INTEGER presentEnd = {};
+            if (QueryPerformanceCounter(&presentEnd))
+                RecordFrameProfile(presentStart.QuadPart, presentEnd.QuadPart, hr);
+        }
+
         if (FAILED(hr))
             Log("DEVICE_PRESENT_FAILED hr=0x%08lX", static_cast<unsigned long>(hr));
-        else if (g_drawTelemetryEnabled)
+        else if (g_drawTelemetryEnabled || g_frameProfilerEnabled)
             InterlockedIncrement(&g_presentFrameIndex);
 
         return hr;
@@ -2685,9 +2900,12 @@ namespace
         UINT startVertex,
         UINT primitiveCount)
     {
+        LARGE_INTEGER drawStart = {};
+        const BOOL profileDraw = BeginDrawTiming(&drawStart);
         const HRESULT hr = g_realDeviceDrawPrimitive
             ? g_realDeviceDrawPrimitive(self, primitiveType, startVertex, primitiveCount)
             : D3DERR_INVALIDCALL;
+        EndDrawTiming(profileDraw, &drawStart, hr);
 
         LogDrawTelemetry(
             "DrawPrimitive", self, primitiveType, primitiveCount, hr,
@@ -2704,11 +2922,14 @@ namespace
         UINT startIndex,
         UINT primitiveCount)
     {
+        LARGE_INTEGER drawStart = {};
+        const BOOL profileDraw = BeginDrawTiming(&drawStart);
         const HRESULT hr = g_realDeviceDrawIndexedPrimitive
             ? g_realDeviceDrawIndexedPrimitive(
                 self, primitiveType, baseVertexIndex, minVertexIndex,
                 numVertices, startIndex, primitiveCount)
             : D3DERR_INVALIDCALL;
+        EndDrawTiming(profileDraw, &drawStart, hr);
 
         LogDrawTelemetry(
             "DrawIndexedPrimitive", self, primitiveType, primitiveCount, hr,
@@ -2723,11 +2944,14 @@ namespace
         const void* vertexStreamZeroData,
         UINT vertexStreamZeroStride)
     {
+        LARGE_INTEGER drawStart = {};
+        const BOOL profileDraw = BeginDrawTiming(&drawStart);
         const HRESULT hr = g_realDeviceDrawPrimitiveUP
             ? g_realDeviceDrawPrimitiveUP(
                 self, primitiveType, primitiveCount,
                 vertexStreamZeroData, vertexStreamZeroStride)
             : D3DERR_INVALIDCALL;
+        EndDrawTiming(profileDraw, &drawStart, hr);
 
         LogDrawTelemetry(
             "DrawPrimitiveUP", self, primitiveType, primitiveCount, hr,
@@ -2746,12 +2970,15 @@ namespace
         const void* vertexStreamZeroData,
         UINT vertexStreamZeroStride)
     {
+        LARGE_INTEGER drawStart = {};
+        const BOOL profileDraw = BeginDrawTiming(&drawStart);
         const HRESULT hr = g_realDeviceDrawIndexedPrimitiveUP
             ? g_realDeviceDrawIndexedPrimitiveUP(
                 self, primitiveType, minVertexIndex, numVertices,
                 primitiveCount, indexData, indexDataFormat,
                 vertexStreamZeroData, vertexStreamZeroStride)
             : D3DERR_INVALIDCALL;
+        EndDrawTiming(profileDraw, &drawStart, hr);
 
         LogDrawTelemetry(
             "DrawIndexedPrimitiveUP", self, primitiveType, primitiveCount, hr,
@@ -2888,10 +3115,6 @@ namespace
         {
             hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
             hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
-            hooked[kDeviceDrawPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitive);
-            hooked[kDeviceDrawIndexedPrimitiveSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitive);
-            hooked[kDeviceDrawPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawPrimitiveUP);
-            hooked[kDeviceDrawIndexedPrimitiveUPSlot] = reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
             hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
             hooked[kDeviceSetSamplerStateSlot] = reinterpret_cast<void*>(HookDeviceSetSamplerState);
             hooked[kDeviceCreateTextureSlot] = reinterpret_cast<void*>(HookDeviceCreateTexture);
@@ -2912,6 +3135,17 @@ namespace
                 reinterpret_cast<void*>(HookDeviceCreateVertexBuffer);
             hooked[kDeviceCreateIndexBufferSlot] =
                 reinterpret_cast<void*>(HookDeviceCreateIndexBuffer);
+        }
+        if (g_drawTelemetryEnabled || g_frameProfilerEnabled)
+        {
+            hooked[kDeviceDrawPrimitiveSlot] =
+                reinterpret_cast<void*>(HookDeviceDrawPrimitive);
+            hooked[kDeviceDrawIndexedPrimitiveSlot] =
+                reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitive);
+            hooked[kDeviceDrawPrimitiveUPSlot] =
+                reinterpret_cast<void*>(HookDeviceDrawPrimitiveUP);
+            hooked[kDeviceDrawIndexedPrimitiveUPSlot] =
+                reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
         }
         if (g_captureShaderConstants)
         {
@@ -2960,14 +3194,18 @@ namespace
     {
         Log(
             "D3D9_CREATE_DEVICE_REQUEST adapter=%u type=%u flags=0x%08lX "
-            "width=%u height=%u backbuffer_format=%u windowed=%u",
+            "width=%u height=%u backbuffer_format=%u windowed=%u "
+            "request_hardware_vp=%u request_mixed_vp=%u request_software_vp=%u",
             adapter,
             static_cast<unsigned>(deviceType),
             static_cast<unsigned long>(behaviorFlags),
             parameters ? parameters->BackBufferWidth : 0,
             parameters ? parameters->BackBufferHeight : 0,
             parameters ? static_cast<unsigned>(parameters->BackBufferFormat) : 0,
-            parameters ? parameters->Windowed : 0);
+            parameters ? parameters->Windowed : 0,
+            (behaviorFlags & D3DCREATE_HARDWARE_VERTEXPROCESSING) ? 1 : 0,
+            (behaviorFlags & D3DCREATE_MIXED_VERTEXPROCESSING) ? 1 : 0,
+            (behaviorFlags & D3DCREATE_SOFTWARE_VERTEXPROCESSING) ? 1 : 0);
 
         const HRESULT hr = g_realD3D9CreateDevice
             ? g_realD3D9CreateDevice(
@@ -3189,6 +3427,33 @@ namespace
                 L"General", L"CaptureDrawTelemetry", 0, g_iniPath) != 0;
         g_drawTelemetryMaxCalls = GetPrivateProfileIntW(
             L"General", L"CaptureDrawMaxCalls", 4096, g_iniPath);
+        g_frameProfilerEnabled =
+            GetPrivateProfileIntW(
+                L"General", L"EnableFrameProfiler", 0, g_iniPath) != 0;
+        g_frameProfilerWindowFrames = GetPrivateProfileIntW(
+            L"General", L"FrameProfilerWindowFrames", 120, g_iniPath);
+        if (g_frameProfilerWindowFrames == 0)
+            g_frameProfilerWindowFrames = 1;
+        if (g_frameProfilerWindowFrames > kMaxFrameProfilerWindow)
+            g_frameProfilerWindowFrames = kMaxFrameProfilerWindow;
+        if (g_frameProfilerEnabled)
+        {
+            LARGE_INTEGER frequency = {};
+            if (QueryPerformanceFrequency(&frequency) && frequency.QuadPart > 0)
+            {
+                g_qpcFrequency = frequency.QuadPart;
+                Log(
+                    "FRAME_PROFILER_ENABLED qpc_frequency=%lld window_frames=%lu "
+                    "draw_methods=4 gpu_time=not_measured",
+                    static_cast<long long>(g_qpcFrequency),
+                    static_cast<unsigned long>(g_frameProfilerWindowFrames));
+            }
+            else
+            {
+                g_frameProfilerEnabled = FALSE;
+                Log("FRAME_PROFILER_DISABLED reason=qpc_frequency_unavailable");
+            }
+        }
         g_captureShaderConstants =
             GetPrivateProfileIntW(
                 L"General", L"CaptureShaderConstants", 0, g_iniPath) != 0;
