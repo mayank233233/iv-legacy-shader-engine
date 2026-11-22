@@ -36,9 +36,9 @@ All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs
 - Added `tools/lower_shader_pairs.py`: uses the captured draw-level pair audit, both stage downlevelers and recorded adapter limits before emitting matched VS2/PS2 candidate files.
 - Runtime mappings are approved as explicit source VS-hash:PS-hash pairs. The generator refuses stage hashes that are also observed with unapproved partners, preventing a shared shader from being mapped to incompatible SM2 interfaces.
 - Corrected the D3D9 state-block vtable indices: `GetRenderState=58`, `CreateStateBlock=59`, `BeginStateBlock=60`, `EndStateBlock=61`. The failed run #295 used 58/59/60 for the three state-block hooks; that replaced GetRenderState and shifted the remaining hooks.
-- Extended the synthetic x86 smoke test to verify the slot-58 read path and all three state-block hooks. The previous baseline run #312 passed Windows x86 compilation, ASI build, smoke execution and the paired shader audit; the latest additional regression tests are running separately.
-- The successful run #312 artifact contains a 105-line `IVLegacy.log`. Its final sequence confirms BeginStateBlock is forwarded after disabling the cache and the following SetRenderState is forwarded successfully.
-- CI run #312 is synthetic test-host evidence only; it does not demonstrate GTA IV startup, rendering on the GMA 3100, image equivalence or genuine FPS.
+- Extended the synthetic x86 smoke test to verify the slot-58 GetRenderState path and all three state-block hooks. Windows x86 CI run #314 passed both build and paired-audit jobs after these additions.
+- Run #314 artifact 14756277716 contains the latest 109-line `IVLegacy.log`. It confirms BeginStateBlock enter/disable/forward/return, then CreateStateBlock and EndStateBlock reach their originals. The fake Create/End methods intentionally return `D3DERR_INVALIDCALL`, which the test expects and verifies.
+- These CI results are synthetic test-host evidence only; they do not demonstrate GTA IV startup, rendering on the GMA 3100, image equivalence or genuine FPS.
 
 ## v0.5.7-alpha changes
 
