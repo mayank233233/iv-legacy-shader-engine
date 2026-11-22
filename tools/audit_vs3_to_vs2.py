@@ -725,9 +725,11 @@ def audit_vs3_bytes(
             )
             continue
 
-        # Enforce the baseline VS2 input/constant read-port limits. A single
-        # instruction may read only one distinct v# register and at most two
-        # distinct float-constant registers. DEF-family operands are literals.
+        # Enforce baseline VS2 input/constant read-port limits. One instruction
+        # may read only one distinct v# and one distinct c# register. Multiple
+        # sources may independently swizzle/negate that same c#; matrix ops
+        # identify a base c# whose consecutive rows are implicit. DEF-family
+        # operands are literal payloads, not source reads.
         if opcode not in (OP_DEF, OP_DEFB, OP_DEFI, 0):
             input_reads: set[int] = set()
             constant_reads: set[int] = set()
@@ -745,10 +747,10 @@ def audit_vs3_bytes(
                     f"{name} at DWORD {ins.offset} reads {len(input_reads)} "
                     "different vertex input registers; baseline vs_2_0 permits one"
                 )
-            if len(constant_reads) > 2:
+            if len(constant_reads) > 1:
                 reasons.append(
                     f"{name} at DWORD {ins.offset} reads {len(constant_reads)} "
-                    "different float-constant registers; baseline vs_2_0 permits two"
+                    "different float-constant registers; baseline vs_2_0 permits one"
                 )
 
         # Track definite temporary-component initialization in straight-line
@@ -1409,7 +1411,21 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     constant_read_port = audit_vs3_bytes(shader(*constant_read_port_words))
-    assert any("float-constant registers" in reason and "permits two" in reason for reason in constant_read_port["reasons"])
+    assert any("float-constant registers" in reason and "permits one" in reason for reason in constant_read_port["reasons"])
+
+    same_constant_read_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            2,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_CONST, 4, 0x00),
+            make_source_token(REG_CONST, 4, 0xFF),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    same_constant_read = audit_vs3_bytes(shader(*same_constant_read_words))
+    assert same_constant_read["structural_candidate_for_manual_lowering"] is True
 
     # LIT ignores src.z and consumes x/y/w only when the corresponding result
     # components are requested.
