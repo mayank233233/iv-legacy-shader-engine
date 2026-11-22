@@ -299,6 +299,15 @@ def assess_factory_hook_path(
         )
     ]
 
+    missing_original_lookup = [
+        item for item in normal_factory
+        if int(item.get("original_first_thunk_rva") or 0) == 0
+    ]
+    missing_iat = [
+        item for item in normal_factory
+        if int(item.get("first_thunk_rva") or 0) == 0
+    ]
+
     if normal_with_lookup:
         if delay_factory:
             classification = "normal_iat_candidate_plus_delay_import"
@@ -313,11 +322,24 @@ def assess_factory_hook_path(
                 "and ASI load timing still need verification"
             )
     elif normal_factory:
-        classification = "normal_import_without_lookup_table"
-        message = (
-            "Direct3DCreate9 is a normal import, but OriginalFirstThunk is zero; "
-            "the current ASI skips this descriptor"
-        )
+        if missing_original_lookup and not missing_iat:
+            classification = "normal_import_without_original_thunk"
+            message = (
+                "Direct3DCreate9 is a normal import, but OriginalFirstThunk is zero; "
+                "the current ASI skips this descriptor"
+            )
+        elif missing_iat and not missing_original_lookup:
+            classification = "normal_import_without_first_thunk"
+            message = (
+                "Direct3DCreate9 has no FirstThunk IAT target; the current ASI "
+                "cannot safely patch this descriptor"
+            )
+        else:
+            classification = "normal_import_without_required_thunks"
+            message = (
+                "Direct3DCreate9 is a normal import, but one or more descriptors "
+                "lack the thunk RVAs required by the current ASI"
+            )
     elif delay_factory:
         classification = "delay_import_only"
         message = (
@@ -337,6 +359,8 @@ def assess_factory_hook_path(
         "normal_direct_import_count": len(normal_factory),
         "delay_direct_import_count": len(delay_factory),
         "normal_direct_imports_with_lookup_table": len(normal_with_lookup),
+        "normal_direct_imports_missing_original_first_thunk": len(missing_original_lookup),
+        "normal_direct_imports_missing_first_thunk": len(missing_iat),
         "message": message,
     }
 
@@ -503,6 +527,10 @@ def inspect_file(path: Path) -> dict[str, Any]:
             "delay_direct_import_count": hook_path["delay_direct_import_count"],
             "normal_direct_imports_with_lookup_table":
                 hook_path["normal_direct_imports_with_lookup_table"],
+            "normal_direct_imports_missing_original_first_thunk":
+                hook_path["normal_direct_imports_missing_original_first_thunk"],
+            "normal_direct_imports_missing_first_thunk":
+                hook_path["normal_direct_imports_missing_first_thunk"],
         },
         "limitations": [
             "The current ASI scans only the main executable's normal import table.",
@@ -573,7 +601,7 @@ def _self_test() -> None:
     assert oft_zero_imports[0]["name"] == "Direct3DCreate9"
     assert oft_zero_imports[0]["original_first_thunk_rva"] == 0
     oft_zero_assessment = assess_factory_hook_path(oft_zero_imports, [])
-    assert oft_zero_assessment["classification"] == "normal_import_without_lookup_table"
+    assert oft_zero_assessment["classification"] == "normal_import_without_original_thunk"
     assert oft_zero_assessment["hook_candidate"] is False
 
     # A non-zero OriginalFirstThunk is not enough if the actual IAT RVA is
@@ -585,7 +613,7 @@ def _self_test() -> None:
     assert missing_iat_imports[0]["original_first_thunk_rva"] == 0x1040
     assert missing_iat_imports[0]["first_thunk_rva"] == 0
     missing_iat_assessment = assess_factory_hook_path(missing_iat_imports, [])
-    assert missing_iat_assessment["classification"] == "normal_import_without_lookup_table"
+    assert missing_iat_assessment["classification"] == "normal_import_without_first_thunk"
     assert missing_iat_assessment["hook_candidate"] is False
 
     normal_candidate = assess_factory_hook_path(imports, [])
@@ -600,7 +628,8 @@ def _self_test() -> None:
 
     missing_lookup = assess_factory_hook_path([{
         "dll": "d3d9.dll", "name": "Direct3DCreate9",
-        "table": "normal", "original_first_thunk_rva": 0
+        "table": "normal", "original_first_thunk_rva": 0,
+        "first_thunk_rva": 0x1060
     }], [])
     assert missing_lookup["classification"] == "normal_import_without_lookup_table"
     assert missing_lookup["hook_candidate"] is False
