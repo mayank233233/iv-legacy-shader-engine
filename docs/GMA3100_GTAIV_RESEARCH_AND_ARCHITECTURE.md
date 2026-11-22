@@ -413,7 +413,7 @@ Windows CI run #312 passed the complete x86 pipeline and synthetic runtime smoke
 4. `STATE_BLOCK_BEGIN_FORWARD` and `STATE_BLOCK_BEGIN_RETURN ... hr=0`.
 5. The next `SET_RENDER_STATE` call is forwarded with `cached=0`.
 
-The test host then prints PASS and the workflow uploads the artifact. The current follow-up test additionally calls GetRenderState before cache suppression and exercises CreateStateBlock/EndStateBlock; those newest assertions require their own passing CI run.
+The test host then prints PASS and the workflow uploads the artifact. Follow-up Windows CI run #314 passed after adding a GetRenderState call before cache suppression and explicit CreateStateBlock/EndStateBlock calls. The latest 109-line log confirms the Begin wrapper's enter/disable/forward/return sequence, then the Create and End wrappers. The latter two return the fake functions' expected `D3DERR_INVALIDCALL`, and the test verifies their calls were forwarded.
 
 This does not establish real GTA IV startup or rendering. The adapter is synthetic test data, the one-sample frame profiler has `gpu_time=not_measured`, and no physical GMA 3100, GTA IV shader pair or gameplay run has been tested. The full 30 FPS objective remains unverified.
 
