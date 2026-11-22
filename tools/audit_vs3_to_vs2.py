@@ -2187,7 +2187,7 @@ def _self_test() -> None:
     max_output_bank_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 11),
-        *dcl(USAGE_PSIZE, REG_OUTPUT, 4),
+        *dcl(USAGE_PSIZE, REG_OUTPUT, 10),
         *dcl(USAGE_COLOR, REG_OUTPUT, 0, usage_index=0),
         *dcl(USAGE_COLOR, REG_OUTPUT, 1, usage_index=1),
     ]
@@ -2195,7 +2195,7 @@ def _self_test() -> None:
         max_output_bank_words.extend(
             dcl(USAGE_TEXCOORD, REG_OUTPUT, semantic_index + 2, usage_index=semantic_index)
         )
-    for output_index in [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]:
+    for output_index in range(10):
         max_output_bank_words.extend(
             make_instruction(
                 1,
@@ -2206,14 +2206,21 @@ def _self_test() -> None:
     max_output_bank_words.extend(
         make_instruction(
             1,
-            make_dest_token(REG_OUTPUT, 4, 0x1),
+            make_dest_token(REG_OUTPUT, 10, 0x1),
+            make_source_token(REG_INPUT, 0),
+        )
+    )
+    max_output_bank_words.extend(
+        make_instruction(
+            1,
+            make_dest_token(REG_OUTPUT, 11),
             make_source_token(REG_INPUT, 0),
         )
     )
     max_output_bank = audit_vs3_bytes(shader(*max_output_bank_words))
     assert max_output_bank["structural_candidate_for_manual_lowering"] is True
     assert max_output_bank["output_mapping_plan"]["o11"][0]["vs_2_0_link_semantic"] == "POSITION0"
-    assert max_output_bank["output_mapping_plan"]["o4"][0]["vs_2_0_link_semantic"] == "PSIZE0"
+    assert max_output_bank["output_mapping_plan"]["o10"][0]["vs_2_0_link_semantic"] == "PSIZE0"
     assert len({
         (entry["vs_2_0_register_type"], entry["vs_2_0_register_index"])
         for declarations in max_output_bank["output_mapping_plan"].values()
