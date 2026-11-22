@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import struct
+import tempfile
 import sys
 from collections import Counter
 from dataclasses import dataclass
