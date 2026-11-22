@@ -225,21 +225,21 @@ def _required_temp_source_mask(ins: Instruction, source_index: int) -> int:
         channels = (0, 1, 2) if opcode == 8 else (0, 1, 2, 3)
     elif opcode == 33:  # CRS: each requested output component depends on two inputs.
         dependencies = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
-        destination_mask = ins.operands[0]
+        destination_write_mask = destination_mask_fn(ins.operands[0])
         channels_set = {
             component
             for destination_channel, components in dependencies.items()
-            if destination_mask & (1 << destination_channel)
+            if destination_write_mask & (1 << destination_channel)
             for component in components
         }
         channels = tuple(sorted(channels_set))
-    elif opcode == 16:  # LIT: src.z is ignored; x/y/w feed only dest.y/z.
+    elif opcode == 16:  # LIT: src.z is ignored; src.w is the exponent for dest.z.
         destination_mask = destination_mask_fn(ins.operands[0])
         required = set()
         if destination_mask & (1 << 1):
             required.add(0)  # dest.y <- src.x
         if destination_mask & (1 << 2):
-            required.update((0, 1))  # dest.z <- src.x, src.y
+            required.update((0, 1, 3))  # dest.z <- src.x, src.y, src.w
         channels = tuple(sorted(required))
     elif opcode == 17:  # DST has distinct component dependencies per source.
         destination_mask = destination_mask_fn(ins.operands[0])
@@ -1434,6 +1434,20 @@ def _self_test() -> None:
     lit_ignored_only = audit_vs3_bytes(shader(*lit_ignored_only_words))
     assert lit_ignored_only["structural_candidate_for_manual_lowering"] is True
 
+    lit_z_missing_exponent_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1, 0x3), make_source_token(REG_INPUT, 0)),
+        *make_instruction(
+            16,
+            make_dest_token(REG_TEMP, 0, 0x4),
+            make_source_token(REG_TEMP, 1),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    lit_z_missing_exponent = audit_vs3_bytes(shader(*lit_z_missing_exponent_words))
+    assert any("reads r1.w" in reason for reason in lit_z_missing_exponent["reasons"])
+
     # DST uses source-specific channels and ignores the other components.
     dst_component_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1689,6 +1703,24 @@ def _self_test() -> None:
     ]
     crs_alias = audit_vs3_bytes(shader(*crs_alias_words))
     assert any("destination aliases src0" in reason for reason in crs_alias["reasons"])
+
+    crs_component_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1, 0x2), make_source_token(REG_INPUT, 0, 0x55)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1, 0x4), make_source_token(REG_INPUT, 0, 0xAA)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 2, 0x2), make_source_token(REG_INPUT, 0, 0x55)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 2, 0x4), make_source_token(REG_INPUT, 0, 0xAA)),
+        *make_instruction(
+            33,
+            make_dest_token(REG_TEMP, 0, 0x1),
+            make_source_token(REG_TEMP, 1),
+            make_source_token(REG_TEMP, 2),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    crs_component = audit_vs3_bytes(shader(*crs_component_words))
+    assert crs_component["structural_candidate_for_manual_lowering"] is True
 
     nrm_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
