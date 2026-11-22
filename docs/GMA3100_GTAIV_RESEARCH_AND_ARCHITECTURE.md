@@ -248,13 +248,14 @@ This remains an instrumentation/analysis foundation, not an installable playable
 The development branch `feature/vs3-vs2-vertex-audit` adds a read-only structural audit for `vs_3_0` bytecode. It uses the documented baseline `vs_2_0` constraints: 256 instruction slots, 12 temporary registers, 16 input registers, at least 256 float constants, and fixed output classes (position, fog, point size, two colors and eight texture-coordinate outputs). The tool checks a limited straight-line subset and produces a semantic output-mapping plan; it does not emit replacement bytecode.
 
 The initial subset explicitly rejects:
-- Static flow control until the IF/loop/subroutine structure and cost can be validated.
+- Static flow control until the IF/loop/subroutine structure and cost can be validated. The parser still validates the two-parameter D3D9 `LOOP aL, i#` instruction form and instruction slot count before rejecting it.
 - The two-operand VS3 `sincos` form, because VS2 uses a different four-operand form.
 - Vertex texture sampling, predicate registers and VS3-only instructions.
 - Relative register addressing and pre-transformed `POSITIONT` outputs.
+- `MOV` writes to `a0`; VS2 requires `MOVA` for address-register writes.
 - Missing writes to the required full-width position output.
 
-The output interface is not treated as a one-source-register/one-destination-register mapping. VS3 permits distinct semantics to occupy disjoint component masks of one output register. The audit retains these declarations as separate entries, checks that masks do not overlap and that repeated semantic identifiers are not used, then assigns each semantic to one of the ten generic VS2 outputs (`oD0/oD1`, `oT0-oT7`). Standard `COLOR0/1` and `TEXCOORD0-7` mappings are preserved where possible; other semantics (including VS3 `FOG`) are remapped and flagged so a paired pixel-shader input rewrite is required. Position and point size remain special outputs. The analyzer makes no claim that this interface rewrite has been implemented in bytecode.
+The output interface is not treated as a one-source-register/one-destination-register mapping. VS3 permits distinct semantics to occupy disjoint component masks of one output register. The audit retains these declarations as separate entries, checks that masks do not overlap and that repeated semantic identifiers are not used, then assigns each semantic to one of the ten generic VS2 outputs (`oD0/oD1`, `oT0-oT7`). Standard `COLOR0/1` mappings are preserved. TEXCOORD semantics are compacted in sorted order into consecutive `oT0-oT7` slots; dense sequences retain their original indices, while sparse sequences such as only `TEXCOORD1` are mapped to `oT0` and flagged for a paired pixel-shader DCL rewrite. Other semantics (including VS3 `FOG`) are allocated to remaining VS2 color/texture outputs and flagged for the same reason. Position and point size remain special outputs. The analyzer makes no claim that these interface rewrites have been implemented in bytecode.
 
 This analyzer is a triage tool for future shader-family work, not a translator or compatibility fix. The CI fixtures are synthetic. No claim is made about the actual GTA IV vertex-shader inventory or GMA 3100 driver.
 
