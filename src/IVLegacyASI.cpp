@@ -91,6 +91,23 @@ namespace
     volatile LONG g_materialStateLogCount = 0;
     volatile LONG g_textureCreateLogCount = 0;
     volatile LONG g_bufferCreateLogCount = 0;
+    struct SurfaceSnapshot
+    {
+        PVOID volatile object;
+        volatile LONG width;
+        volatile LONG height;
+        volatile LONG format;
+        volatile LONG type;
+        volatile LONG usage;
+        volatile LONG pool;
+        volatile LONG multisampleType;
+        volatile LONG multisampleQuality;
+        volatile LONG known;
+    };
+
+    SurfaceSnapshot g_renderTargetSnapshots[4] = {};
+    SurfaceSnapshot g_depthStencilSnapshot = {};
+
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
     PVOID volatile g_currentTextures[16] = {};
@@ -290,6 +307,117 @@ namespace
 
         InterlockedExchange(&g_logLock, 0);
         OutputDebugStringA(line);
+    }
+
+    void UpdateSurfaceSnapshot(
+        SurfaceSnapshot* snapshot,
+        IDirect3DSurface9* surface,
+        const D3DSURFACE_DESC* description)
+    {
+        if (!snapshot)
+            return;
+
+        InterlockedExchange(&snapshot->known, 0);
+        InterlockedExchangePointer(&snapshot->object, surface);
+        InterlockedExchange(
+            &snapshot->width,
+            description ? static_cast<LONG>(description->Width) : 0);
+        InterlockedExchange(
+            &snapshot->height,
+            description ? static_cast<LONG>(description->Height) : 0);
+        InterlockedExchange(
+            &snapshot->format,
+            description ? static_cast<LONG>(description->Format) : 0);
+        InterlockedExchange(
+            &snapshot->type,
+            description ? static_cast<LONG>(description->Type) : 0);
+        InterlockedExchange(
+            &snapshot->usage,
+            description ? static_cast<LONG>(description->Usage) : 0);
+        InterlockedExchange(
+            &snapshot->pool,
+            description ? static_cast<LONG>(description->Pool) : 0);
+        InterlockedExchange(
+            &snapshot->multisampleType,
+            description ? static_cast<LONG>(description->MultiSampleType) : 0);
+        InterlockedExchange(
+            &snapshot->multisampleQuality,
+            description ? static_cast<LONG>(description->MultiSampleQuality) : 0);
+        InterlockedExchange(&snapshot->known, 1);
+    }
+
+    void ClearSurfaceSnapshot(SurfaceSnapshot* snapshot)
+    {
+        if (snapshot)
+            InterlockedExchange(&snapshot->known, 0);
+    }
+
+    BOOL FormatSurfaceSnapshot(
+        SurfaceSnapshot* snapshot,
+        char* output,
+        size_t outputCount,
+        BOOL includeIndex,
+        DWORD index)
+    {
+        if (!snapshot || !output || outputCount == 0 ||
+            InterlockedCompareExchange(&snapshot->known, 0, 0) == 0)
+        {
+            if (output && outputCount)
+                output[0] = '\0';
+            return FALSE;
+        }
+
+        const PVOID object =
+            InterlockedCompareExchangePointer(&snapshot->object, NULL, NULL);
+        const DWORD width = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->width, 0, 0));
+        const DWORD height = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->height, 0, 0));
+        const DWORD format = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->format, 0, 0));
+        const DWORD type = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->type, 0, 0));
+        const DWORD usage = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->usage, 0, 0));
+        const DWORD pool = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->pool, 0, 0));
+        const DWORD multisampleType = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->multisampleType, 0, 0));
+        const DWORD multisampleQuality = static_cast<DWORD>(
+            InterlockedCompareExchange(&snapshot->multisampleQuality, 0, 0));
+
+        if (includeIndex)
+        {
+            _snprintf_s(
+                output, outputCount, _TRUNCATE,
+                "%lu:%p:%lu:%lu:%lu:%lu:%lu:%lu:%lu:%lu",
+                static_cast<unsigned long>(index),
+                object,
+                static_cast<unsigned long>(width),
+                static_cast<unsigned long>(height),
+                static_cast<unsigned long>(format),
+                static_cast<unsigned long>(type),
+                static_cast<unsigned long>(usage),
+                static_cast<unsigned long>(pool),
+                static_cast<unsigned long>(multisampleType),
+                static_cast<unsigned long>(multisampleQuality));
+        }
+        else
+        {
+            _snprintf_s(
+                output, outputCount, _TRUNCATE,
+                "%p:%lu:%lu:%lu:%lu:%lu:%lu:%lu:%lu",
+                object,
+                static_cast<unsigned long>(width),
+                static_cast<unsigned long>(height),
+                static_cast<unsigned long>(format),
+                static_cast<unsigned long>(type),
+                static_cast<unsigned long>(usage),
+                static_cast<unsigned long>(pool),
+                static_cast<unsigned long>(multisampleType),
+                static_cast<unsigned long>(multisampleQuality));
+        }
+        return TRUE;
     }
 
     bool GetShaderBytecodeInfo(
@@ -842,6 +970,9 @@ namespace
             InterlockedExchangePointer(&g_currentVertexDeclaration, NULL);
             InterlockedExchangePointer(&g_currentIndexBuffer, NULL);
             InterlockedExchange(&g_currentFVF, 0);
+            for (DWORD target = 0; target < _countof(g_renderTargetSnapshots); ++target)
+                ClearSurfaceSnapshot(&g_renderTargetSnapshots[target]);
+            ClearSurfaceSnapshot(&g_depthStencilSnapshot);
             for (DWORD stream = 0; stream < 16; ++stream)
             {
                 InterlockedExchangePointer(&g_streamBuffers[stream], NULL);
@@ -958,26 +1089,51 @@ namespace
         IDirect3DDevice9* self,
         IDirect3DSurface9* surface)
     {
-        if (surface && InterlockedIncrement(&g_setDepthTargetLogCount) <= 512)
+        const LONG logSequence = InterlockedIncrement(&g_setDepthTargetLogCount);
+        D3DSURFACE_DESC desc = {};
+        BOOL hasDescription = FALSE;
+        if (surface && (g_drawTelemetryEnabled || logSequence <= 512))
+            hasDescription = SUCCEEDED(surface->GetDesc(&desc));
+
+        const HRESULT hr = g_realDeviceSetDepthStencilSurface
+            ? g_realDeviceSetDepthStencilSurface(self, surface)
+            : D3DERR_INVALIDCALL;
+
+        if (SUCCEEDED(hr) && g_drawTelemetryEnabled)
+            UpdateSurfaceSnapshot(
+                &g_depthStencilSnapshot,
+                surface,
+                hasDescription ? &desc : NULL);
+
+        if (logSequence <= 512)
         {
-            D3DSURFACE_DESC desc = {};
-            const HRESULT descHr = surface->GetDesc(&desc);
-            if (SUCCEEDED(descHr))
+            if (surface && hasDescription)
             {
                 Log(
-                    "SET_DEPTH_STENCIL_SURFACE width=%u height=%u format=%u",
-                    desc.Width, desc.Height, static_cast<unsigned>(desc.Format));
+                    "SET_DEPTH_STENCIL_SURFACE object=%p width=%u height=%u "
+                    "format=%u type=%u usage=0x%08lX pool=%u multisample=%u "
+                    "quality=%lu hr=0x%08lX",
+                    surface,
+                    desc.Width,
+                    desc.Height,
+                    static_cast<unsigned>(desc.Format),
+                    static_cast<unsigned>(desc.Type),
+                    static_cast<unsigned long>(desc.Usage),
+                    static_cast<unsigned>(desc.Pool),
+                    static_cast<unsigned>(desc.MultiSampleType),
+                    static_cast<unsigned long>(desc.MultiSampleQuality),
+                    static_cast<unsigned long>(hr));
             }
             else
             {
-                Log("SET_DEPTH_STENCIL_SURFACE desc_hr=0x%08lX",
-                    static_cast<unsigned long>(descHr));
+                Log(
+                    "SET_DEPTH_STENCIL_SURFACE object=%p desc_available=%u hr=0x%08lX",
+                    surface,
+                    hasDescription ? 1 : 0,
+                    static_cast<unsigned long>(hr));
             }
         }
-
-        return g_realDeviceSetDepthStencilSurface
-            ? g_realDeviceSetDepthStencilSurface(self, surface)
-            : D3DERR_INVALIDCALL;
+        return hr;
     }
 
     HRESULT WINAPI HookDeviceSetRenderTarget(
@@ -985,40 +1141,56 @@ namespace
         DWORD index,
         IDirect3DSurface9* surface)
     {
-        if (InterlockedIncrement(&g_setRenderTargetLogCount) <= 512)
+        const LONG logSequence = InterlockedIncrement(&g_setRenderTargetLogCount);
+        D3DSURFACE_DESC desc = {};
+        BOOL hasDescription = FALSE;
+        if (surface && (g_drawTelemetryEnabled || logSequence <= 512))
+            hasDescription = SUCCEEDED(surface->GetDesc(&desc));
+
+        const HRESULT hr = g_realDeviceSetRenderTarget
+            ? g_realDeviceSetRenderTarget(self, index, surface)
+            : D3DERR_INVALIDCALL;
+
+        if (SUCCEEDED(hr) && g_drawTelemetryEnabled &&
+            index < _countof(g_renderTargetSnapshots))
         {
-            if (surface)
+            UpdateSurfaceSnapshot(
+                &g_renderTargetSnapshots[index],
+                surface,
+                hasDescription ? &desc : NULL);
+        }
+
+        if (logSequence <= 512)
+        {
+            if (surface && hasDescription)
             {
-                D3DSURFACE_DESC desc = {};
-                const HRESULT descHr = surface->GetDesc(&desc);
-                if (SUCCEEDED(descHr))
-                {
-                    Log(
-                        "SET_RENDER_TARGET index=%lu width=%u height=%u "
-                        "format=%u type=%u",
-                        static_cast<unsigned long>(index),
-                        desc.Width, desc.Height,
-                        static_cast<unsigned>(desc.Format),
-                        static_cast<unsigned>(desc.Type));
-                }
-                else
-                {
-                    Log(
-                        "SET_RENDER_TARGET index=%lu desc_hr=0x%08lX",
-                        static_cast<unsigned long>(index),
-                        static_cast<unsigned long>(descHr));
-                }
+                Log(
+                    "SET_RENDER_TARGET index=%lu object=%p width=%u height=%u "
+                    "format=%u type=%u usage=0x%08lX pool=%u multisample=%u "
+                    "quality=%lu hr=0x%08lX",
+                    static_cast<unsigned long>(index),
+                    surface,
+                    desc.Width,
+                    desc.Height,
+                    static_cast<unsigned>(desc.Format),
+                    static_cast<unsigned>(desc.Type),
+                    static_cast<unsigned long>(desc.Usage),
+                    static_cast<unsigned>(desc.Pool),
+                    static_cast<unsigned>(desc.MultiSampleType),
+                    static_cast<unsigned long>(desc.MultiSampleQuality),
+                    static_cast<unsigned long>(hr));
             }
             else
             {
-                Log("SET_RENDER_TARGET index=%lu surface=NULL",
-                    static_cast<unsigned long>(index));
+                Log(
+                    "SET_RENDER_TARGET index=%lu object=%p desc_available=%u hr=0x%08lX",
+                    static_cast<unsigned long>(index),
+                    surface,
+                    hasDescription ? 1 : 0,
+                    static_cast<unsigned long>(hr));
             }
         }
-
-        return g_realDeviceSetRenderTarget
-            ? g_realDeviceSetRenderTarget(self, index, surface)
-            : D3DERR_INVALIDCALL;
+        return hr;
     }
 
     void LogShaderObject(
@@ -2291,6 +2463,41 @@ namespace
             InterlockedCompareExchangePointer(&g_currentVertexDeclaration, NULL, NULL);
         PVOID indexBuffer =
             InterlockedCompareExchangePointer(&g_currentIndexBuffer, NULL, NULL);
+        char renderTargetBindings[512] = {};
+        size_t renderTargetOffset = 0;
+        for (DWORD target = 0; target < _countof(g_renderTargetSnapshots); ++target)
+        {
+            char targetBinding[128] = {};
+            if (!FormatSurfaceSnapshot(
+                    &g_renderTargetSnapshots[target],
+                    targetBinding,
+                    _countof(targetBinding),
+                    TRUE,
+                    target))
+                continue;
+
+            const int appended = _snprintf_s(
+                renderTargetBindings + renderTargetOffset,
+                _countof(renderTargetBindings) - renderTargetOffset,
+                _TRUNCATE,
+                "%s;",
+                targetBinding);
+            if (appended < 0)
+                break;
+            renderTargetOffset += static_cast<size_t>(appended);
+            if (renderTargetOffset >= _countof(renderTargetBindings) - 1)
+                break;
+        }
+        char depthTargetBinding[192] = "unknown";
+        FormatSurfaceSnapshot(
+            &g_depthStencilSnapshot,
+            depthTargetBinding,
+            _countof(depthTargetBinding),
+            FALSE,
+            0);
+        if (depthTargetBinding[0] == '\\0')
+            strcpy_s(depthTargetBinding, _countof(depthTargetBinding), "unknown");
+
         const DWORD currentFVF = static_cast<DWORD>(
             InterlockedCompareExchange(&g_currentFVF, 0, 0));
 
@@ -2357,7 +2564,8 @@ namespace
             "DRAW_CALL seq=%ld frame=%ld kind=%s device=%p primitive=%u primitives=%u "
             "start_vertex=%u base_vertex=%ld min_vertex=%u num_vertices=%u "
             "start_index=%u bound_vs=%p bound_ps=%p vertex_decl=%p fvf=0x%08lX "
-            "index_buffer=%p streams=%s textures=%s sampler_hash=%016llX "
+            "index_buffer=%p streams=%s textures=%s render_targets=%s "
+            "depth_target=%s sampler_hash=%016llX "
             "sampler_count=%lu render_state_hash=%016llX render_state_count=%lu "
             "texture_stage_hash=%016llX texture_stage_count=%lu hr=0x%08lX",
             sequence,
@@ -2378,6 +2586,8 @@ namespace
             indexBuffer,
             streamBindings,
             textureBindings,
+            renderTargetBindings,
+            depthTargetBinding,
             samplerHash,
             static_cast<unsigned long>(samplerStateCount),
             renderStateHash,
