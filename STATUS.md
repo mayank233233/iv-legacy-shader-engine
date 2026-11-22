@@ -361,3 +361,13 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Hook assessment distinguishes a normal-IAT candidate, delay-only import, normal import with zero `OriginalFirstThunk`, and a mixed normal-plus-delay case. It explicitly warns that the normal path is only a static candidate; runtime use and ASI load timing still require verification.
 - Added self-tests for supported normal imports, delay-only imports, zero-`OriginalFirstThunk` imports, and mixed import paths. The existing Windows x86 workflow already runs this tool's `--self-test`.
 - This is an inspector/reporting correction only. It does not inspect the user's installed `GTAIV.exe`, change the ASI hook, or establish the game's actual import path.
+
+## D3D9 import inspector validation — follow-up audit — 2026-11-22
+
+- GitHub Actions run [#260](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45001827118) passed both jobs on commit `1e0320359d7dac978028493ae438203eb26cf4f6`. The Windows x86 job passed inspector/source sanity, all six SM2 shader compiles, x86 probe and ASI builds, the synthetic D3D9 runtime smoke test, captured-shader inventory, artifact staging and upload.
+- Artifact: `iv-legacy-shader-engine-windows-x86`, ID `14746287021`, 242,307 bytes. This is a hosted x86 build and synthetic test package, not a physical-GPU test.
+- Subsequent inspector-only commits extend the assessment for multiple `d3d9.dll` descriptors. A supported normal descriptor no longer hides other unhookable normal descriptors or unsupported delay-import paths.
+- The D3D9 import JSON now includes each imported entry's descriptor index, lookup-table RVA, exact IAT-entry RVA, and descriptor-level `OriginalFirstThunk` / `FirstThunk` RVAs.
+- Added self-tests for mixed supported/unhookable normal imports, mixed normal-plus-delay paths, both thunk RVAs missing, exact IAT-entry reporting, and the unhookable-import count without double counting.
+- The current ASI implementation itself remains unchanged: it scans the main executable's normal import table and requires a nonzero `OriginalFirstThunk`; this tool only diagnoses the static import table and never edits the game.
+- Commits after run #260 are awaiting CI. No original `GTAIV.exe` import report, ASI-loaded real-game session, real GMA 3100 capability log, game rendering or FPS result is available.
