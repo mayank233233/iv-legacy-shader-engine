@@ -102,6 +102,7 @@ namespace
     volatile LONG g_stateCacheWindowFrameCount = 0;
     volatile LONG g_stateCacheLock = 0;
     PVOID volatile g_stateCacheDevice = NULL;
+    DWORD g_stateCacheThreadId = 0;
     volatile LONG64 g_stateCacheForwarded[3] = {};
     volatile LONG64 g_stateCacheSkipped[3] = {};
     BOOL g_frameProfilerEnabled = FALSE;
@@ -384,6 +385,7 @@ namespace
                 InterlockedExchange(&g_samplerStateKnown[stage][state], 0);
         }
         InterlockedExchangePointer(&g_stateCacheDevice, device);
+        g_stateCacheThreadId = 0;
         InterlockedExchange(&g_stateCacheWindowFrameCount, 0);
         for (LONG index = 0; index < 3; ++index)
         {
@@ -397,6 +399,26 @@ namespace
         AcquireStateCacheLock();
         InvalidateStateCacheLocked(device);
         ReleaseStateCacheLock();
+    }
+
+    BOOL VerifyStateCacheThreadLocked(BOOL* disabled)
+    {
+        if (disabled)
+            *disabled = FALSE;
+        const DWORD threadId = GetCurrentThreadId();
+        if (g_stateCacheThreadId == 0)
+        {
+            g_stateCacheThreadId = threadId;
+            return TRUE;
+        }
+        if (g_stateCacheThreadId == threadId)
+            return TRUE;
+
+        g_redundantStateCacheEnabled = FALSE;
+        InvalidateStateCacheLocked(NULL);
+        if (disabled)
+            *disabled = TRUE;
+        return FALSE;
     }
 
     void DisableRedundantStateCacheForStateBlock()
@@ -424,6 +446,14 @@ namespace
         if (!g_redundantStateCacheEnabled || g_stateCacheDevice != device)
         {
             ReleaseStateCacheLock();
+            return;
+        }
+        BOOL disabledForThreadChange = FALSE;
+        if (!VerifyStateCacheThreadLocked(&disabledForThreadChange))
+        {
+            ReleaseStateCacheLock();
+            if (disabledForThreadChange)
+                Log("STATE_CACHE_DISABLED reason=multiple_device_threads");
             return;
         }
 
@@ -502,6 +532,22 @@ namespace
 
         if (g_stateCacheDevice != self)
             InvalidateStateCacheLocked(self);
+        BOOL disabledForThreadChange = FALSE;
+        if (!VerifyStateCacheThreadLocked(&disabledForThreadChange))
+        {
+            ReleaseStateCacheLock();
+            if (disabledForThreadChange)
+                Log("STATE_CACHE_DISABLED reason=multiple_device_threads");
+            const HRESULT hr = g_realDeviceSetRenderState
+                ? g_realDeviceSetRenderState(self, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchange(&g_renderStates[index], static_cast<LONG>(value));
+                InterlockedExchange(&g_renderStateKnown[index], 1);
+            }
+            return hr;
+        }
         const BOOL known = InterlockedCompareExchange(
             &g_renderStateKnown[index], 0, 0) != 0;
         const DWORD current = static_cast<DWORD>(InterlockedCompareExchange(
@@ -572,6 +618,22 @@ namespace
 
         if (g_stateCacheDevice != self)
             InvalidateStateCacheLocked(self);
+        BOOL disabledForThreadChange = FALSE;
+        if (!VerifyStateCacheThreadLocked(&disabledForThreadChange))
+        {
+            ReleaseStateCacheLock();
+            if (disabledForThreadChange)
+                Log("STATE_CACHE_DISABLED reason=multiple_device_threads");
+            const HRESULT hr = g_realDeviceSetTextureStageState
+                ? g_realDeviceSetTextureStageState(self, stage, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchange(&g_textureStageStates[stage][index], static_cast<LONG>(value));
+                InterlockedExchange(&g_textureStageStateKnown[stage][index], 1);
+            }
+            return hr;
+        }
         const BOOL known = InterlockedCompareExchange(
             &g_textureStageStateKnown[stage][index], 0, 0) != 0;
         const DWORD current = static_cast<DWORD>(InterlockedCompareExchange(
@@ -642,6 +704,22 @@ namespace
 
         if (g_stateCacheDevice != self)
             InvalidateStateCacheLocked(self);
+        BOOL disabledForThreadChange = FALSE;
+        if (!VerifyStateCacheThreadLocked(&disabledForThreadChange))
+        {
+            ReleaseStateCacheLock();
+            if (disabledForThreadChange)
+                Log("STATE_CACHE_DISABLED reason=multiple_device_threads");
+            const HRESULT hr = g_realDeviceSetSamplerState
+                ? g_realDeviceSetSamplerState(self, sampler, state, value)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchange(&g_samplerStates[sampler][index], static_cast<LONG>(value));
+                InterlockedExchange(&g_samplerStateKnown[sampler][index], 1);
+            }
+            return hr;
+        }
         const BOOL known = InterlockedCompareExchange(
             &g_samplerStateKnown[sampler][index], 0, 0) != 0;
         const DWORD current = static_cast<DWORD>(InterlockedCompareExchange(
