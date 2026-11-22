@@ -60,6 +60,7 @@ namespace
         kDeviceCreateVolumeTextureSlot = 24,
         kDeviceCreateCubeTextureSlot = 25,
         kDeviceSetRenderStateSlot = 57,
+        kDeviceGetRenderStateSlot = 58,
         kDeviceCreateStateBlockSlot = 59,
         kDeviceBeginStateBlockSlot = 60,
         kDeviceEndStateBlockSlot = 61,
