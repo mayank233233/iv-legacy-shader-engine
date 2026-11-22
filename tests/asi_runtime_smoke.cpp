@@ -240,6 +240,10 @@ namespace
         caps->MaxSimultaneousTextures = 2;
         caps->MaxTextureBlendStages = 2;
         caps->NumSimultaneousRTs = 1;
+        caps->DevCaps = D3DDEVCAPS_HWTRANSFORMANDLIGHT;
+        caps->VertexProcessingCaps = D3DVTXPCAPS_TEXGEN;
+        caps->MaxStreams = 16;
+        caps->MaxStreamStride = 255;
         caps->MaxVertexShaderConst = 96;
         caps->VertexShaderVersion = D3DVS_VERSION(2, 0);
         caps->PixelShaderVersion = D3DPS_VERSION(2, 0);
@@ -798,6 +802,10 @@ int main()
     WritePrivateProfileStringW(
         L"General", L"CaptureDrawMaxCalls", L"8", iniPath);
     WritePrivateProfileStringW(
+        L"General", L"EnableFrameProfiler", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"FrameProfilerWindowFrames", L"1", iniPath);
+    WritePrivateProfileStringW(
         L"General", L"CaptureShaderConstants", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"CaptureShaderConstantMaxRecords", L"16", iniPath);
@@ -1093,6 +1101,9 @@ int main()
     const HRESULT drawIndexedPrimitiveUPHr = device->DrawIndexedPrimitiveUP(
         D3DPT_TRIANGLELIST, 0, 3, 1, NULL, D3DFMT_INDEX16,
         NULL, sizeof(float) * 3);
+    const HRESULT profilerPresentHr = device->Present(NULL, NULL, NULL, NULL);
+    if (FAILED(profilerPresentHr))
+        return Fail("Frame-profiler verification Present call failed");
 
     if (vertexBytecode)
         HeapFree(GetProcessHeap(), 0, vertexBytecode);
@@ -1126,8 +1137,9 @@ int main()
         return Fail("Direct3DCreate9 wrapper was not called");
     if (!HasText("D3D9_ADAPTER"))
         return Fail("IDirect3D9::GetAdapterIdentifier hook was not observed");
-    if (!HasText("D3D9_GET_DEVICE_CAPS"))
-        return Fail("IDirect3D9::GetDeviceCaps hook was not observed");
+    if (!HasText("D3D9_GET_DEVICE_CAPS") ||
+        !HasText("HWTransformAndLight=1"))
+        return Fail("IDirect3D9 capability audit did not record the synthetic HW T&L bit");
     if (!HasText("D3D9_CHECK_DEVICE_FORMAT"))
         return Fail("IDirect3D9::CheckDeviceFormat hook was not observed");
     if (!HasText("D3D9_CHECK_DEPTH_MATCH"))
@@ -1139,6 +1151,8 @@ int main()
 
     if (!HasText("DEVICE_GET_DEVICE_CAPS"))
         return Fail("IDirect3DDevice9::GetDeviceCaps hook was not observed");
+    if (!HasText("request_software_vp=1"))
+        return Fail("CreateDevice did not record the requested software vertex-processing mode");
     if (!HasText("DEVICE_RESET_REQUEST") || !HasText("DEVICE_RESET_RESULT"))
         return Fail("IDirect3DDevice9::Reset hook was not observed");
     if (!HasText("CREATE_RENDER_TARGET") || !HasText("CREATE_DEPTH_STENCIL_SURFACE"))
@@ -1164,6 +1178,11 @@ int main()
     if (!HasText("SHADER_OBJECT_CREATED stage=VS") ||
         !HasText("SHADER_OBJECT_CREATED stage=PS"))
         return Fail("Shader object-to-bytecode hash correlation was not logged");
+    if (!HasText("FRAME_PROFILER_ENABLED") ||
+        !HasText("FRAME_PROFILE_WINDOW samples=1") ||
+        !HasText("avg_draw_calls=4.00") ||
+        !HasText("gpu_time=not_measured"))
+        return Fail("Frame-profiler summary did not record the synthetic frame and four draw calls");
     if (!HasText("DRAW_TELEMETRY_ENABLED") ||
         !HasText("frame=1") ||
         !HasText("kind=DrawPrimitive") ||
