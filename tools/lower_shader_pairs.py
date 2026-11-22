@@ -377,8 +377,8 @@ def build_pair_records(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("log", type=Path, help="IVLegacy.log from one capture session")
-    parser.add_argument("captures", type=Path, help="Matching IVLegacyCaptures directory")
+    parser.add_argument("log", nargs="?", type=Path, help="IVLegacy.log from one capture session")
+    parser.add_argument("captures", nargs="?", type=Path, help="Matching IVLegacyCaptures directory")
     parser.add_argument("--emit-dir", type=Path, help="Write paired VS2/PS2 candidates here")
     parser.add_argument("--fallback-ini", type=Path, help="Merge explicitly approved pairs into both runtime map sections")
     parser.add_argument("--fallback-prefix", default="IVLegacyFallbacks")
@@ -397,6 +397,8 @@ def main() -> int:
         parser.error("--fallback-ini requires --emit-dir")
     if args.approved_pair and not args.fallback_ini:
         parser.error("--approved-pair requires --fallback-ini")
+    if args.log is None or args.captures is None:
+        parser.error("log and captures are required unless --self-test is used")
     if not args.log.is_file():
         parser.error(f"log file does not exist: {args.log}")
     if not args.captures.is_dir():
