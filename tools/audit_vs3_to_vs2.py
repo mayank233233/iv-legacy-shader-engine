@@ -427,6 +427,26 @@ def audit_vs3_bytes(
                 and opcode not in (25, 26, 27, 28, 29, 30, 38, 39, 40, 42, 43)
             )
 
+            if is_destination:
+                if opcode == OP_DEF and register_type != REG_CONST:
+                    reasons.append(f"DEF at DWORD {ins.offset} must target a float constant register")
+                elif opcode == OP_DEFB and register_type != REG_CONSTBOOL:
+                    reasons.append(f"DEFB at DWORD {ins.offset} must target a boolean constant register")
+                elif opcode == OP_DEFI and register_type != REG_CONSTINT:
+                    reasons.append(f"DEFI at DWORD {ins.offset} must target an integer constant register")
+                elif opcode == 46 and register_type != REG_ADDR:
+                    reasons.append(f"MOVA at DWORD {ins.offset} must target address register a0")
+                elif opcode != 46 and register_type == REG_ADDR:
+                    reasons.append(f"{name} at DWORD {ins.offset} may not write address register a0")
+                elif opcode not in (OP_DEF, OP_DEFB, OP_DEFI) and register_type in (
+                    REG_INPUT, REG_CONST, REG_CONSTINT, REG_CONSTBOOL,
+                    REG_LOOP, REG_SAMPLER, REG_LABEL, REG_PREDICATE,
+                ):
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} writes read-only or unsupported "
+                        f"register type {register_type}"
+                    )
+
             if register_type == REG_TEMP:
                 registers["temp"].add(register_number)
                 if register_number >= max_temps:
