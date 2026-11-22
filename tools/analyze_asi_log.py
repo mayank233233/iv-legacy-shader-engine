@@ -170,8 +170,8 @@ def analyze_log(path: Path) -> dict[str, Any]:
             except (IndexError, ValueError):
                 driver_version_high = 0
                 driver_version_low = 0
-            description_match = re.search(r"\\bdescription=(.*?)\\s+driver=", raw_line)
-            driver_match = re.search(r"\\bdriver=(.*?)\\s*$", raw_line)
+            description_match = re.search(r"\bdescription=(.*?)\s+driver=", raw_line)
+            driver_match = re.search(r"\bdriver=(.*?)\s*$", raw_line)
             if adapter_index >= 0:
                 adapters_by_index[adapter_index] = {
                     "adapter": adapter_index,
