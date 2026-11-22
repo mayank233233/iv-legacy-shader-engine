@@ -408,7 +408,7 @@ def audit_vs3_bytes(
     for ins in instructions:
         if ins.opcode in setup_opcodes:
             if seen_executable:
-                setup_name = VS2_OPCODE_NAMES.get(ins.opcode, "setup instruction")
+                setup_name = VS2_OPCODE_NAMES.get(ins.opcode, "setup instruction").upper()
                 reasons.append(
                     f"{setup_name} at DWORD {ins.offset} appears after the first executable instruction"
                 )
