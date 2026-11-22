@@ -1114,9 +1114,18 @@ def _self_test() -> None:
         words = [VS3_VERSION, *instruction_words, OP_END]
         return struct.pack("<" + "I" * len(words), *words)
 
-    def dcl(usage: int, register_type: int, register: int, usage_index: int = 0) -> list[int]:
+    def dcl(
+        usage: int,
+        register_type: int,
+        register: int,
+        usage_index: int = 0,
+        component_mask: int = 0xF,
+    ) -> list[int]:
         declaration = 0x80000000 | (usage & 0xF) | ((usage_index & 0xF) << 16)
-        return make_instruction(OP_DCL, declaration, make_dest_token(register_type, register))
+        return make_instruction(
+            OP_DCL, declaration,
+            make_dest_token(register_type, register, component_mask),
+        )
 
     basic_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1477,7 +1486,7 @@ def _self_test() -> None:
     texcoord_mask_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1, component_mask=0x5),
         *dcl(USAGE_COLOR, REG_OUTPUT, 2, usage_index=0),
         *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=1),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
@@ -1493,7 +1502,7 @@ def _self_test() -> None:
     sparse_texcoord_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1, component_mask=0x5),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0x5), make_source_token(REG_INPUT, 0)),
     ]
