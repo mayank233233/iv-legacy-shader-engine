@@ -1993,23 +1993,112 @@ namespace
         const DWORD* function,
         IDirect3DVertexShader9** shader)
     {
-        const HRESULT hr = g_realDeviceCreateVertexShader
-            ? g_realDeviceCreateVertexShader(self, function, shader)
-            : D3DERR_INVALIDCALL;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        BYTE* fallbackBytes = NULL;
+        DWORD fallbackByteCount = 0;
+        DWORD sourceVersion = 0;
+        DWORD sourceByteCount = 0;
+        unsigned __int64 sourceHash = 0;
+        BOOL fallbackObjectLogged = FALSE;
+        wchar_t fallbackPath[MAX_PATH] = {};
+
+        const bool validSource = GetShaderBytecodeInfo(
+            function, FALSE, &sourceVersion, &sourceByteCount, &sourceHash);
+        if (g_realDeviceCreateVertexShader &&
+            g_shaderFallbacksEnabled &&
+            validSource &&
+            sourceVersion == 0xFFFE0300UL &&
+            LoadConfiguredVS2Fallback(
+                sourceHash,
+                &fallbackBytes,
+                &fallbackByteCount,
+                fallbackPath,
+                _countof(fallbackPath)))
+        {
+            Log(
+                "VERTEX_SHADER_FALLBACK_ATTEMPT source_hash=%016llX source_bytes=%lu "
+                "fallback_bytes=%lu path=%ls",
+                sourceHash,
+                static_cast<unsigned long>(sourceByteCount),
+                static_cast<unsigned long>(fallbackByteCount),
+                fallbackPath);
+
+            hr = g_realDeviceCreateVertexShader(
+                self,
+                reinterpret_cast<const DWORD*>(fallbackBytes),
+                shader);
+            if (SUCCEEDED(hr))
+            {
+                InterlockedIncrement(&g_shaderFallbackAppliedCount);
+
+                DWORD fallbackVersion = 0;
+                DWORD fallbackActualBytes = 0;
+                unsigned __int64 fallbackHash = 0;
+                const DWORD* actualBytecode =
+                    reinterpret_cast<const DWORD*>(fallbackBytes);
+                const bool validFallback = GetShaderBytecodeInfo(
+                    actualBytecode, FALSE,
+                    &fallbackVersion, &fallbackActualBytes, &fallbackHash);
+
+                Log(
+                    "VERTEX_SHADER_FALLBACK_APPLIED source_hash=%016llX target_hash=%016llX "
+                    "source_bytes=%lu target_bytes=%lu target_profile=vs_2_0 hr=0x%08lX",
+                    sourceHash,
+                    validFallback ? fallbackHash : 0ULL,
+                    static_cast<unsigned long>(sourceByteCount),
+                    static_cast<unsigned long>(fallbackActualBytes),
+                    static_cast<unsigned long>(hr));
+
+                if (shader && *shader)
+                {
+                    LogShaderObject("VS", FALSE, actualBytecode, hr, *shader);
+                    Log(
+                        "VERTEX_SHADER_FALLBACK_OBJECT_MAP object=%p source_hash=%016llX "
+                        "target_hash=%016llX target_profile=vs_2_0",
+                        *shader,
+                        sourceHash,
+                        validFallback ? fallbackHash : 0ULL);
+                    fallbackObjectLogged = TRUE;
+                }
+
+                CaptureShaderBytecode(L"VS_FALLBACK", FALSE, actualBytecode);
+            }
+            else
+            {
+                Log(
+                    "VERTEX_SHADER_FALLBACK_CREATE_FAILED source_hash=%016llX hr=0x%08lX; "
+                    "retrying original bytecode",
+                    sourceHash,
+                    static_cast<unsigned long>(hr));
+                if (shader)
+                    *shader = NULL;
+                hr = g_realDeviceCreateVertexShader(self, function, shader);
+            }
+
+            HeapFree(GetProcessHeap(), 0, fallbackBytes);
+        }
+        else
+        {
+            hr = g_realDeviceCreateVertexShader
+                ? g_realDeviceCreateVertexShader(self, function, shader)
+                : D3DERR_INVALIDCALL;
+        }
+
         LogShaderProfile("VS", function, hr);
-        if (SUCCEEDED(hr) && shader && *shader)
+        if (SUCCEEDED(hr) && shader && *shader && !fallbackObjectLogged)
             LogShaderObject("VS", FALSE, function, hr, *shader);
         CaptureShaderBytecode(L"VS", FALSE, function);
         return hr;
     }
 
-    bool ValidatePS20FallbackBytecode(
+    bool ValidateSM20FallbackBytecode(
         const DWORD* words,
-        DWORD byteCount)
+        DWORD byteCount,
+        DWORD expectedVersion)
     {
         if (!words || byteCount < sizeof(DWORD) * 2 ||
             (byteCount % sizeof(DWORD)) != 0 ||
-            words[0] != 0xFFFF0200UL)
+            words[0] != expectedVersion)
         {
             return false;
         }
@@ -2040,14 +2129,16 @@ namespace
         return false;
     }
 
-    bool LoadConfiguredPS2Fallback(
+    bool LoadConfiguredSM20Fallback(
+        const wchar_t* mappingSection,
+        DWORD expectedVersion,
         unsigned __int64 sourceHash,
         BYTE** fallbackBytes,
         DWORD* fallbackByteCount,
         wchar_t* resolvedPath,
         DWORD resolvedPathCount)
     {
-        if (!g_shaderFallbacksEnabled || !fallbackBytes ||
+        if (!g_shaderFallbacksEnabled || !mappingSection || !fallbackBytes ||
             !fallbackByteCount || !resolvedPath || resolvedPathCount == 0 ||
             g_shaderFallbackIniPath[0] == L'\0')
         {
@@ -2065,7 +2156,7 @@ namespace
 
         wchar_t relativePath[MAX_PATH] = {};
         const DWORD copied = GetPrivateProfileStringW(
-            L"ShaderFallbacks",
+            mappingSection,
             key,
             L"",
             relativePath,
@@ -2075,7 +2166,8 @@ namespace
         {
             const LONG misses = InterlockedIncrement(&g_shaderFallbackMissCount);
             if (misses <= 128)
-                Log("SHADER_FALLBACK_NOT_MAPPED source_hash=%016llX", sourceHash);
+                Log("SHADER_FALLBACK_NOT_MAPPED section=%ls source_hash=%016llX",
+                    mappingSection, sourceHash);
             return false;
         }
         if (copied >= _countof(relativePath) - 1)
@@ -2166,19 +2258,43 @@ namespace
         CloseHandle(file);
 
         if (!readSucceeded || bytesRead != byteCount ||
-            !ValidatePS20FallbackBytecode(
-                reinterpret_cast<const DWORD*>(buffer), byteCount))
+            !ValidateSM20FallbackBytecode(
+                reinterpret_cast<const DWORD*>(buffer), byteCount, expectedVersion))
         {
             HeapFree(GetProcessHeap(), 0, buffer);
             Log(
-                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=invalid_ps20_bytecode",
-                sourceHash);
+                "SHADER_FALLBACK_REJECTED source_hash=%016llX reason=invalid_sm2_bytecode profile=0x%08lX",
+                sourceHash, static_cast<unsigned long>(expectedVersion));
             return false;
         }
 
         *fallbackBytes = buffer;
         *fallbackByteCount = byteCount;
         return true;
+    }
+
+    bool LoadConfiguredPS2Fallback(
+        unsigned __int64 sourceHash,
+        BYTE** fallbackBytes,
+        DWORD* fallbackByteCount,
+        wchar_t* resolvedPath,
+        DWORD resolvedPathCount)
+    {
+        return LoadConfiguredSM20Fallback(
+            L"ShaderFallbacks", 0xFFFF0200UL, sourceHash,
+            fallbackBytes, fallbackByteCount, resolvedPath, resolvedPathCount);
+    }
+
+    bool LoadConfiguredVS2Fallback(
+        unsigned __int64 sourceHash,
+        BYTE** fallbackBytes,
+        DWORD* fallbackByteCount,
+        wchar_t* resolvedPath,
+        DWORD resolvedPathCount)
+    {
+        return LoadConfiguredSM20Fallback(
+            L"VertexShaderFallbacks", 0xFFFE0200UL, sourceHash,
+            fallbackBytes, fallbackByteCount, resolvedPath, resolvedPathCount);
     }
 
     HRESULT WINAPI HookDeviceCreatePixelShader(
