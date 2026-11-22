@@ -401,16 +401,18 @@ def audit_vs3_bytes(
         "sampler": set(), "output": set(),
     }
 
-    # DCL/setup instructions must precede executable instructions. The parser
-    # has already discarded COMMENT payloads, so this is a direct code-order check.
+    # Declaration and constant-definition setup instructions must precede
+    # executable instructions. COMMENT payloads are absent from this stream.
+    setup_opcodes = (OP_DCL, OP_DEF, OP_DEFB, OP_DEFI)
     seen_executable = False
     for ins in instructions:
-        if ins.opcode == OP_DCL:
+        if ins.opcode in setup_opcodes:
             if seen_executable:
+                setup_name = VS2_OPCODE_NAMES.get(ins.opcode, "setup instruction")
                 reasons.append(
-                    f"DCL at DWORD {ins.offset} appears after the first executable instruction"
+                    f"{setup_name} at DWORD {ins.offset} appears after the first executable instruction"
                 )
-        elif ins.opcode not in (OP_DEF, OP_DEFB, OP_DEFI):
+        else:
             seen_executable = True
 
     # Pass one: gather and validate declarations before validating use sites.
@@ -926,7 +928,10 @@ def audit_vs3_bytes(
             # Operand zero is the destination for ordinary arithmetic instructions.
             is_destination = (
                 operand_index == 0
-                and opcode not in (25, 26, 27, 28, 29, 30, 38, 39, 40, 42, 43)
+                and (
+                    opcode in (OP_DEF, OP_DEFB, OP_DEFI)
+                    or opcode not in (25, 26, 27, 28, 29, 30, 38, 39, 40, 42, 43)
+                )
             )
 
             if operand & 0xC000:
@@ -1481,6 +1486,62 @@ def _self_test() -> None:
     nrm_xyz = audit_vs3_bytes(shader(*nrm_xyz_words))
     assert any("reads r1.xyz" in reason for reason in nrm_xyz["reasons"])
     assert not any("reads r1.w" in reason for reason in nrm_xyz["reasons"])
+
+    # DEF/DEFB/DEFI operands are setup destinations, not reads. Their
+    # target register classes and ordering are validated independently.
+    def_setup_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(81, make_dest_token(REG_CONST, 7), 0x3F800000, 0, 0, 0x3F800000),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    def_setup = audit_vs3_bytes(shader(*def_setup_words))
+    assert def_setup["structural_candidate_for_manual_lowering"] is True
+
+    defb_setup_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(47, make_dest_token(REG_CONSTBOOL, 2), 1),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    defb_setup = audit_vs3_bytes(shader(*defb_setup_words))
+    assert defb_setup["structural_candidate_for_manual_lowering"] is True
+
+    defi_setup_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(48, make_dest_token(REG_CONSTINT, 3), 1, 2, 3, 4),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    defi_setup = audit_vs3_bytes(shader(*defi_setup_words))
+    assert defi_setup["structural_candidate_for_manual_lowering"] is True
+
+    bad_defb_target_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(47, make_dest_token(REG_CONST, 2), 1),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    bad_defb_target = audit_vs3_bytes(shader(*bad_defb_target_words))
+    assert any("DEFB" in reason and "boolean constant register" in reason for reason in bad_defb_target["reasons"])
+
+    bad_defi_target_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(48, make_dest_token(REG_CONSTBOOL, 2), 1, 2, 3, 4),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    bad_defi_target = audit_vs3_bytes(shader(*bad_defi_target_words))
+    assert any("DEFI" in reason and "integer constant register" in reason for reason in bad_defi_target["reasons"])
+
+    late_def_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(81, make_dest_token(REG_CONST, 7), 0x3F800000, 0, 0, 0x3F800000),
+    ]
+    late_def = audit_vs3_bytes(shader(*late_def_words))
+    assert any("DEF at DWORD" in reason and "after the first executable instruction" in reason for reason in late_def["reasons"])
 
     sampler_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
