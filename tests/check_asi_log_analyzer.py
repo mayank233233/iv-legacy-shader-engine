@@ -10,6 +10,17 @@ from analyze_asi_log import analyze_log  # noqa: E402
 
 def main() -> None:
     fixture = """\
+[11:59:59.990] D3D9_ADAPTER adapter=0 vendor=0x8086 device=0x29C2 subsys=0x00000001 revision=0x00000002 driver_version=00000001:00000002 description=Intel driver=igdumdim32.dll
+[11:59:59.991] D3D9_GET_DEVICE_CAPS adapter=0 type=1 VS=0xFFFE0200 PS=0xFFFF0200 MaxSimTextures=2 MaxTextureStages=2 MaxRTs=1 MaxVSConst=96 VS20Temps=12 VS20DynamicFlow=0 VS20StaticFlow=1 PS20Caps=0x00000000 PS20Temps=12 PS20Slots=96 PS20DynamicFlow=0 PS20StaticFlow=0
+[11:59:59.992] D3D9_CHECK_DEVICE_FORMAT adapter=0 type=1 adapter_format=22 usage=0x00000001 resource_type=3 check_format=21 hr=0x00000000
+[11:59:59.993] D3D9_CHECK_DEVICE_FORMAT adapter=0 type=1 adapter_format=22 usage=0x00000001 resource_type=3 check_format=75 hr=0x8876086A
+[11:59:59.994] D3D9_CHECK_DEPTH_MATCH adapter=0 type=1 adapter_format=22 render_format=21 depth_format=75 hr=0x00000000
+[11:59:59.995] D3D9_CREATE_DEVICE_REQUEST adapter=0 type=1 flags=0x00000040 width=800 height=600 backbuffer_format=22 windowed=1
+[11:59:59.996] D3D9_CREATE_DEVICE_RESULT hr=0x00000000
+[11:59:59.997] CREATE_RENDER_TARGET width=800 height=600 format=21 multisample=0 quality=0 lockable=0 hr=0x00000000
+[11:59:59.998] CREATE_DEPTH_STENCIL_SURFACE width=800 height=600 format=75 multisample=0 quality=0 discard=1 hr=0x00000000
+[11:59:59.999] SET_RENDER_TARGET index=0 object=00008000 width=800 height=600 format=21 type=1 usage=0x00000001 pool=0 multisample=0 quality=0 hr=0x00000000
+[11:59:59.9995] SET_DEPTH_STENCIL_SURFACE object=0000A000 width=800 height=600 format=75 type=1 usage=0x00000002 pool=0 multisample=0 quality=0 hr=0x00000000
 [12:00:00.000] SHADER_OBJECT_CREATED stage=VS object=00001000 profile=VS_3_0 bytes=96 hash=aaa111 hr=0x00000000
 [12:00:00.001] SHADER_OBJECT_CREATED stage=PS object=00002000 profile=PS_2_0 bytes=128 hash=bbb222 hr=0x00000000
 [12:00:00.0015] SHADER_FALLBACK_OBJECT_MAP object=00002000 source_hash=ccc333 target_hash=bbb222 target_profile=ps_2_0
@@ -43,6 +54,28 @@ def main() -> None:
     assert report["reset_failures"] == 1
     assert report["frames_observed"] == 3
     assert report["unresolved_shader_references"] == 1
+
+    assert len(report["adapter_identifiers"]) == 1
+    adapter = report["adapter_identifiers"][0]
+    assert adapter["vendor_id"] == 0x8086
+    assert adapter["device_id"] == 0x29C2
+    assert adapter["driver_version_high"] == 1
+    assert adapter["driver_version_low"] == 2
+    assert adapter["description"] == "Intel"
+    assert report["device_capability_snapshots"][0]["vertex_shader"]["profile"] == "vs_2_0"
+    assert report["device_capability_snapshots"][0]["pixel_shader"]["profile"] == "ps_2_0"
+    assert report["device_capability_snapshots"][0]["max_simultaneous_render_targets"] == 1
+    assert report["device_format_checks"]["count"] == 2
+    assert report["device_format_checks"]["supported_count"] == 1
+    assert report["device_format_checks"]["unsupported_count"] == 1
+    assert report["device_format_checks"]["checks"][1]["check_format"] == 75
+    assert report["depth_stencil_format_checks"]["supported_count"] == 1
+    assert report["device_create_events"][0]["event"] == "request"
+    assert report["device_create_events"][1]["succeeded"] is True
+    assert report["render_target_create_requests"][0]["format"] == 21
+    assert report["depth_stencil_create_requests"][0]["format"] == 75
+    assert report["render_target_bind_events"][0]["object"] == "8000"
+    assert report["depth_stencil_bind_events"][0]["object"] == "a000"
 
     top = report["shader_pair_usage"][0]
     assert top["draw_calls"] == 2
