@@ -1315,7 +1315,7 @@ def lower_vs3_to_vs2(
     output_register_map: dict[int, tuple[int, int]] = {}
     emission_reasons: list[str] = []
     for source_name, declarations in result.get("output_mapping_plan", {}).items():
-        match = re.fullmatch(r"o(\\d+)", str(source_name))
+        match = re.fullmatch(r"o(\d+)", str(source_name))
         if not match:
             emission_reasons.append(f"invalid source output key {source_name!r}")
             continue
@@ -1470,7 +1470,7 @@ def inspect_file(
     item["output_file"] = str(output_path)
     item["output_sha256"] = hashlib.sha256(bytecode).hexdigest()
     item["fallback_relative_path"] = (
-        fallback_prefix.replace("/", "\\\\").strip("\\\\")
+        fallback_prefix.replace("/", "\\").strip("\\")
         + "\\\\"
         + output_path.name
     )
@@ -1515,15 +1515,13 @@ def _self_test() -> None:
     ))
     assert basic_words_out[0] == VS2_VERSION
     assert basic_words_out[-1] == OP_END
-    assert sum(1 for ins in parse_vs3(data=struct.pack(
-        "<" + "I" * len(basic_words_out),
-        VS3_VERSION, *basic_words_out[1:-1], OP_END,
-    ))[1] if ins.opcode == OP_DCL) == 1
-    lowered_move = next(
-        ins for ins in parse_vs3(
-            struct.pack("<" + "I" * (len(basic_words_out) // 4), *basic_words_out[:1], *basic_words_out[1:])
-        )[1] if ins.opcode == 1
+    inspection_words = [VS3_VERSION, *basic_words_out[1:]]
+    inspection_bytes = struct.pack(
+        "<" + "I" * len(inspection_words), *inspection_words
     )
+    lowered_instructions = parse_vs3(inspection_bytes)[1]
+    assert sum(1 for ins in lowered_instructions if ins.opcode == OP_DCL) == 1
+    lowered_move = next(ins for ins in lowered_instructions if ins.opcode == 1)
     assert decode_register(lowered_move.operands[0]) == (REG_RASTOUT, 0)
 
     temp12_words = [
@@ -2666,6 +2664,9 @@ def main() -> int:
             1 for item in results
             if item.get("structural_candidate_for_manual_lowering")
         ),
+        "emitted_count": sum(
+            1 for item in results if item.get("status") == "vs2_candidate_emitted"
+        ),
         "rejected_count": sum(1 for item in results if item.get("status") == "rejected"),
         "skipped_non_vs3_count": sum(1 for item in results if item.get("status") == "skipped_non_vs3"),
         "parse_error_count": sum(1 for item in results if item.get("status") == "parse_error"),
@@ -2690,7 +2691,8 @@ def main() -> int:
             print(f"  - {reason}")
     print(
         "Audit complete: "
-        f"{report['candidate_count']} candidate(s), "
+        f"{report['candidate_count']} structural candidate(s), "
+        f"{report['emitted_count']} emitted, "
         f"{report['rejected_count']} rejected, "
         f"{report['skipped_non_vs3_count']} non-vs_3_0 skipped, "
         f"{report['parse_error_count']} parse error(s)."
