@@ -260,3 +260,14 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Added matrix destination/vector-source alias rejection and regression fixtures for exact masks, valid m4x3/m3x4/m3x2 forms, constant-register boundary overflow, and aliasing.
 - Tightened baseline address-register handling to `MOVA a0.x`; MOV-to-a0 is rejected as a VS1.1 form, and vector masks on MOVA are rejected for VS2.0.
 - Windows x86 CI run #200 passed with the complete existing pipeline. Run #201, which includes the new matrix fixtures, is in progress.
+
+
+## Component-aware vertex data-flow audit — 2026-11-22
+
+- Added straight-line temporary initialization tracking at component level. Source swizzles are mapped to the physical components read; partial writes accumulate, and only reads from unwritten components are rejected.
+- Added opcode-specific source dependencies for DP3/DP4, CRS, LIT, DST, NRM, SGN and matrix-vector operations. Tests cover LIT's ignored z channel and exponent w, DST source-specific channels, NRM's mandatory xyz and optional w, and CRS component dependencies.
+- SGN src1/src2 temporary scratch registers are marked undefined after execution, matching the D3D9 reference; later reads are rejected.
+- Enforced baseline VS2 input/constant read-port limits: one distinct vertex input register and at most two distinct float-constant registers per instruction. Positive and negative fixtures are included.
+- Independent Ubuntu vertex-audit job in run #207 passed Python bytecode compilation and all analyzer self-tests.
+- Run #206 Windows build failed before source tests because Chocolatey returned HTTP 504 while resolving the DirectX SDK package. It did not reach analyzer tests. Run #207's Windows x86 build is running separately.
+- The tool remains diagnostic-only and emits no VS2 bytecode. No actual GTA IV VS3 shader or GMA 3100 hardware has been tested.
