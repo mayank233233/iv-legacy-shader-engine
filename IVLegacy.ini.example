@@ -1,0 +1,8 @@
+; GMA Edition renderer experiments — all disabled by default.
+; This is a template only. No runtime feature is enabled by this file yet.
+[GMAEdition]
+LowResEnabled=0
+LowResWidth=320
+LowResHeight=240
+FixedFunctionProbe=0
+ProbeDrawCount=10
