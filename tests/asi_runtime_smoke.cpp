@@ -1382,10 +1382,12 @@ int main()
     if (!HasText("TEXTURE_OBJECT_CREATED type=2D") ||
         !HasText("SET_TEXTURE") || !HasText("SET_SAMPLER_STATE"))
         return Fail("D3D9 texture creation, binding or sampler-state hooks were not observed");
+    // Two distinct indices in each group are established before the first
+    // draw: ALPHABLENDENABLE + ZENABLE, and COLOROP + ALPHAOP.
     if (!HasText("SET_RENDER_STATE") ||
         !HasText("SET_TEXTURE_STAGE_STATE") ||
-        !HasText("render_state_count=1") ||
-        !HasText("texture_stage_count=1"))
+        !HasText("render_state_count=2") ||
+        !HasText("texture_stage_count=2"))
         return Fail("D3D9 render-state or texture-stage snapshot hooks were not observed");
     if (!HasText("VERTEX_DECL_OBJECT_CREATED") ||
         !HasText("VERTEX_DECL_ELEMENT") ||
