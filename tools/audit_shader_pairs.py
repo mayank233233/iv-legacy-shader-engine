@@ -875,7 +875,8 @@ def _self_test() -> None:
         }],
     }
     layout = validate_vertex_layout(vs_result, draw)
-    assert layout["status"] == "verified_layout", layout
+    assert layout["status"] == "layout_with_warnings", layout
+    assert any("first element only" in warning for warning in layout["warnings"]), layout
 
     # Sparse TEXCOORD1 is compacted to VS2 oT0, while the current PS2 lowerer
     # maps TEXCOORD1 to t1. Original SM3 semantics match, but the pair needs a
