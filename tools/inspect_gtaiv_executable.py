@@ -631,7 +631,7 @@ def _self_test() -> None:
         "table": "normal", "original_first_thunk_rva": 0,
         "first_thunk_rva": 0x1060
     }], [])
-    assert missing_lookup["classification"] == "normal_import_without_lookup_table"
+    assert missing_lookup["classification"] == "normal_import_without_original_thunk"
     assert missing_lookup["hook_candidate"] is False
 
     mixed_paths = assess_factory_hook_path(imports, [{
