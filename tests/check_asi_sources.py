@@ -106,6 +106,10 @@ required_source_markers = (
     "HookDeviceCreateStateBlock",
     "HookDeviceBeginStateBlock",
     "HookDeviceEndStateBlock",
+    "kDeviceGetRenderStateSlot = 58",
+    "kDeviceCreateStateBlockSlot = 59",
+    "kDeviceBeginStateBlockSlot = 60",
+    "kDeviceEndStateBlockSlot = 61",
     "STATE_BLOCK_BEGIN_FORWARD",
     "STATE_BLOCK_BEGIN_RETURN",
     "D3DTEXTURESTAGESTATETYPE state",
@@ -202,6 +206,10 @@ if "SHADER_FALLBACK_OBJECT_MAP" not in smoke_source or "profile=PS_2_0" not in s
 
 if "BuildSyntheticVs3Shader();" not in smoke_source or "g_syntheticVs3VertexShader" not in smoke_source:
     fail("synthetic runtime test must create a VS3 vertex shader input")
+if "device->GetRenderState(" not in smoke_source or "GetRenderState slot 58 was overwritten" not in smoke_source:
+    fail("synthetic runtime test must prove GetRenderState slot 58 remains intact")
+if "device->CreateStateBlock(" not in smoke_source or "device->EndStateBlock(" not in smoke_source:
+    fail("synthetic runtime test must exercise CreateStateBlock and EndStateBlock in addition to BeginStateBlock")
 if "g_fakeLastVertexShaderVersion" not in smoke_source or "mappedVertexShaderVersion != 0xFFFE0200UL" not in smoke_source:
     fail("synthetic runtime test must verify the VS3-to-VS2 fallback profile")
 if 'L"VertexShaderFallbacks"' not in smoke_source or "VERTEX_SHADER_FALLBACK_APPLIED" not in smoke_source:
