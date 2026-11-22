@@ -566,6 +566,11 @@ def audit_vs3_bytes(
             allocated_targets.add(target)
             entry["target_register_type"] = target[0]
             entry["target_register_index"] = target[1]
+            entry["target_component_mask"] = (
+                0x1
+                if entry["usage"] == USAGE_PSIZE and entry["usage_index"] == 0
+                else entry["component_mask"]
+            )
             entry["requires_pixel_shader_interface_remap"] = False
 
     # Compact TEXCOORD0..N into oT0..N. If an original semantic index changes,
@@ -580,26 +585,10 @@ def audit_vs3_bytes(
         key=lambda item: (item[0], item[1]),
     )
     next_texcoord_output = 0
-    legal_texcoord_masks = {0x1, 0x3, 0x7, 0xF}
     for semantic_index, source_register, entry in texcoord_entries:
-        component_mask = entry["component_mask"]
-        if component_mask not in legal_texcoord_masks:
-            # A VS2 texture output cannot preserve a sparse component mask.
-            # Use a color output instead and ask the paired PS to relink it.
-            target = next(
-                (
-                    candidate for candidate in ((REG_ATTROUT, 0), (REG_ATTROUT, 1))
-                    if candidate not in allocated_targets
-                ),
-                None,
-            )
-            if target is None:
-                reasons.append(
-                    f"TEXCOORD{semantic_index} has a non-contiguous component mask "
-                    "and no free VS2 color output for a safe remap"
-                )
-                continue
-        elif next_texcoord_output < 8:
+        # VS2 oT# registers are four-component outputs. Preserve arbitrary
+        # non-empty component masks (including .yz / .xz) without repacking.
+        if next_texcoord_output < 8:
             target = (REG_OUTPUT, next_texcoord_output)
             next_texcoord_output += 1
         else:
@@ -623,6 +612,7 @@ def audit_vs3_bytes(
         allocated_targets.add(target)
         entry["target_register_type"] = target[0]
         entry["target_register_index"] = target[1]
+        entry["target_component_mask"] = entry["component_mask"]
         entry["requires_pixel_shader_interface_remap"] = (
             target != (REG_OUTPUT, semantic_index)
         )
@@ -637,34 +627,19 @@ def audit_vs3_bytes(
         for entry in entries:
             if "target_register_type" in entry:
                 continue
-            component_mask = entry["component_mask"]
-            if component_mask not in legal_texcoord_masks:
-                target = next(
-                    (
-                        candidate for candidate in ((REG_ATTROUT, 0), (REG_ATTROUT, 1))
-                        if candidate not in allocated_targets
-                    ),
-                    None,
-                )
-            else:
-                target = next(
-                    (candidate for candidate in generic_targets if candidate not in allocated_targets),
-                    None,
-                )
+            target = next(
+                (candidate for candidate in generic_targets if candidate not in allocated_targets),
+                None,
+            )
             if target is None:
-                if component_mask not in legal_texcoord_masks:
-                    reasons.append(
-                        f"{entry['usage_name']}{entry['usage_index']} has a non-contiguous "
-                        "component mask and no free VS2 color output for a safe remap"
-                    )
-                else:
-                    reasons.append(
-                        "more than ten generic vertex output semantics require VS2 interpolation registers"
-                    )
+                reasons.append(
+                    "more than ten generic vertex output semantics require VS2 interpolation registers"
+                )
                 continue
             allocated_targets.add(target)
             entry["target_register_type"] = target[0]
             entry["target_register_index"] = target[1]
+            entry["target_component_mask"] = entry["component_mask"]
             entry["requires_pixel_shader_interface_remap"] = True
 
     declared_outputs = output_declarations
@@ -1095,12 +1070,19 @@ def audit_vs3_bytes(
                         part_mask = write_mask & entry["component_mask"]
                         if not part_mask or "target_register_type" not in entry:
                             continue
+                        target_part_mask = (
+                            part_mask & 0x1
+                            if entry["usage"] == USAGE_PSIZE and entry["usage_index"] == 0
+                            else part_mask
+                        )
+                        if not target_part_mask:
+                            continue
                         mapped_target = (
                             entry["target_register_type"],
                             entry["target_register_index"],
                         )
                         written_outputs[mapped_target] = (
-                            written_outputs.get(mapped_target, 0) | part_mask
+                            written_outputs.get(mapped_target, 0) | target_part_mask
                         )
             elif register_type == REG_CONSTINT:
                 registers["integer_constant"].add(register_number)
@@ -1170,10 +1152,8 @@ def audit_vs3_bytes(
             if target[0] is None:
                 continue
             written_mask = written_outputs.get(target, 0)
-            required_mask = (
-                0x1
-                if declaration["usage"] == USAGE_PSIZE and declaration["usage_index"] == 0
-                else declaration["component_mask"]
+            required_mask = declaration.get(
+                "target_component_mask", declaration["component_mask"]
             )
             missing_mask = required_mask & ~written_mask
             if missing_mask:
@@ -1191,24 +1171,6 @@ def audit_vs3_bytes(
             "mapped point-size output must write only the x component"
         )
 
-    # The combined write mask for each oT# must be .x, .xy, .xyz or .xyzw;
-    # if a higher texture-coordinate register is written, all lower ones must be.
-    written_texcoord_indices = sorted(
-        index for (register_type, index), mask in written_outputs.items()
-        if register_type == REG_OUTPUT and mask
-    )
-    for index in written_texcoord_indices:
-        mask = written_outputs[(REG_OUTPUT, index)]
-        if mask not in (0x1, 0x3, 0x7, 0xF):
-            reasons.append(
-                f"mapped oT{index} has unsupported combined write mask 0x{mask:X}"
-            )
-        for lower_index in range(index):
-            if (REG_OUTPUT, lower_index) not in written_outputs:
-                reasons.append(
-                    f"mapped oT{index} is written without the required lower output oT{lower_index}"
-                )
-
     reasons = list(dict.fromkeys(reasons))
     candidate = not reasons
     output_map_report = {
@@ -1220,6 +1182,7 @@ def audit_vs3_bytes(
                     "usage_index": declaration["usage_index"],
                 },
                 "declared_component_mask": declaration["component_mask"],
+                "vs_2_0_component_mask": declaration.get("target_component_mask"),
                 "vs_2_0_register_type": declaration.get("target_register_type"),
                 "vs_2_0_register_index": declaration.get("target_register_index"),
                 "vs_2_0_link_semantic": output_target_semantic(
