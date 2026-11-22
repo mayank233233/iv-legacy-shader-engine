@@ -1602,11 +1602,18 @@ def _self_test() -> None:
             "IVLegacyFallbacks\\basic.vs20.vso"
         )
         ini_path = temporary_path / "IVLegacyShaderFallbacks.ini"
+        ini_path.write_text(
+            "[ShaderFallbacks]\\n"
+            "0123456789ABCDEF=IVLegacyFallbacks\\smoke.ps20.pso\\n",
+            encoding="utf-8",
+        )
         mapping_count = write_vertex_fallback_ini(ini_path, [emitted_report])
         assert mapping_count == 1
         ini_text = ini_path.read_text(encoding="utf-8")
         assert "[VertexShaderFallbacks]" in ini_text
         assert emitted_report["source_fnv1a64"] + "=" in ini_text
+        assert "[ShaderFallbacks]" in ini_text
+        assert "0123456789ABCDEF=IVLegacyFallbacks\\smoke.ps20.pso" in ini_text
 
     temp12_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
