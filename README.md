@@ -21,6 +21,7 @@ Prototype 0.5.5-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `build/build_asi.bat` | x86 MSVC ASI/DLL build |
 | `tools/analyze_d3d9_shaders.py` | Offline D3D9 SM2/SM3 token-stream inventory for compiled or captured shaders |
 | `tools/audit_sm3_to_sm2.py` | Conservative offline audit/lowering candidate generator for a restricted `ps_3_0` pixel-shader subset; unsupported shaders are rejected, not guessed |
+| `tools/audit_vs3_to_vs2.py` | Conservative `vs_3_0` to `vs_2_0` structural audit; reports blockers and output-mapping plans but emits no bytecode |
 | `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls in `IVLegacy.log` |
 | `tools/inspect_gtaiv_executable.py` | Read-only PE32 import/version inspector for the original `GTAIV.exe`; reports normal and delay imports without modifying the file |
 | `tools/analyze_asi_constants.py` | Validates float, integer and boolean shader-constant sidecars and resolves them to shader hashes from `IVLegacy.log` |
@@ -38,6 +39,12 @@ All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs
 - Windows x86 CI run #172 checks both buffer descriptors are present and correctly associated with the first draw. It also retains the declaration/FVF, stream, material-state and shader/constant correlation checks.
 
 These descriptors are synthetic test allocations. They do not describe GTA IV's actual vertex/index buffers.
+
+## Vertex-stage compatibility audit (development branch)
+
+A separate offline `tools/audit_vs3_to_vs2.py` now checks a deliberately narrow, straight-line `vs_3_0` subset against the baseline `vs_2_0` register file and instruction-slot limits. It checks instruction slots, temporary/input/constant register ranges, sampler and predicate use, position-output writes, and whether declared VS3 output semantics can map to the fixed VS2 output registers.
+
+The first audit deliberately rejects static flow-control programs, version-sensitive `sincos`, vertex texture sampling, relative register addressing and output semantics it cannot map. It reports a structural candidate for manual lowering only; **it does not rewrite or emit VS2 bytecode**. Candidate status is not proof of D3D9 driver acceptance, vertex-declaration compatibility, PS linkage or visual equivalence. CI uses synthetic bytecode fixtures only.
 
 ## v0.5.4-alpha changes
 
