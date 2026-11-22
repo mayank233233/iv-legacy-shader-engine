@@ -76,7 +76,14 @@ required_source_markers = (
     "CaptureMaxFiles",
     "EnableShaderFallbacks",
     "LoadConfiguredPS2Fallback",
-    "ValidatePS20FallbackBytecode",
+    "ValidateSM20FallbackBytecode",
+    "LoadConfiguredSM20Fallback",
+    "LoadConfiguredPS2Fallback",
+    "LoadConfiguredVS2Fallback",
+    "VertexShaderFallbacks",
+    "VERTEX_SHADER_FALLBACK_ATTEMPT",
+    "VERTEX_SHADER_FALLBACK_APPLIED",
+    "VERTEX_SHADER_FALLBACK_OBJECT_MAP",
     "SHADER_FALLBACK_ATTEMPT",
     "SHADER_FALLBACK_APPLIED",
     "SHADER_FALLBACK_OBJECT_MAP",
@@ -190,6 +197,13 @@ if "EnableShaderFallbacks" not in smoke_source or "ShaderFallbacks" not in smoke
     fail("synthetic runtime test must create an explicit opt-in fallback map")
 if "SHADER_FALLBACK_OBJECT_MAP" not in smoke_source or "profile=PS_2_0" not in smoke_source:
     fail("synthetic runtime test must verify shader-object to actual fallback-bytecode correlation")
+
+if "BuildSyntheticVs3Shader();" not in smoke_source or "g_syntheticVs3VertexShader" not in smoke_source:
+    fail("synthetic runtime test must create a VS3 vertex shader input")
+if "g_fakeLastVertexShaderVersion" not in smoke_source or "mappedVertexShaderVersion != 0xFFFE0200UL" not in smoke_source:
+    fail("synthetic runtime test must verify the VS3-to-VS2 fallback profile")
+if 'L"VertexShaderFallbacks"' not in smoke_source or "VERTEX_SHADER_FALLBACK_APPLIED" not in smoke_source:
+    fail("synthetic runtime test must exercise the vertex-shader fallback map")
 
 if "wcscpy_s(g_gameDirectory, MAX_PATH, g_gamePath)" not in source:
     fail("path setup must preserve the full executable path for version validation")
