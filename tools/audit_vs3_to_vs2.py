@@ -263,8 +263,6 @@ def output_mapping(usage: int, usage_index: int) -> tuple[int, int] | None:
         return (REG_RASTOUT, 2)       # oPts
     if usage == USAGE_COLOR and usage_index in (0, 1):
         return (REG_ATTROUT, usage_index)  # oD0/oD1
-    if usage == USAGE_TEXCOORD and usage_index <= 7:
-        return (REG_OUTPUT, usage_index)   # oT0-oT7
     return None
 
 
@@ -471,32 +469,72 @@ def audit_vs3_bytes(
                 "which this initial vs_2_0 audit does not map"
             )
 
-    # Allocate the VS3 semantic declarations to the ten generic VS2 output
-    # registers. Direct COLOR/TEXCOORD bindings are reserved first. Other
-    # semantics are remapped to free output registers and require a paired
-    # pixel-shader input-declaration remap.
-    direct_targets: set[tuple[int, int]] = set()
+    # Reserve special outputs and direct COLOR0/1 bindings first.
+    # TEXCOORD semantics are assigned to consecutive VS2 oT# registers below;
+    # this preserves their indices when already dense and compacts sparse sets
+    # when the pixel shader can be updated to the reported link semantic.
+    allocated_targets: set[tuple[int, int]] = set()
     for source_register, entries in sorted(output_declarations.items()):
         for entry in entries:
             target = output_mapping(entry["usage"], entry["usage_index"])
-            if target is not None:
-                if target in direct_targets:
-                    reasons.append(
-                        f"multiple output semantics map to the same VS2 register "
-                        f"type={target[0]} index={target[1]}"
-                    )
-                direct_targets.add(target)
-                entry["target_register_type"] = target[0]
-                entry["target_register_index"] = target[1]
-                entry["requires_pixel_shader_interface_remap"] = False
+            if target is None:
+                continue
+            if target in allocated_targets:
+                reasons.append(
+                    f"multiple output semantics map to the same VS2 register "
+                    f"type={target[0]} index={target[1]}"
+                )
+                continue
+            allocated_targets.add(target)
+            entry["target_register_type"] = target[0]
+            entry["target_register_index"] = target[1]
+            entry["requires_pixel_shader_interface_remap"] = False
 
-    # Prefer oD0/oD1 for remapped semantics because their masks are not subject
-    # to the consecutive oT# write-mask restrictions; then use oT0-oT7.
+    # Compact TEXCOORD0..N into oT0..N. If an original semantic index changes,
+    # the paired pixel-shader DCL must be rewritten to the effective semantic.
+    texcoord_entries = sorted(
+        (
+            (entry["usage_index"], source_register, entry)
+            for source_register, entries in output_declarations.items()
+            for entry in entries
+            if entry["usage"] == USAGE_TEXCOORD
+        ),
+        key=lambda item: (item[0], item[1]),
+    )
+    for compact_index, (semantic_index, source_register, entry) in enumerate(texcoord_entries):
+        if compact_index < 8:
+            target = (REG_OUTPUT, compact_index)
+        else:
+            target = next(
+                (
+                    candidate for candidate in ((REG_ATTROUT, 0), (REG_ATTROUT, 1))
+                    if candidate not in allocated_targets
+                ),
+                None,
+            )
+        if target is None:
+            reasons.append(
+                f"TEXCOORD{semantic_index} has no free VS2 interpolation output register"
+            )
+            continue
+        if target in allocated_targets:
+            reasons.append(
+                f"TEXCOORD{semantic_index} collides with an already allocated VS2 output"
+            )
+            continue
+        allocated_targets.add(target)
+        entry["target_register_type"] = target[0]
+        entry["target_register_index"] = target[1]
+        entry["requires_pixel_shader_interface_remap"] = (
+            target != (REG_OUTPUT, semantic_index)
+        )
+
+    # Assign remaining generic semantics to free VS2 color outputs first, then
+    # consecutive texture outputs. Every remap is surfaced for paired PS work.
     generic_targets = (
         [(REG_ATTROUT, 0), (REG_ATTROUT, 1)]
         + [(REG_OUTPUT, index) for index in range(8)]
     )
-    allocated_targets = set(direct_targets)
     for source_register, entries in sorted(output_declarations.items()):
         for entry in entries:
             if "target_register_type" in entry:
@@ -507,7 +545,7 @@ def audit_vs3_bytes(
             )
             if target is None:
                 reasons.append(
-                    "more than ten non-position vertex output semantics require VS2 interpolation registers"
+                    "more than ten generic vertex output semantics require VS2 interpolation registers"
                 )
                 continue
             allocated_targets.add(target)
@@ -1217,7 +1255,10 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 1), make_source_token(REG_INPUT, 0)),
     ]
     texcoord_gap = audit_vs3_bytes(shader(*texcoord_gap_words))
-    assert any("without the required lower output oT0" in reason for reason in texcoord_gap["reasons"])
+    assert texcoord_gap["structural_candidate_for_manual_lowering"] is True
+    assert texcoord_gap["output_mapping_plan"]["o1"][0]["vs_2_0_register_index"] == 0
+    assert texcoord_gap["output_mapping_plan"]["o1"][0]["vs_2_0_link_semantic"] == "TEXCOORD0"
+    assert texcoord_gap["output_mapping_plan"]["o1"][0]["requires_pixel_shader_interface_remap"] is True
 
     texcoord_mask_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
