@@ -846,13 +846,9 @@ def audit_vs3_bytes(
                     f"{name} at DWORD {ins.offset} requires a scalar-replicate source swizzle"
                 )
 
-        if opcode in (6, 7, 14, 15, 32, 78, 79):
-            mask = destination_mask(ins.operands[0])
-            if mask == 0 or (mask & (mask - 1)) != 0:
-                reasons.append(
-                    f"{name} at DWORD {ins.offset} requires a single-component destination mask"
-                )
-
+        # Scalar math instructions replicate their scalar result to every
+        # component selected by the destination's single combined write mask.
+        # Multi-component masks such as .xy and .xyzw are legal.
         if opcode == 33:
             destination = decode_register(ins.operands[0])
             source0 = decode_register(ins.operands[1])
@@ -1893,10 +1889,31 @@ def _self_test() -> None:
             make_dest_token(REG_TEMP, 0, 0x3),
             make_source_token(REG_INPUT, 0, 0x00),
         ),
-        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
     scalar_mask = audit_vs3_bytes(shader(*scalar_mask_words))
-    assert any("single-component destination mask" in reason for reason in scalar_mask["reasons"])
+    assert scalar_mask["structural_candidate_for_manual_lowering"] is True
+    assert scalar_mask["temporary_component_write_masks"]["0"] == 0x3
+
+    scalar_component_read_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(6, make_dest_token(REG_TEMP, 0, 0x3), make_source_token(REG_INPUT, 0, 0x00)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1, 0x1), make_source_token(REG_TEMP, 0, 0x55)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    scalar_component_read = audit_vs3_bytes(shader(*scalar_component_read_words))
+    assert scalar_component_read["structural_candidate_for_manual_lowering"] is True
+
+    scalar_missing_component_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(6, make_dest_token(REG_TEMP, 0, 0x1), make_source_token(REG_INPUT, 0, 0x00)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1, 0x1), make_source_token(REG_TEMP, 0, 0x55)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    scalar_missing_component = audit_vs3_bytes(shader(*scalar_missing_component_words))
+    assert any("reads r0.y before those temporary components are initialized" in reason for reason in scalar_missing_component["reasons"])
 
     texcoord_gap_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
