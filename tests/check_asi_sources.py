@@ -30,6 +30,15 @@ if "g_shaderFallbackIniPath[0] == " + correct_null_literal + ")" not in source:
 if "resolvedPath[0] = " + correct_null_literal + ";" not in source:
     fail("resolved fallback path must be initialized with the wide null character")
 
+# Guard the render-target telemetry null terminator against the same
+# multi-character-literal typo in narrow character constants.
+malformed_narrow_null_literal = "'" + chr(92) + chr(92) + "0'"
+correct_narrow_null_literal = "'" + chr(92) + "0'"
+if malformed_narrow_null_literal in source:
+    fail("render-target telemetry contains a malformed multi-character null literal")
+if "depthTargetBinding[0] == " + correct_narrow_null_literal not in source:
+    fail("depth target telemetry must use a single null character escape")
+
 required_source_markers = (
     "GTAIV.exe",
     "InitializePluginOnce",
@@ -49,6 +58,12 @@ required_source_markers = (
     "CREATE_DEPTH_STENCIL_SURFACE",
     "SET_DEPTH_STENCIL_SURFACE",
     "SET_RENDER_TARGET",
+    "SurfaceSnapshot",
+    "UpdateSurfaceSnapshot",
+    "ClearSurfaceSnapshot",
+    "FormatSurfaceSnapshot",
+    "render_targets=%s",
+    "depth_target=%s",
     "DEVICE_RESET_REQUEST",
     "CaptureShaderBytecode",
     "CaptureMaxFiles",
