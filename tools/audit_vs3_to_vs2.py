@@ -1334,6 +1334,36 @@ def _self_test() -> None:
     nrm_alias = audit_vs3_bytes(shader(*nrm_alias_words))
     assert any("destination and source must not be the same" in reason for reason in nrm_alias["reasons"])
 
+    sgn_valid_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            34,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_INPUT, 0),
+            make_source_token(REG_TEMP, 1),
+            make_source_token(REG_TEMP, 2),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    sgn_valid = audit_vs3_bytes(shader(*sgn_valid_words))
+    assert sgn_valid["structural_candidate_for_manual_lowering"] is True
+
+    sgn_duplicate_scratch_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            34,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_INPUT, 0),
+            make_source_token(REG_TEMP, 1),
+            make_source_token(REG_TEMP, 1),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    sgn_duplicate_scratch = audit_vs3_bytes(shader(*sgn_duplicate_scratch_words))
+    assert any("two different temporary scratch registers" in reason for reason in sgn_duplicate_scratch["reasons"])
+
     matrix_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
