@@ -1,8 +1,8 @@
-# IV Legacy Shader Engine — Prototype 0.5.5-alpha
+# IV Legacy Shader Engine — Prototype 0.5.6-alpha
 
 **Target:** 32-bit Windows, Direct3D 9, Shader Model `vs_2_0` / `ps_2_0`.
 
-Prototype 0.5.5-alpha combines the v0.3 standalone D3D9 probe with an experimental Win32/x86 telemetry ASI, shader inventory tools and a conservative offline pixel-shader downlevel audit. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This is still a development foundation, not a playable compatibility fix: it does not inject SM2 replacements into GTA IV, spoof capabilities, or establish that the game can launch on Intel GMA 3100.
+Prototype 0.5.6-alpha combines the v0.3 standalone D3D9 probe with an experimental Win32/x86 telemetry ASI, shader inventory tools, conservative offline shader-downlevel audits and an opt-in redundant D3D9 scalar state cache. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This is still a development foundation, not a playable compatibility fix: it does not inject SM2 replacements into GTA IV, spoof capabilities, or establish that the game can launch on Intel GMA 3100.
 
 ## Project contents
 
@@ -15,7 +15,7 @@ Prototype 0.5.5-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `shaders/flat_lod_vs20.hlsl` | Position/vertex-colour transform for flat distant geometry |
 | `shaders/flat_lod_ps20.hlsl` | Texture-free vertex-colour/fog pass |
 | `src/D3D9ShaderProbe.cpp` | Standalone x86 D3D9 capability, shader-creation, draw/present and readback probe |
-| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; D3D9 adapter/device telemetry, hardware-T&L and vertex-processing capability audit, shader/draw capture, and optional QPC frame/API timing |
+| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; D3D9 capability/draw telemetry, optional QPC frame/API profiler, and opt-in redundant scalar state suppression |
 | `build/compile_shaders.bat` | FXC compilation and assembly-listing generation for all six shaders |
 | `build/build_probe.bat` | x86 MSVC standalone-probe build |
 | `build/build_asi.bat` | x86 MSVC ASI/DLL build |
@@ -30,6 +30,15 @@ Prototype 0.5.5-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `.github/workflows/windows-x86-build.yml` | Windows x86 compile/build CI; does not run the GPU probe |
 
 All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs_2_0` and `ps_2_0`.
+
+## v0.5.6-alpha changes
+
+- Added an opt-in D3D9 state cache for repeated `SetRenderState`, `SetTextureStageState` and `SetSamplerState` calls. It skips only a consecutive setter whose last call on the same device succeeded with the identical state/value.
+- The cache is **disabled by default** (`EnableRedundantStateCache=0`). Enable it only for controlled tests with the matching GTA IV 1.0.0.0 build and retain a way to remove the ASI.
+- State shadows are invalidated after successful `Reset`, failed `Present` and a newly hooked device. The cache disables itself permanently for that process as soon as `CreateStateBlock`, `BeginStateBlock` or `EndStateBlock` is used, because applying a D3D9 state block would bypass the tracked setters.
+- Per-window forwarded/skipped counters are logged by successful Presents. Set `StateCacheReportFrames` to control the reporting interval (1–600, default 120).
+- The Windows synthetic runtime test covers duplicate suppression, counter output, Reset invalidation and the state-block safety fallback.
+- This is an experimental CPU-side API-call optimization. CI verification and real-game/GMA 3100 benchmarks are required before claiming any FPS gain; no 30 FPS result is implied.
 
 ## v0.5.5-alpha changes
 
