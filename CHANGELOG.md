@@ -1,3 +1,11 @@
+## Prototype 0.5.6-alpha — conservative D3D9 scalar state cache
+
+- Added opt-in suppression of consecutive duplicate `SetRenderState`, `SetTextureStageState` and `SetSamplerState` calls after a successful call established the same value on the current device.
+- The feature is disabled by default. It invalidates its state shadow after successful Reset, failed Present and device changes.
+- The cache automatically disables itself on the first `CreateStateBlock`, `BeginStateBlock` or `EndStateBlock` call so later state-block application cannot silently desynchronize the shadow.
+- Added per-Present-window forwarded/skipped counts and synthetic x86 runtime coverage for duplicate values, Reset and the state-block fallback.
+- **Verification pending:** Windows x86 CI has not yet run for this branch. No original GTA IV session or GMA 3100 FPS benchmark has been performed.
+
 ## Prototype 0.5.5-alpha — vertex/index buffer descriptors
 
 - Added opt-in D3D9 CreateVertexBuffer and CreateIndexBuffer hooks at slots 26 and 27.
