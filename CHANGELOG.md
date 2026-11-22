@@ -4,8 +4,9 @@
 - Pair fallback mappings require explicit approval of each `VS-hash:PS-hash` pair. A shader hash observed with other unapproved partners is rejected for mapping.
 - Diagnosed the failed Windows smoke run #295: that commit incorrectly assigned the state-block hooks to slots 58/59/60. D3D9 slot 58 is `GetRenderState`; the correct order is `GetRenderState=58`, `CreateStateBlock=59`, `BeginStateBlock=60`, `EndStateBlock=61`. The old mapping overwrote the read method and shifted all three state-block hooks, producing an access violation in the synthetic host.
 - The current source uses slots 59/60/61 for Create/Begin/End. Added regression coverage for GetRenderState and all three state-block methods; static source checks assert the exact slot assignments.
-- Windows x86 CI run #312 passes both jobs, including the complete x86 build, ASI compilation, runtime smoke test, captured-shader inventory and paired-audit tests. Artifact 14756021066 contains the actual 105-line synthetic `IVLegacy.log`.
-- The run #312 log confirms the final order: successful Reset, post-reset state forwarding, BeginStateBlock entry, state-cache disable, forwarding to the original BeginStateBlock, successful return, and the next render-state call forwarded successfully.
+- Windows x86 CI run #312 passed the baseline pipeline; follow-up Windows x86 run #314 passed after adding direct GetRenderState and Create/Begin/End state-block regression checks. Both jobs in run #314 passed.
+- Run #314 artifact 14756277716 (SHA-256 `05421799a25be07b1edc0f7bca7036608ce7dd0399332d2c33a1090c69273206`) contains the 109-line `IVLegacy.log`. It records BeginStateBlock enter/disable/forward/return, then CreateStateBlock and EndStateBlock enter/return.
+- Fake CreateStateBlock and EndStateBlock originals intentionally return `D3DERR_INVALIDCALL`; the smoke test expects those results and verifies that each original was called once.
 - These are synthetic D3D9 host results. No GTA IV executable session, physical GMA 3100 driver test, image comparison or FPS benchmark has been performed.
 
 ## Prototype 0.5.7-alpha — restricted VS3-to-VS2 emission
