@@ -267,10 +267,12 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Added straight-line temporary initialization tracking at component level. Source swizzles are mapped to the physical components read; partial writes accumulate, and only reads from unwritten components are rejected.
 - Added opcode-specific source dependencies for DP3/DP4, CRS, LIT, DST, NRM, SGN and matrix-vector operations. Tests cover LIT's ignored z channel and exponent w, DST source-specific channels, NRM's mandatory xyz and optional w, and CRS component dependencies.
 - SGN src1/src2 temporary scratch registers are marked undefined after execution, matching the D3D9 reference; later reads are rejected.
-- Enforced baseline VS2 input/constant read-port limits: one distinct vertex input register and at most two distinct float-constant registers per instruction. Positive and negative fixtures are included.
+- Enforced baseline VS2 input/constant read-port limits: one distinct vertex input register and one distinct float-constant register per ordinary instruction. Same-constant multi-source swizzles are accepted; matrix operations retain their implicit consecutive-row behavior. Positive and negative fixtures are included.
 - Run #207 passed both jobs: independent Ubuntu analyzer compilation/self-tests and the complete Windows x86 build.
 - Run #206's Windows build failed before source tests because Chocolatey returned HTTP 504 while resolving the DirectX SDK package. It did not reach analyzer tests; run #207 subsequently passed the full Windows path.
 - The tool remains diagnostic-only and emits no VS2 bytecode. No actual GTA IV VS3 shader or GMA 3100 hardware has been tested.
 
 - Corrected point-size handling: PSIZE0 DCL must declare xyzw, while the scalar output write is x-only. Added tests for the valid form and invalid declaration/y-only write.
 - Run #208's independent Ubuntu vertex-audit job passed the point-size tests; the Windows x86 build is still running at the DirectX SDK install step.
+
+- Microsoft’s constant-float register page clarified that ordinary instructions may access only one distinct c-register (not two). Updated the audit and tests; see https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-constant-float.
