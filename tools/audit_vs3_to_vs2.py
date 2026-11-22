@@ -2077,10 +2077,11 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
     ]
     texcoord_mask = audit_vs3_bytes(shader(*texcoord_mask_words))
-    assert any("non-contiguous component mask" in reason and "no free VS2 color output" in reason for reason in texcoord_mask["reasons"])
+    assert texcoord_mask["structural_candidate_for_manual_lowering"] is True
+    assert texcoord_mask["output_mapping_plan"]["o1"][0]["vs_2_0_register_type"] == REG_OUTPUT
+    assert texcoord_mask["output_mapping_plan"]["o1"][0]["vs_2_0_component_mask"] == 0x5
 
-    # A TEXCOORD with a sparse component mask can be carried by a color output
-    # when one is free; the report marks the pixel-shader link rewrite.
+    # Sparse .xz component masks are legal on four-component VS2 output registers.
     sparse_texcoord_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
@@ -2090,7 +2091,8 @@ def _self_test() -> None:
     ]
     sparse_texcoord = audit_vs3_bytes(shader(*sparse_texcoord_words))
     assert sparse_texcoord["structural_candidate_for_manual_lowering"] is True
-    assert sparse_texcoord["output_mapping_plan"]["o1"][0]["vs_2_0_link_semantic"] == "COLOR0"
+    assert sparse_texcoord["output_mapping_plan"]["o1"][0]["vs_2_0_link_semantic"] == "TEXCOORD0"
+    assert sparse_texcoord["output_mapping_plan"]["o1"][0]["vs_2_0_component_mask"] == 0x5
     assert sparse_texcoord["output_mapping_plan"]["o1"][0]["requires_pixel_shader_interface_remap"] is True
 
     # VS3 may pack different semantics into disjoint components of one output
@@ -2126,6 +2128,34 @@ def _self_test() -> None:
     assert packed_distinct["output_component_split_required"] is True
     assert packed_distinct["requires_pixel_shader_interface_remap"] is True
     assert len(packed_distinct["output_mapping_plan"]["o3"]) == 2
+
+    # Microsoft D3D9 documents this exact packing pattern: COLOR.x,
+    # TEXCOORD.yz and FOG.w all share one VS3 output register.
+    packed_semantics_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 7),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=0, component_mask=0x1),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 3, usage_index=3, component_mask=0x6),
+        *dcl(USAGE_FOG, REG_OUTPUT, 3, component_mask=0x8),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 7), make_source_token(REG_INPUT, 0)),
+    ]
+    packed_semantics = audit_vs3_bytes(shader(*packed_semantics_words))
+    assert packed_semantics["structural_candidate_for_manual_lowering"] is True
+    assert packed_semantics["output_component_split_required"] is True
+    assert [e["semantic"]["usage_name"] for e in packed_semantics["output_mapping_plan"]["o3"]] == [
+        "COLOR", "TEXCOORD", "FOG"
+    ]
+    assert [e["declared_component_mask"] for e in packed_semantics["output_mapping_plan"]["o3"]] == [
+        0x1, 0x6, 0x8
+    ]
+    assert [e["vs_2_0_component_mask"] for e in packed_semantics["output_mapping_plan"]["o3"]] == [
+        0x1, 0x6, 0x8
+    ]
+    assert [e["vs_2_0_link_semantic"] for e in packed_semantics["output_mapping_plan"]["o3"]] == [
+        "COLOR0", "TEXCOORD0", "COLOR1"
+    ]
+    assert packed_semantics["requires_pixel_shader_interface_remap"] is True
 
     overlapping_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
