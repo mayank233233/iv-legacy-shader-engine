@@ -2180,6 +2180,68 @@ def _self_test() -> None:
     overlapping = audit_vs3_bytes(shader(*overlapping_words))
     assert any("overlapping DCL component masks" in reason for reason in overlapping["reasons"])
 
+    # The 12 VS3 output slots are semantic slots, not fixed legacy classes:
+    # ten generic interpolators plus position and optional point size may occupy
+    # arbitrary VS3 o# indices. COLOR0/1 and TEXCOORD0-7 fill all ten generic
+    # VS2 outputs in this boundary fixture.
+    max_output_bank_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 11),
+        *dcl(USAGE_PSIZE, REG_OUTPUT, 4),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 0, usage_index=0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 1, usage_index=1),
+    ]
+    for semantic_index in range(8):
+        max_output_bank_words.extend(
+            dcl(USAGE_TEXCOORD, REG_OUTPUT, semantic_index + 2, usage_index=semantic_index)
+        )
+    for output_index in [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]:
+        max_output_bank_words.extend(
+            make_instruction(
+                1,
+                make_dest_token(REG_OUTPUT, output_index),
+                make_source_token(REG_INPUT, 0),
+            )
+        )
+    max_output_bank_words.extend(
+        make_instruction(
+            1,
+            make_dest_token(REG_OUTPUT, 4, 0x1),
+            make_source_token(REG_INPUT, 0),
+        )
+    )
+    max_output_bank = audit_vs3_bytes(shader(*max_output_bank_words))
+    assert max_output_bank["structural_candidate_for_manual_lowering"] is True
+    assert max_output_bank["output_mapping_plan"]["o11"][0]["vs_2_0_link_semantic"] == "POSITION0"
+    assert max_output_bank["output_mapping_plan"]["o4"][0]["vs_2_0_link_semantic"] == "PSIZE0"
+    assert len({
+        (entry["vs_2_0_register_type"], entry["vs_2_0_register_index"])
+        for declarations in max_output_bank["output_mapping_plan"].values()
+        for entry in declarations
+    }) == 12
+
+    too_many_interpolators_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 11),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 0, usage_index=0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 1, usage_index=1),
+    ]
+    for semantic_index in range(9):
+        too_many_interpolators_words.extend(
+            dcl(USAGE_TEXCOORD, REG_OUTPUT, semantic_index + 2, usage_index=semantic_index)
+        )
+    for output_index in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+        too_many_interpolators_words.extend(
+            make_instruction(
+                1,
+                make_dest_token(REG_OUTPUT, output_index),
+                make_source_token(REG_INPUT, 0),
+            )
+        )
+    too_many_interpolators = audit_vs3_bytes(shader(*too_many_interpolators_words))
+    assert too_many_interpolators["structural_candidate_for_manual_lowering"] is False
+    assert any("no free VS2 interpolation output register" in reason for reason in too_many_interpolators["reasons"])
+
     point_size_bad_mask_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
