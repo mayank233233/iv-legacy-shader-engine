@@ -334,3 +334,5 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - No actual original GTA IV shader capture, original executable import inspection, ASI-loaded gameplay session, physical GMA 3100 render, screenshot comparison or FPS measurement has been performed.
 - The tool emits no replacement bytecode, does not modify D3D9 state, does not spoof capabilities and does not drop rendering passes.
 
+- Follow-up audit hardening: required texture bindings are now checked only for samplers actually sampled by the pixel shader; unused sampler declarations do not create false missing-texture failures.
+- `DrawPrimitiveUP` and `DrawIndexedPrimitiveUP` are explicitly marked capture-incomplete because the current telemetry does not record their transient per-draw vertex/index memory layout and ranges.
