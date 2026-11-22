@@ -40,6 +40,7 @@ namespace
     volatile LONG g_fakeCreateStateBlockCalls = 0;
     volatile LONG g_fakeEndStateBlockCalls = 0;
     volatile LONG g_fakeGetRenderStateCalls = 0;
+    volatile LONG g_fakeSetViewportCalls = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
     DWORD g_syntheticVs3VertexShader[11] = {};
@@ -382,6 +383,16 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceSetViewport(
+        IDirect3DDevice9*,
+        const D3DVIEWPORT9* viewport)
+    {
+        if (!viewport || viewport->Width != 64 || viewport->Height != 48)
+            return D3DERR_INVALIDCALL;
+        InterlockedIncrement(&g_fakeSetViewportCalls);
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeDeviceSetRenderTarget(
         IDirect3DDevice9*,
         DWORD,
@@ -717,6 +728,7 @@ namespace
         g_fakeDeviceVTable[28] = reinterpret_cast<void*>(FakeDeviceCreateRenderTarget);
         g_fakeDeviceVTable[29] = reinterpret_cast<void*>(FakeDeviceCreateDepthStencilSurface);
         g_fakeDeviceVTable[37] = reinterpret_cast<void*>(FakeDeviceSetRenderTarget);
+        g_fakeDeviceVTable[47] = reinterpret_cast<void*>(FakeDeviceSetViewport);
         g_fakeDeviceVTable[38] = reinterpret_cast<void*>(FakeDeviceGetRenderTarget);
         g_fakeDeviceVTable[39] = reinterpret_cast<void*>(FakeDeviceSetDepthStencilSurface);
         g_fakeDeviceVTable[40] = reinterpret_cast<void*>(FakeDeviceGetDepthStencilSurface);
@@ -1039,6 +1051,18 @@ int main()
     const HRESULT depthSurfaceHr = device->CreateDepthStencilSurface(
         32, 32, D3DFMT_D24S8,
         D3DMULTISAMPLE_NONE, 0, TRUE, &depthSurface, NULL);
+
+    D3DVIEWPORT9 viewport = {};
+    viewport.X = 0;
+    viewport.Y = 0;
+    viewport.Width = 64;
+    viewport.Height = 48;
+    viewport.MinZ = 0.0f;
+    viewport.MaxZ = 1.0f;
+    const HRESULT setViewportHr = device->SetViewport(&viewport);
+    if (FAILED(setViewportHr) ||
+        InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0) != 1)
+        return Fail("SetViewport slot 47 was not forwarded through the telemetry hook");
 
     const HRESULT setRenderTargetHr = device->SetRenderTarget(0, NULL);
     const HRESULT setDepthSurfaceHr = device->SetDepthStencilSurface(NULL);
