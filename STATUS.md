@@ -236,7 +236,7 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - It rejects static flow control, the VS3.0 `sincos` operand form, vertex texture sampling, relative addressing and unhandled output semantics rather than guessing.
 - It emits an audit report and mapping plan only. It does **not** emit VS2 bytecode or demonstrate compatibility with any GTA IV shader.
 - Synthetic self-tests cover a simple candidate, excessive temporary register, vertex sampler, VS3-only texture lookup, unsupported output semantic, declaration-without-write, output register overflow, version-sensitive `sincos`, slot-budget overflow and truncated bytecode.
-- The new self-test is wired into the Windows x86 source-sanity workflow. CI result for this feature commit is pending.
+- The self-test is wired into both the standalone vertex-audit workflow and Windows x86 source-sanity workflow. Standalone vertex-audit validation passed in run #219; the full Windows x86 build for that commit was still running at the last check.
 - All fixtures are synthetic; no original GTA IV shader or GMA 3100 device has been inspected.
 
 
@@ -276,3 +276,14 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Run #208's independent Ubuntu vertex-audit job passed the point-size tests; the Windows x86 build is still running at the DirectX SDK install step.
 
 - Microsoft’s constant-float register page clarified that ordinary instructions may access only one distinct c-register (not two). Updated the audit and tests; see https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-constant-float.
+
+
+## VS3-to-VS2 output mapping corrections — 2026-11-22
+
+- Rechecked output declaration behavior against Microsoft's D3D9 `dcl_usage` reference. Different semantic declarations may share one VS3 `o#` register when their DCL component masks are unique and non-overlapping.
+- Added a regression fixture for Microsoft's documented packing pattern: `COLOR0 o3.x`, `TEXCOORD3 o3.yz`, and `FOG o3.w`. The report maps the source lanes into separate VS2 outputs and marks pixel-shader interface remapping where required.
+- Removed the false restriction that a sparse TEXCOORD component mask must be moved to a color output. Masks such as `.yz` and `.xz` are retained on the mapped four-component output.
+- Removed the undocumented check that VS2 `oT#` outputs must be used contiguously or have a contiguous component mask.
+- The report now includes both the VS3 declared component mask and the target VS2 component mask. `PSIZE0` maps its scalar source `.x` to `oPts.x`; its VS3 declaration still requires the full mask.
+- Standalone vertex-audit CI run #219 passed the self-test job after these changes. The run's separate Windows x86 build job was still in progress at the last status check.
+- The analyzer remains report-only: no output-splitting or pixel-shader relink bytecode is generated, and no real GTA IV shaders have been audited.
