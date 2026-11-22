@@ -2839,7 +2839,7 @@ namespace
     HRESULT WINAPI HookDeviceSetTextureStageState(
         IDirect3DDevice9* self,
         DWORD stage,
-        D3DTEXTURESTAGETYPE state,
+        D3DTEXTURESTAGESTATETYPE state,
         DWORD value)
     {
         BOOL skipped = FALSE;
