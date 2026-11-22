@@ -141,6 +141,7 @@ D3DDECLUSAGE_NAMES = {
 # Matrix instructions read a number of consecutive constant registers equal
 # to the result dimension (the second digit pair in mNxM).
 MATRIX_ROWS = {20: 4, 21: 3, 22: 4, 23: 3, 24: 2}
+MATRIX_INPUT_COMPONENTS = {20: 4, 21: 4, 22: 3, 23: 3, 24: 3}
 MATRIX_DEST_MASKS = {
     20: (0xF,),  # m4x4 requires .xyzw
     21: (0x7,),  # m4x3 requires .xyz
@@ -197,6 +198,47 @@ def source_swizzle(token: int) -> int:
 
 def source_modifier(token: int) -> int:
     return (token >> 24) & 0xF
+
+
+def _swizzled_component_mask(source_token: int, source_channels: tuple[int, ...]) -> int:
+    """Return the physical source components selected for logical result channels."""
+    swizzle = source_swizzle(source_token)
+    result = 0
+    for channel in source_channels:
+        component = (swizzle >> (2 * channel)) & 0x3
+        result |= 1 << component
+    return result
+
+
+def _required_temp_source_mask(ins: Instruction, source_index: int) -> int:
+    """Conservative component-use model for this audit's supported instruction subset."""
+    opcode = ins.opcode
+    source_token = ins.operands[source_index]
+
+    if opcode in MATRIX_INPUT_COMPONENTS and source_index == 1:
+        channels = tuple(range(MATRIX_INPUT_COMPONENTS[opcode]))
+    elif opcode in (8, 9):  # dp3 / dp4
+        channels = (0, 1, 2) if opcode == 8 else (0, 1, 2, 3)
+    elif opcode == 33:  # CRS: each requested output component depends on two inputs.
+        dependencies = {0: (1, 2), 1: (0, 2), 2: (0, 1)}
+        destination_mask = ins.operands[0]
+        channels_set = {
+            component
+            for destination_channel, components in dependencies.items()
+            if destination_mask & (1 << destination_channel)
+            for component in components
+        }
+        channels = tuple(sorted(channels_set))
+    elif opcode in (16, 17, 34, 36):  # LIT, DST, SGN source, NRM
+        channels = (0, 1, 2, 3)
+    else:
+        destination_mask = ins.operands[0] & 0xF0000
+        destination_mask = (destination_mask >> 16) & 0xF
+        if destination_mask == 0:
+            destination_mask = 0xF
+        channels = tuple(index for index in range(4) if destination_mask & (1 << index))
+
+    return _swizzled_component_mask(source_token, channels)
 
 
 def make_instruction(opcode: int, *operands: int) -> list[int]:
@@ -320,6 +362,7 @@ def audit_vs3_bytes(
     output_declarations: dict[int, list[dict[str, Any]]] = {}
     output_semantics: set[tuple[int, int]] = set()
     written_outputs: dict[tuple[int, int], int] = {}
+    temporary_component_write_masks: dict[int, int] = {}
     input_semantics: dict[tuple[int, int], int] = {}
     registers: dict[str, set[int]] = {
         "temp": set(), "input": set(), "float_constant": set(),
@@ -648,6 +691,45 @@ def audit_vs3_bytes(
                 "a different four-operand form"
             )
             continue
+
+        # Track definite temporary-component initialization in straight-line
+        # programs. Source reads are checked before the current instruction's
+        # destination and SGN scratch registers are marked as written.
+        if opcode not in (OP_DEF, OP_DEFB, OP_DEFI, 0):
+            source_indices = list(range(1, len(ins.operands)))
+            if opcode == 34:
+                # SGN's final two temp operands are scratch outputs, not reads.
+                source_indices = [1]
+            for source_index in source_indices:
+                source = decode_register(ins.operands[source_index])
+                if source is None or source[0] != REG_TEMP:
+                    continue
+                required_mask = _required_temp_source_mask(ins, source_index)
+                initialized_mask = temporary_component_write_masks.get(source[1], 0)
+                missing_mask = required_mask & ~initialized_mask
+                if missing_mask:
+                    missing = "".join(
+                        component
+                        for bit, component in enumerate("xyzw")
+                        if missing_mask & (1 << bit)
+                    )
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} reads r{source[1]}.{missing} "
+                        "before those temporary components are initialized"
+                    )
+
+        if opcode not in (OP_DEF, OP_DEFB, OP_DEFI) and ins.operands:
+            destination = decode_register(ins.operands[0])
+            if destination is not None and destination[0] == REG_TEMP:
+                temporary_component_write_masks[destination[1]] = (
+                    temporary_component_write_masks.get(destination[1], 0)
+                    | destination_mask(ins.operands[0])
+                )
+        if opcode == 34:
+            for scratch_token in ins.operands[2:4]:
+                scratch = decode_register(scratch_token)
+                if scratch is not None and scratch[0] == REG_TEMP:
+                    temporary_component_write_masks[scratch[1]] = 0xF
 
         # Matrix instructions have a specific constant-file matrix operand and
         # fixed destination masks. The matrix source cannot be modified/swizzled.
@@ -1055,6 +1137,10 @@ def audit_vs3_bytes(
         "highest_temporary_register": max(registers["temp"], default=None),
         "highest_input_register": max(registers["input"], default=None),
         "highest_float_constant_register": max(registers["float_constant"], default=None),
+        "temporary_component_write_masks": {
+            str(number): mask
+            for number, mask in sorted(temporary_component_write_masks.items())
+        },
         "registers": {
             key: sorted(values) for key, values in registers.items() if values
         },
