@@ -141,6 +141,10 @@ jobs:
           New-Item -ItemType Directory -Force build\bin\IVLegacyFallbacks | Out-Null
           python tools\audit_sm3_to_sm2.py build\bin\IVLegacyCaptures --emit-dir build\bin\IVLegacyFallbacks --fallback-ini build\bin\IVLegacyShaderFallbacks.ini --fallback-prefix IVLegacyFallbacks --report build\bin\captured_shader_downlevel_audit.json --max-samplers 16 --dependent-read-limit 3
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools\audit_vs3_to_vs2.py build\bin\IVLegacyCaptures --report build\bin\captured_vertex_shader_downlevel_audit.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $vertexAudit = Get-Content build\bin\captured_vertex_shader_downlevel_audit.json -Raw | ConvertFrom-Json
+          if ($vertexAudit.audited_file_count -lt 2 -or $vertexAudit.vs_3_0_file_count -ne 0 -or $vertexAudit.skipped_non_vs3_count -lt 2) { throw 'Expected the two known synthetic SM2 captures to be counted and skipped by the VS3 downlevel audit.' }
 
       - name: Stage build outputs with repository-relative paths
         shell: pwsh
@@ -153,6 +157,7 @@ jobs:
           Copy-Item build\out\shader_inventory.json artifact\build\out\
           Copy-Item build\bin\captured_shader_inventory.json artifact\build\bin\
           Copy-Item build\bin\captured_shader_downlevel_audit.json artifact\build\bin\
+          Copy-Item build\bin\captured_vertex_shader_downlevel_audit.json artifact\build\bin\
           Copy-Item build\bin\synthetic_draw_analysis.json artifact\build\bin\
           Copy-Item build\bin\IVLegacy.log artifact\build\bin\
           Copy-Item build\bin\shader_constant_inventory.json artifact\build\bin\
