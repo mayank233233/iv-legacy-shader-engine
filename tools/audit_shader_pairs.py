@@ -188,11 +188,16 @@ def audit_shader_interface(
     pixel_inputs: list[dict[str, Any]],
 ) -> dict[str, Any]:
     outputs: dict[tuple[int, int], list[dict[str, Any]]] = {}
-    for declarations in vertex_result.get("output_mapping_plan", {}).values():
+    for output_register, declarations in vertex_result.get("output_mapping_plan", {}).items():
+        source_register_match = re.fullmatch(r"o(\d+)", str(output_register))
+        source_register = int(source_register_match.group(1)) if source_register_match else None
         for entry in declarations:
             semantic = entry["semantic"]
             key = (int(semantic["usage"]), int(semantic["usage_index"]))
-            outputs.setdefault(key, []).append(entry)
+            outputs.setdefault(key, []).append({
+                **entry,
+                "source_output_register": source_register,
+            })
 
     matches: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -249,7 +254,8 @@ def audit_shader_interface(
             "semantic": semantic,
             "pixel_input_register": pixel_input["register"],
             "pixel_component_mask": required_mask,
-            "vertex_source_output_register": output.get("semantic"),
+            "vertex_source_output_register": output.get("source_output_register"),
+            "vertex_output_semantic": output.get("semantic"),
             "vertex_declared_component_mask": source_mask,
             "vertex_vs2_register_type": vs_type,
             "vertex_vs2_register_index": vs_index,
@@ -334,15 +340,9 @@ def validate_vertex_layout(
             reasons.append(f"vertex semantic {semantic} uses unsupported D3DDECLTYPE {type_code}")
             continue
         byte_size, stored_components, type_name = type_info
-        required_mask = int(expected.get("component_mask", 0xF))
-        stored_mask = (1 << stored_components) - 1
-        missing_components = required_mask & ~stored_mask
-        if missing_components:
-            reasons.append(
-                f"VS input v{register} semantic {semantic} requires components "
-                f".{format_mask(required_mask)}, but {type_name} stores only "
-                f".{format_mask(stored_mask)}"
-            )
+        # D3D9 vertex-declaration conversion defines missing components
+        # (e.g. FLOAT3's w) with default values; do not mistake the memory
+        # component count for the post-conversion shader input mask.
         stream_index = int(element.get("stream", 0))
         stream = streams.get(stream_index)
         if stream is None:
@@ -785,33 +785,6 @@ def _self_test() -> None:
     }
     layout = validate_vertex_layout(vs_result, draw)
     assert layout["status"] == "verified_layout", layout
-
-    # A FLOAT3 cannot satisfy a VS input declaration that consumes xyzw.
-    short_layout_draw = {
-        "vertex_declaration": {
-            "elements": [
-                {"stream": 0, "offset": 0, "type": 2, "method": 0, "usage": 0, "usage_index": 0},
-                {"stream": 0, "offset": 12, "type": 1, "method": 0, "usage": 5, "usage_index": 0},
-            ]
-        },
-        "fvf": 0,
-        "stream_bindings": [{
-            "stream": 0, "offset": 0, "stride": 20,
-            "buffer_descriptor": {"length_bytes": 4096},
-        }],
-    }
-    float4_vs_words = [audit_vs3_to_vs2.VS3_VERSION]
-    float4_vs_words.extend(vs_dcl(0, audit_vs3_to_vs2.REG_INPUT, 0, mask=0xF))
-    float4_vs_words.extend(vs_dcl(0, audit_vs3_to_vs2.REG_OUTPUT, 0))
-    float4_vs_words.extend(audit_vs3_to_vs2.make_instruction(
-        1, audit_vs3_to_vs2.make_dest_token(audit_vs3_to_vs2.REG_OUTPUT, 0),
-        audit_vs3_to_vs2.make_source_token(audit_vs3_to_vs2.REG_INPUT, 0)))
-    float4_vs_words.append(audit_vs3_to_vs2.OP_END)
-    float4_vs_result = audit_vs3_to_vs2.audit_vs3_bytes(
-        struct.pack("<" + "I" * len(float4_vs_words), *float4_vs_words)
-    )
-    short_layout = validate_vertex_layout(float4_vs_result, short_layout_draw)
-    assert any("FLOAT3 stores only .xyz" in reason for reason in short_layout["reasons"])
 
     # Sparse TEXCOORD1 is compacted to VS2 oT0, while the current PS2 lowerer
     # maps TEXCOORD1 to t1. Original SM3 semantics match, but the pair needs a
