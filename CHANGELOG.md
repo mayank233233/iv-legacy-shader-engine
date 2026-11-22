@@ -7,6 +7,7 @@
 - Generalised the fallback bytecode-envelope validator for both SM2 shader stages.
 - PS and VS map writers now require explicit source-hash approval after paired-interface and visual review; bytecode emission alone no longer creates an approved runtime mapping.
 - Extended synthetic converter and ASI runtime tests, plus the Windows workflow to emit an SM2 candidate from its synthetic VS3 capture.
+- The paired draw audit now constrains VS2 temporary and float-constant registers against captured device values, including `MaxVertexShaderConst`, with an over-limit regression fixture.
 - **Verification pending:** no confirmed Windows x86 CI result for this commit series. No GTA IV or physical GMA 3100 testing has been performed.
 
 ## Prototype 0.5.6-alpha — conservative D3D9 scalar state cache
