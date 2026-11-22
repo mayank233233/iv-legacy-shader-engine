@@ -755,26 +755,30 @@ namespace
         D3DSTATEBLOCKTYPE type,
         IDirect3DStateBlock9** stateBlock)
     {
+        Log("STATE_BLOCK_CREATE_ENTER device=%p original=%p type=%u",
+            self, reinterpret_cast<PVOID>(g_realDeviceCreateStateBlock),
+            static_cast<unsigned long>(type));
         DisableRedundantStateCacheForStateBlock();
-        return g_realDeviceCreateStateBlock
+        const HRESULT hr = g_realDeviceCreateStateBlock
             ? g_realDeviceCreateStateBlock(self, type, stateBlock)
             : D3DERR_INVALIDCALL;
+        Log("STATE_BLOCK_CREATE_RETURN device=%p hr=0x%08lX",
+            self, static_cast<unsigned long>(hr));
+        return hr;
     }
 
     HRESULT WINAPI HookDeviceBeginStateBlock(IDirect3DDevice9* self)
     {
+        Log("STATE_BLOCK_BEGIN_ENTER device=%p original=%p",
+            self, reinterpret_cast<PVOID>(g_realDeviceBeginStateBlock));
         DisableRedundantStateCacheForStateBlock();
-        Log(
-            "STATE_BLOCK_BEGIN_FORWARD device=%p original=%p",
-            self,
-            reinterpret_cast<PVOID>(g_realDeviceBeginStateBlock));
+        Log("STATE_BLOCK_BEGIN_FORWARD device=%p original=%p",
+            self, reinterpret_cast<PVOID>(g_realDeviceBeginStateBlock));
         const HRESULT hr = g_realDeviceBeginStateBlock
             ? g_realDeviceBeginStateBlock(self)
             : D3DERR_INVALIDCALL;
-        Log(
-            "STATE_BLOCK_BEGIN_RETURN device=%p hr=0x%08lX",
-            self,
-            static_cast<unsigned long>(hr));
+        Log("STATE_BLOCK_BEGIN_RETURN device=%p hr=0x%08lX",
+            self, static_cast<unsigned long>(hr));
         return hr;
     }
 
@@ -782,10 +786,15 @@ namespace
         IDirect3DDevice9* self,
         IDirect3DStateBlock9** stateBlock)
     {
+        Log("STATE_BLOCK_END_ENTER device=%p original=%p",
+            self, reinterpret_cast<PVOID>(g_realDeviceEndStateBlock));
         DisableRedundantStateCacheForStateBlock();
-        return g_realDeviceEndStateBlock
+        const HRESULT hr = g_realDeviceEndStateBlock
             ? g_realDeviceEndStateBlock(self, stateBlock)
             : D3DERR_INVALIDCALL;
+        Log("STATE_BLOCK_END_RETURN device=%p hr=0x%08lX",
+            self, static_cast<unsigned long>(hr));
+        return hr;
     }
 
     void UpdateSurfaceSnapshot(
@@ -3666,6 +3675,15 @@ namespace
             reinterpret_cast<DeviceBeginStateBlockFn>(original[kDeviceBeginStateBlockSlot]);
         g_realDeviceEndStateBlock =
             reinterpret_cast<DeviceEndStateBlockFn>(original[kDeviceEndStateBlockSlot]);
+        Log(
+            "D3D9_STATE_BLOCK_ORIGINALS create=%p begin=%p end=%p "
+            "slots=%p/%p/%p",
+            reinterpret_cast<PVOID>(g_realDeviceCreateStateBlock),
+            reinterpret_cast<PVOID>(g_realDeviceBeginStateBlock),
+            reinterpret_cast<PVOID>(g_realDeviceEndStateBlock),
+            original[kDeviceCreateStateBlockSlot],
+            original[kDeviceBeginStateBlockSlot],
+            original[kDeviceEndStateBlockSlot]);
         g_realDeviceSetTextureStageState =
             reinterpret_cast<DeviceSetTextureStageStateFn>(original[kDeviceSetTextureStageStateSlot]);
         g_realDeviceCreateVertexDeclaration =
