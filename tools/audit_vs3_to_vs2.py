@@ -1241,6 +1241,67 @@ def _self_test() -> None:
     assert temp12["structural_candidate_for_manual_lowering"] is False
     assert any("r12" in reason for reason in temp12["reasons"])
 
+    uninitialized_temp_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+    ]
+    uninitialized_temp = audit_vs3_bytes(shader(*uninitialized_temp_words))
+    assert any(
+        "reads r0.xyzw before those temporary components are initialized" in reason
+        for reason in uninitialized_temp["reasons"]
+    )
+
+    partial_temp_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            1,
+            make_dest_token(REG_TEMP, 0, 0x1),
+            make_source_token(REG_INPUT, 0, 0x00),
+        ),
+        *make_instruction(
+            1,
+            make_dest_token(REG_OUTPUT, 0),
+            make_source_token(REG_TEMP, 0),
+        ),
+    ]
+    partial_temp = audit_vs3_bytes(shader(*partial_temp_words))
+    assert any("reads r0.yzw" in reason for reason in partial_temp["reasons"])
+
+    fully_initialized_temp_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_TEMP, 0, 0x1), make_source_token(REG_INPUT, 0, 0x00)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 0, 0x2), make_source_token(REG_INPUT, 0, 0x55)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 0, 0x4), make_source_token(REG_INPUT, 0, 0xAA)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 0, 0x8), make_source_token(REG_INPUT, 0, 0xFF)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+    ]
+    fully_initialized_temp = audit_vs3_bytes(shader(*fully_initialized_temp_words))
+    assert fully_initialized_temp["structural_candidate_for_manual_lowering"] is True
+    assert fully_initialized_temp["temporary_component_write_masks"]["0"] == 0xF
+
+    component_temp_read_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_TEMP, 0, 0x1), make_source_token(REG_INPUT, 0, 0x00)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1, 0x2), make_source_token(REG_TEMP, 0, 0x00)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    component_temp_read = audit_vs3_bytes(shader(*component_temp_read_words))
+    assert component_temp_read["structural_candidate_for_manual_lowering"] is True
+
+    missing_component_temp_read_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_TEMP, 0, 0x1), make_source_token(REG_INPUT, 0, 0x00)),
+        *make_instruction(1, make_dest_token(REG_TEMP, 1, 0x1), make_source_token(REG_TEMP, 0, 0x55)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    missing_component_temp_read = audit_vs3_bytes(shader(*missing_component_temp_read_words))
+    assert any("reads r0.y before those temporary components are initialized" in reason for reason in missing_component_temp_read["reasons"])
+
     sampler_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
