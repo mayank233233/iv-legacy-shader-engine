@@ -1,3 +1,13 @@
+## Prototype 0.5.8-alpha — paired shader lowering and D3D9 smoke diagnosis
+
+- Added `tools/lower_shader_pairs.py` to emit candidate VS2/PS2 bytecode together from captured VS3/PS3 draw pairs that pass the existing stage, interface, input-layout, texture-binding and adapter-cap audits.
+- Pair fallback mappings require explicit approval of each `VS-hash:PS-hash` pair. A shader hash observed with other unapproved partners is rejected for mapping.
+- Diagnosed the failed Windows smoke run #295: that commit incorrectly assigned the state-block hooks to slots 58/59/60. D3D9 slot 58 is `GetRenderState`; the correct order is `GetRenderState=58`, `CreateStateBlock=59`, `BeginStateBlock=60`, `EndStateBlock=61`. The old mapping overwrote the read method and shifted all three state-block hooks, producing an access violation in the synthetic host.
+- The current source uses slots 59/60/61 for Create/Begin/End. Added regression coverage for GetRenderState and all three state-block methods; static source checks assert the exact slot assignments.
+- Windows x86 CI run #312 passes both jobs, including the complete x86 build, ASI compilation, runtime smoke test, captured-shader inventory and paired-audit tests. Artifact 14756021066 contains the actual 105-line synthetic `IVLegacy.log`.
+- The run #312 log confirms the final order: successful Reset, post-reset state forwarding, BeginStateBlock entry, state-cache disable, forwarding to the original BeginStateBlock, successful return, and the next render-state call forwarded successfully.
+- These are synthetic D3D9 host results. No GTA IV executable session, physical GMA 3100 driver test, image comparison or FPS benchmark has been performed.
+
 ## Prototype 0.5.7-alpha — restricted VS3-to-VS2 emission
 
 - Added a strict VS3-to-VS2 bytecode emitter for the subset that passes the existing straight-line register, instruction, data-flow and output audit.
