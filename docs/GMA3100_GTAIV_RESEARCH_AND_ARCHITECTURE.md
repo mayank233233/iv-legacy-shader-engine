@@ -338,3 +338,10 @@ The offline log parser now associates each draw with the captured target/depth d
 **Do not infer pass identity from format or dimensions alone.** The report does not claim that a particular surface is a G-buffer, shadow map, reflection, water or post-process target without correlating the shader pair, draw sequence, state and (eventually) captured image. No render target is suppressed or redirected; no render state, shader capability, LOD, population, physics, mission or game-simulation setting is changed by this telemetry work.
 
 All automated coverage uses synthetic logs/fake D3D9 devices. The normal game render path is unchanged, but actual-game correctness and performance remain unverified until a real capture and gameplay test are possible. The current pixel shader fallback is still opt-in/manual-map only; there is still no runtime VS3 replacement path and no complete shader translator.
+### Verification of default-surface capture and Windows build — 2026-11-22
+
+Windows x86 workflow run #239 passed on commit `8034e2508b3a9c71d7a9ec91311de4460432d354`. The job passed repository source checks, compiled the six generic SM2 shader examples, built the D3D9 probe and x86 ASI, and passed the fake-D3D9 runtime smoke test. The latter includes typed `GetRenderTarget` and `GetDepthStencilSurface` stubs and verifies the capture helper invokes them after device creation and successful reset. The independent VS3-to-VS2 audit job also passed.
+
+Artifact: `iv-legacy-shader-engine-windows-x86`, 237,403 bytes, SHA-256 `baaf821d66560a20d2aafebe34982aec5e307ede6e4fa4ce338105f34c8ca556`.
+
+This verifies compilation and synthetic integration only. It does not verify GTA IV 1.0.0.0 startup, render correctness, the GMA 3100 driver's D3D9 capabilities, or frame rate.
