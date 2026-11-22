@@ -200,6 +200,10 @@ def source_modifier(token: int) -> int:
     return (token >> 24) & 0xF
 
 
+def destination_mask_fn(token: int) -> int:
+    return (token >> 16) & 0xF
+
+
 def _swizzled_component_mask(source_token: int, source_channels: tuple[int, ...]) -> int:
     """Return the physical source components selected for logical result channels."""
     swizzle = source_swizzle(source_token)
@@ -229,8 +233,35 @@ def _required_temp_source_mask(ins: Instruction, source_index: int) -> int:
             for component in components
         }
         channels = tuple(sorted(channels_set))
-    elif opcode in (16, 17, 34, 36):  # LIT, DST, SGN source, NRM
-        channels = (0, 1, 2, 3)
+    elif opcode == 16:  # LIT: src.z is ignored; x/y/w feed only dest.y/z.
+        destination_mask = destination_mask_fn(ins.operands[0])
+        required = set()
+        if destination_mask & (1 << 1):
+            required.add(0)  # dest.y <- src.x
+        if destination_mask & (1 << 2):
+            required.update((0, 1))  # dest.z <- src.x, src.y
+        channels = tuple(sorted(required))
+    elif opcode == 17:  # DST has distinct component dependencies per source.
+        destination_mask = destination_mask_fn(ins.operands[0])
+        if source_index == 1:
+            required = set()
+            if destination_mask & (1 << 1):
+                required.add(1)  # dest.y <- src0.y
+            if destination_mask & (1 << 2):
+                required.add(2)  # dest.z <- src0.z
+        else:
+            required = set()
+            if destination_mask & (1 << 1):
+                required.add(1)  # dest.y <- src1.y
+            if destination_mask & (1 << 3):
+                required.add(3)  # dest.w <- src1.w
+        channels = tuple(sorted(required))
+    elif opcode == 34:  # SGN source0 is component-wise and follows the dest mask.
+        mask = destination_mask_fn(ins.operands[0])
+        channels = tuple(index for index in range(4) if mask & (1 << index))
+    elif opcode == 36:  # NRM always reads xyz for the norm; w only if written.
+        mask = destination_mask_fn(ins.operands[0])
+        channels = (0, 1, 2, 3) if mask & 0x8 else (0, 1, 2)
     else:
         destination_mask = ins.operands[0] & 0xF0000
         destination_mask = (destination_mask >> 16) & 0xF
@@ -691,6 +722,32 @@ def audit_vs3_bytes(
                 "a different four-operand form"
             )
             continue
+
+        # Enforce the baseline VS2 input/constant read-port limits. A single
+        # instruction may read only one distinct v# register and at most two
+        # distinct float-constant registers. DEF-family operands are literals.
+        if opcode not in (OP_DEF, OP_DEFB, OP_DEFI, 0):
+            input_reads: set[int] = set()
+            constant_reads: set[int] = set()
+            for source_token in ins.operands[1:]:
+                decoded_source = decode_register(source_token)
+                if decoded_source is None:
+                    continue
+                source_type, source_number = decoded_source
+                if source_type == REG_INPUT:
+                    input_reads.add(source_number)
+                elif source_type == REG_CONST:
+                    constant_reads.add(source_number)
+            if len(input_reads) > 1:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} reads {len(input_reads)} "
+                    "different vertex input registers; baseline vs_2_0 permits one"
+                )
+            if len(constant_reads) > 2:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} reads {len(constant_reads)} "
+                    "different float-constant registers; baseline vs_2_0 permits two"
+                )
 
         # Track definite temporary-component initialization in straight-line
         # programs. Source reads are checked before destinations are updated;
@@ -1303,6 +1360,112 @@ def _self_test() -> None:
     ]
     missing_component_temp_read = audit_vs3_bytes(shader(*missing_component_temp_read_words))
     assert any("reads r0.y before those temporary components are initialized" in reason for reason in missing_component_temp_read["reasons"])
+
+    input_read_port_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_COLOR, REG_INPUT, 1),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            2,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_INPUT, 0),
+            make_source_token(REG_INPUT, 1),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    input_read_port = audit_vs3_bytes(shader(*input_read_port_words))
+    assert any("different vertex input registers" in reason for reason in input_read_port["reasons"])
+
+    same_input_read_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            2,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_INPUT, 0),
+            make_source_token(REG_INPUT, 0, 0x1B),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+    ]
+    same_input_read = audit_vs3_bytes(shader(*same_input_read_words))
+    assert same_input_read["structural_candidate_for_manual_lowering"] is True
+
+    constant_read_port_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            4,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_CONST, 0),
+            make_source_token(REG_CONST, 1),
+            make_source_token(REG_CONST, 2),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    constant_read_port = audit_vs3_bytes(shader(*constant_read_port_words))
+    assert any("float-constant registers" in reason and "permits two" in reason for reason in constant_read_port["reasons"])
+
+    # LIT ignores src.z and consumes x/y/w only when the corresponding result
+    # components are requested.
+    lit_unused_z_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            16,
+            make_dest_token(REG_TEMP, 0, 0x2),
+            make_source_token(REG_TEMP, 1),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    lit_unused_z = audit_vs3_bytes(shader(*lit_unused_z_words))
+    assert any("reads r1.x" in reason for reason in lit_unused_z["reasons"])
+    assert not any("reads r1.z" in reason for reason in lit_unused_z["reasons"])
+
+    lit_ignored_only_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            16,
+            make_dest_token(REG_TEMP, 0, 0x1),
+            make_source_token(REG_TEMP, 1),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    lit_ignored_only = audit_vs3_bytes(shader(*lit_ignored_only_words))
+    assert lit_ignored_only["structural_candidate_for_manual_lowering"] is True
+
+    # DST uses source-specific channels and ignores the other components.
+    dst_component_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            17,
+            make_dest_token(REG_TEMP, 0, 0x8),
+            make_source_token(REG_TEMP, 1),
+            make_source_token(REG_TEMP, 2),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    dst_component = audit_vs3_bytes(shader(*dst_component_words))
+    assert any("reads r2.w" in reason for reason in dst_component["reasons"])
+    assert not any("reads r1." in reason for reason in dst_component["reasons"])
+    assert not any("reads r2.xyz" in reason for reason in dst_component["reasons"])
+
+    # NRM always consumes xyz for the norm but does not consume w unless it is
+    # also asked to write the normalized w component.
+    nrm_xyz_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            36,
+            make_dest_token(REG_TEMP, 0, 0x7),
+            make_source_token(REG_TEMP, 1),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    nrm_xyz = audit_vs3_bytes(shader(*nrm_xyz_words))
+    assert any("reads r1.xyz" in reason for reason in nrm_xyz["reasons"])
+    assert not any("reads r1.w" in reason for reason in nrm_xyz["reasons"])
 
     sampler_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
