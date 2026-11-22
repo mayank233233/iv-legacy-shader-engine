@@ -1,8 +1,8 @@
-# IV Legacy Shader Engine — Prototype 0.5.6-alpha
+# IV Legacy Shader Engine — Prototype 0.5.7-alpha
 
 **Target:** 32-bit Windows, Direct3D 9, Shader Model `vs_2_0` / `ps_2_0`.
 
-Prototype 0.5.6-alpha combines the v0.3 standalone D3D9 probe with an experimental Win32/x86 telemetry ASI, shader inventory tools, conservative offline shader-downlevel audits and an opt-in redundant D3D9 scalar state cache. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This is still a development foundation, not a playable compatibility fix: it does not inject SM2 replacements into GTA IV, spoof capabilities, or establish that the game can launch on Intel GMA 3100.
+Prototype 0.5.7-alpha combines the standalone D3D9 probe, experimental Win32/x86 telemetry ASI, restricted offline PS3/VS3-to-SM2 bytecode downlevelers, explicitly approved hash-mapped PS2/VS2 fallback hooks, and an opt-in redundant D3D9 scalar state cache. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This remains an experimental compatibility foundation, not a playable compatibility fix: it does not spoof device capabilities, translate arbitrary SM3 shaders, or establish that GTA IV can launch or render correctly on Intel GMA 3100.
 
 ## Project contents
 
@@ -15,13 +15,13 @@ Prototype 0.5.6-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `shaders/flat_lod_vs20.hlsl` | Position/vertex-colour transform for flat distant geometry |
 | `shaders/flat_lod_ps20.hlsl` | Texture-free vertex-colour/fog pass |
 | `src/D3D9ShaderProbe.cpp` | Standalone x86 D3D9 capability, shader-creation, draw/present and readback probe |
-| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; D3D9 capability/draw telemetry, optional QPC frame/API profiler, and opt-in redundant scalar state suppression |
+| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; D3D9 telemetry/profiling, opt-in scalar state suppression, and explicit hash-mapped PS2/VS2 shader fallback hooks |
 | `build/compile_shaders.bat` | FXC compilation and assembly-listing generation for all six shaders |
 | `build/build_probe.bat` | x86 MSVC standalone-probe build |
 | `build/build_asi.bat` | x86 MSVC ASI/DLL build |
 | `tools/analyze_d3d9_shaders.py` | Offline D3D9 SM2/SM3 token-stream inventory for compiled or captured shaders |
 | `tools/audit_sm3_to_sm2.py` | Conservative offline audit/lowering candidate generator for a restricted `ps_3_0` pixel-shader subset; unsupported shaders are rejected, not guessed |
-| `tools/audit_vs3_to_vs2.py` | Conservative `vs_3_0` to `vs_2_0` structural audit; reports blockers and output-mapping plans but emits no bytecode |
+| `tools/audit_vs3_to_vs2.py` | Conservative `vs_3_0` to `vs_2_0` auditor and restricted bytecode emitter; rejects unsupported instructions, packed output semantics and unsafe remaps |
 | `tools/audit_shader_pairs.py` | Read-only draw-level VS3/PS3 pairing audit: semantic/component linkage, vertex declaration/FVF layout, captured texture bindings and render-target caps; emits no bytecode |
 | `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls in `IVLegacy.log` |
 | `tools/inspect_gtaiv_executable.py` | Read-only PE32 import/version inspector for the original `GTAIV.exe`; reports normal and delay imports without modifying the file |
@@ -30,6 +30,16 @@ Prototype 0.5.6-alpha combines the v0.3 standalone D3D9 probe with an experiment
 | `.github/workflows/windows-x86-build.yml` | Windows x86 compile/build CI; does not run the GPU probe |
 
 All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs_2_0` and `ps_2_0`.
+
+## v0.5.7-alpha changes
+
+- Added a restricted `vs_3_0` → `vs_2_0` bytecode emitter for the existing straight-line subset that passes the conservative VS2 instruction/register/output audit.
+- The emitter removes VS3 output DCL instructions and remaps each single-semantic VS3 output register to the selected fixed VS2 output register. It rejects output registers packing multiple semantics because splitting their component writes is not implemented.
+- Added x86 ASI vertex-shader creation fallback: a captured VS3 source hash can be mapped through `[VertexShaderFallbacks]` to a VS2 bytecode file. The hook validates the VS2 profile, logs the replacement/object mapping, and retries the original VS3 shader if replacement creation fails.
+- Generalised the runtime bytecode-envelope validator for both VS2 and PS2 and retained separate `[ShaderFallbacks]` and `[VertexShaderFallbacks]` INI sections.
+- Both offline converters now require an explicit `--approved-source-hash` before writing a runtime fallback-map entry. Bytecode emission or a stage-level audit alone is not proof that its paired shader, declarations, constants, render states and material are compatible.
+- Added synthetic coverage for VS2 bytecode emission, packed-output rejection, map-section preservation and the VS3→VS2 runtime creation fallback.
+- Extended Windows x86 CI to emit the synthetic VS2 candidate and verify that both fallback-map sections survive. **CI verification for this branch is pending.** No GTA IV gameplay session or GMA 3100 render test has been run.
 
 ## v0.5.6-alpha changes
 
@@ -78,11 +88,36 @@ The offline `tools/audit_vs3_to_vs2.py` checks a deliberately narrow, straight-l
 
 The output audit follows the VS3 declaration model: different semantics may occupy disjoint component masks of the same output register, provided their DCL write masks are unique and non-overlapping. The report preserves each semantic mapping separately, allocates direct `COLOR0/1` semantics to their VS2 color outputs, and compacts TEXCOORD semantics into `oT0-oT7` outputs. A sparse source sequence such as only `TEXCOORD1` can therefore map to `oT0`; the changed link semantic is recorded and flagged because the paired pixel-shader input declaration must also be updated. Sparse component masks such as `.yz` and `.xz` are preserved on the target four-component output; the audit does not impose an undocumented contiguous-mask or consecutive-use requirement on VS2 output registers. The VS3 position and point-size source registers are reserved: neither can share its register with another semantic. The other ten slots are general interpolators and may be any ten of the twelve source indices. Other generic varyings are assigned to remaining VS2 color/texture outputs and carry the same explicit interface-remap flag. `FOG` is treated as a generic VS3 varying, not silently converted to the special VS2 fog register. `POSITION0` requires a full declaration and full output write. `PSIZE0` requires the VS3 full DCL declaration mask, but only source component `.x` is mapped to the scalar VS2 point-size output `oPts.x`.
 
-The first audit deliberately rejects static flow-control programs, version-sensitive `sincos`, vertex texture sampling, relative register addressing and pre-transformed `POSITIONT` outputs. It validates the D3D9 `LOOP` token form as two parameters (`aL,i#`) before rejecting flow control. For baseline `vs_2_0`, it accepts `MOVA a0.x` only; `MOV a0` is a `vs_1_1` form, and arbitrary vector write masks on `MOVA` are documented for `vs_2_x` and later.
+The auditor rejects static flow-control programs, version-sensitive `sincos`, vertex texture sampling, relative register addressing and pre-transformed `POSITIONT` outputs. It validates the D3D9 `LOOP` token form as two parameters (`aL,i#`) before rejecting flow control. For baseline `vs_2_0`, it accepts `MOVA a0.x` only; `MOV a0` is a `vs_1_1` form, and arbitrary vector write masks on `MOVA` are documented for `vs_2_x` and later.
 
-Matrix forms are checked against their exact instruction contracts: `m4x4` writes `.xyzw` and reads four consecutive constants; `m4x3` writes `.xyz` and reads three; `m3x4` writes `.xyzw` and reads four; `m3x3` writes `.xyz` and reads three; `m3x2` writes `.xy` and reads two. The audit also rejects matrix destination/vector-source aliasing and modified matrix-source operands. It reports a structural candidate for manual lowering only; **it does not rewrite or emit VS2 bytecode**. Candidate status is not proof of D3D9 driver acceptance, vertex-declaration compatibility, pixel-shader linkage or visual equivalence. CI uses synthetic bytecode fixtures only. The analyzer also performs component-aware temporary initialization checks for straight-line programs. It follows source swizzles and the channels consumed by DP3/DP4, CRS, LIT, DST, NRM, SGN and matrix operations. It treats SGN scratch temporaries as undefined after execution and rejects later reads from them. It checks the VS2 read-port limits of one distinct vertex input register and one distinct float-constant register per instruction. Multiple sources may independently swizzle or negate that same constant register; matrix operations name a base constant whose following rows are implicit. Flow-control shaders remain rejected, so initialization is not guessed across branches or loops.
+Matrix forms are checked against their exact instruction contracts: `m4x4` writes `.xyzw` and reads four consecutive constants; `m4x3` writes `.xyz` and reads three; `m3x4` writes `.xyzw` and reads four; `m3x3` writes `.xyz` and reads three; `m3x2` writes `.xy` and reads two. The auditor rejects matrix destination/vector-source aliasing and modified matrix-source operands. For shaders accepted by this restricted subset, the tool can now emit `.vs20.vso` bytecode: VS3 output DCLs are removed and output-register destinations are rewritten to the corresponding VS2 fixed outputs. A source output register carrying multiple semantics is rejected because component-split write rewriting is not implemented. TEXCOORD or generic-semantic remaps are also withheld from the runtime map until the paired pixel shader has been rewritten and reviewed. CI uses synthetic bytecode fixtures only. The analyzer also performs component-aware temporary initialization checks for straight-line programs. It follows source swizzles and the channels consumed by DP3/DP4, CRS, LIT, DST, NRM, SGN and matrix operations. It treats SGN scratch temporaries as undefined after execution and rejects later reads from them. It checks the VS2 read-port limits of one distinct vertex input register and one distinct float-constant register per instruction. Multiple sources may independently swizzle or negate that same constant register; matrix operations name a base constant whose following rows are implicit. Flow-control shaders remain rejected, so initialization is not guessed across branches or loops.
 
 See the [Microsoft VS3 output declaration rules](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dcl-usage-outut-register---vs), [VS2 output registers](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-2-0), [VS2 destination masks](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-modifiers-masking), and the per-opcode [m4x4](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m4x4---vs), [m4x3](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m4x3---vs), [m3x4](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x4---vs), [m3x3](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x3---vs), and [m3x2](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x2---vs) requirements.
+
+### Emit VS2 bytecode candidates
+
+Run the strict auditor and emit only the bytecode candidates that pass its checks:
+
+```sh
+python tools/audit_vs3_to_vs2.py IVLegacyCaptures \
+  --emit-dir build/bin/IVLegacyFallbacks \
+  --fallback-prefix IVLegacyFallbacks \
+  --report build/bin/vertex_downlevel.json
+```
+
+The output files are candidates, not certified replacements. The tool reports a source FNV-1a hash and a relative fallback path. After reviewing the paired-shader audit, render states, vertex layout, constants and actual output, an explicitly approved hash can be added to the runtime map:
+
+```sh
+python tools/audit_vs3_to_vs2.py IVLegacyCaptures \
+  --emit-dir build/bin/IVLegacyFallbacks \
+  --fallback-ini build/bin/IVLegacyShaderFallbacks.ini \
+  --fallback-prefix IVLegacyFallbacks \
+  --approved-source-hash 0123456789ABCDEF
+```
+
+Use the real 16-digit source hash from the JSON report, not the example above. The pixel-shader converter uses the same explicit-approval rule. Both tools preserve the other shader-stage section in the same INI. Runtime replacement remains opt-in through `EnableShaderFallbacks=1`; unknown or unapproved hashes continue through the original code path.
+
+**The current implementation does not remove GTA IV's initial SM3 device-capability requirement.** The game may check shader-model capabilities and abort before it ever calls `CreateVertexShader` or `CreatePixelShader`. The current ASI deliberately does not lie about GMA 3100 capabilities. Whether the game reaches shader creation on this adapter must be measured separately. Even if it does, every relevant shader pair, declaration, constant layout, texture binding, render target, blend/depth state and required effect must be validated. Missing features such as MRT formats, depth textures or other fixed-function/device capabilities cannot be solved by rewriting shader bytecode alone.
 
 ## v0.5.4-alpha changes
 
