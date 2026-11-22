@@ -764,9 +764,18 @@ namespace
     HRESULT WINAPI HookDeviceBeginStateBlock(IDirect3DDevice9* self)
     {
         DisableRedundantStateCacheForStateBlock();
-        return g_realDeviceBeginStateBlock
+        Log(
+            "STATE_BLOCK_BEGIN_FORWARD device=%p original=%p",
+            self,
+            reinterpret_cast<PVOID>(g_realDeviceBeginStateBlock));
+        const HRESULT hr = g_realDeviceBeginStateBlock
             ? g_realDeviceBeginStateBlock(self)
             : D3DERR_INVALIDCALL;
+        Log(
+            "STATE_BLOCK_BEGIN_RETURN device=%p hr=0x%08lX",
+            self,
+            static_cast<unsigned long>(hr));
+        return hr;
     }
 
     HRESULT WINAPI HookDeviceEndStateBlock(
