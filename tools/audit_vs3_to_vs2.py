@@ -252,10 +252,13 @@ def parse_vs3(data: bytes) -> tuple[list[int], list[Instruction]]:
 
 
 def output_mapping(usage: int, usage_index: int) -> tuple[int, int] | None:
+    """Map semantics with a direct legacy VS2 output equivalent.
+
+    Other valid semantics are assigned later to an unused oD#/oT# register,
+    with an explicit pixel-shader interface-remap requirement.
+    """
     if usage == USAGE_POSITION and usage_index == 0:
         return (REG_RASTOUT, 0)       # oPos
-    if usage == USAGE_FOG and usage_index == 0:
-        return (REG_RASTOUT, 1)       # oFog
     if usage == USAGE_PSIZE and usage_index == 0:
         return (REG_RASTOUT, 2)       # oPts
     if usage == USAGE_COLOR and usage_index in (0, 1):
@@ -300,8 +303,9 @@ def audit_vs3_bytes(
     opcode_counts: Counter[str] = Counter()
     instruction_slots = 0
     input_declarations: dict[int, dict[str, int]] = {}
-    output_declarations: dict[int, dict[str, Any]] = {}
-    output_targets: dict[tuple[int, int], int] = {}
+    output_declarations: dict[int, list[dict[str, Any]]] = {}
+    output_targets: dict[tuple[int, int], tuple[int, int]] = {}
+    output_semantics: set[tuple[int, int]] = set()
     written_outputs: dict[tuple[int, int], int] = {}
     input_semantics: dict[tuple[int, int], int] = {}
     registers: dict[str, set[int]] = {
@@ -404,45 +408,97 @@ def audit_vs3_bytes(
                 reasons.append(
                     f"output o{register_number} exceeds the vs_3_0 o0-o11 declaration range"
                 )
-            target = output_mapping(usage, usage_index)
+            semantic_key = (usage, usage_index)
+            if semantic_key in output_semantics:
+                reasons.append(
+                    f"output semantic {D3DDECLUSAGE_NAMES.get(usage, usage)}{usage_index} "
+                    "is declared more than once"
+                )
+            output_semantics.add(semantic_key)
+
+            if usage == USAGE_POSITION and usage_index == 0 and declared_mask != 0xF:
+                reasons.append(
+                    f"POSITION0 output o{register_number} must declare all four components"
+                )
+            if usage == USAGE_PSIZE and usage_index == 0 and declared_mask != 0xF:
+                reasons.append(
+                    f"PSIZE0 output o{register_number} must use the full xyzw declaration mask"
+                )
+            if usage == 9:  # D3DDECLUSAGE_POSITIONT
+                reasons.append(
+                    f"POSITIONT{usage_index} output requires the pre-transformed vertex path"
+                )
+            if usage == USAGE_PSIZE and usage_index != 0:
+                reasons.append(
+                    f"PSIZE{usage_index} is not a supported point-size output semantic"
+                )
+
             semantic = {
                 "usage": usage,
                 "usage_name": D3DDECLUSAGE_NAMES.get(usage, f"UNKNOWN_{usage}"),
                 "usage_index": usage_index,
                 "component_mask": declared_mask,
             }
-            if target is None:
+            entries = output_declarations.setdefault(register_number, [])
+            existing_mask = 0
+            for existing in entries:
+                existing_mask |= existing["component_mask"]
+            if existing_mask & declared_mask:
                 reasons.append(
-                    f"output o{register_number} semantic usage={usage}, "
-                    f"index={usage_index} has no fixed vs_2_0 output mapping"
+                    f"output o{register_number} has overlapping DCL component masks"
                 )
-            else:
-                if register_number in output_declarations:
-                    reasons.append(f"output o{register_number} is declared more than once")
-                if target in output_targets:
-                    reasons.append(
-                        f"output semantics collide on vs_2_0 register type={target[0]} "
-                        f"index={target[1]}"
-                    )
-                output_targets[target] = register_number
-                semantic["target_register_type"] = target[0]
-                semantic["target_register_index"] = target[1]
-            output_declarations[register_number] = semantic
+            entries.append(semantic)
         else:
             reasons.append(
                 f"DCL at DWORD {ins.offset} targets register type {register_type}, "
                 "which this initial vs_2_0 audit does not map"
             )
 
-    declared_outputs = {
-        number: (
-            declaration.get("target_register_type"),
-            declaration.get("target_register_index"),
-            declaration.get("component_mask", 0),
-        )
-        for number, declaration in output_declarations.items()
-        if "target_register_type" in declaration
-    }
+    # Allocate the VS3 semantic declarations to the ten generic VS2 output
+    # registers. Direct COLOR/TEXCOORD bindings are reserved first. Other
+    # semantics are remapped to free output registers and require a paired
+    # pixel-shader input-declaration remap.
+    direct_targets: set[tuple[int, int]] = set()
+    for source_register, entries in sorted(output_declarations.items()):
+        for entry in entries:
+            target = output_mapping(entry["usage"], entry["usage_index"])
+            if target is not None:
+                if target in direct_targets:
+                    reasons.append(
+                        f"multiple output semantics map to the same VS2 register "
+                        f"type={target[0]} index={target[1]}"
+                    )
+                direct_targets.add(target)
+                entry["target_register_type"] = target[0]
+                entry["target_register_index"] = target[1]
+                entry["requires_pixel_shader_interface_remap"] = False
+
+    # Prefer oD0/oD1 for remapped semantics because their masks are not subject
+    # to the consecutive oT# write-mask restrictions; then use oT0-oT7.
+    generic_targets = (
+        [(REG_ATTROUT, 0), (REG_ATTROUT, 1)]
+        + [(REG_OUTPUT, index) for index in range(8)]
+    )
+    allocated_targets = set(direct_targets)
+    for source_register, entries in sorted(output_declarations.items()):
+        for entry in entries:
+            if "target_register_type" in entry:
+                continue
+            target = next(
+                (candidate for candidate in generic_targets if candidate not in allocated_targets),
+                None,
+            )
+            if target is None:
+                reasons.append(
+                    "more than ten non-position vertex output semantics require VS2 interpolation registers"
+                )
+                continue
+            allocated_targets.add(target)
+            entry["target_register_type"] = target[0]
+            entry["target_register_index"] = target[1]
+            entry["requires_pixel_shader_interface_remap"] = True
+
+    declared_outputs = output_declarations
 
     # Pass two: prove the straight-line instruction subset, register file and
     # output interface fit the baseline vs_2_0 model.
@@ -670,28 +726,37 @@ def audit_vs3_bytes(
                 )
             elif register_type == REG_OUTPUT:
                 registers["output"].add(register_number)
-                target = declared_outputs.get(register_number)
-                if target is None:
+                entries = declared_outputs.get(register_number)
+                if not entries:
                     reasons.append(
                         f"{name} at DWORD {ins.offset} uses output o{register_number} "
-                        "without a supported semantic declaration"
+                        "without a semantic declaration"
                     )
                 elif not is_destination:
                     reasons.append(
                         f"{name} at DWORD {ins.offset} reads a write-only vertex output"
                     )
                 else:
-                    target_type, target_index, declared_mask = target
                     write_mask = destination_mask(operand)
+                    declared_mask = 0
+                    for entry in entries:
+                        declared_mask |= entry["component_mask"]
                     if write_mask & ~declared_mask:
                         reasons.append(
                             f"{name} at DWORD {ins.offset} writes components outside "
-                            f"the declared mask for output o{register_number}"
+                            f"the declared masks for output o{register_number}"
                         )
-                    mapped_target = (target_type, target_index)
-                    written_outputs[mapped_target] = (
-                        written_outputs.get(mapped_target, 0) | write_mask
-                    )
+                    for entry in entries:
+                        part_mask = write_mask & entry["component_mask"]
+                        if not part_mask or "target_register_type" not in entry:
+                            continue
+                        mapped_target = (
+                            entry["target_register_type"],
+                            entry["target_register_index"],
+                        )
+                        written_outputs[mapped_target] = (
+                            written_outputs.get(mapped_target, 0) | part_mask
+                        )
             elif register_type == REG_CONSTINT:
                 registers["integer_constant"].add(register_number)
                 if register_number > 15:
@@ -751,13 +816,13 @@ def audit_vs3_bytes(
             f"the mapped oPos write mask is 0x{position_mask:X}"
         )
 
-    # Baseline vs_2_0 uses a scalar x component for fog and point size.
-    for scalar_output in ((REG_RASTOUT, 1), (REG_RASTOUT, 2)):
-        scalar_mask = written_outputs.get(scalar_output, 0)
-        if scalar_mask and scalar_mask != 0x1:
-            reasons.append(
-                f"mapped scalar output register {scalar_output[1]} must use only the x component"
-            )
+    # VS2 point size is a scalar register but its assembler write mask must
+    # remain implicit/full (.xyzw); only x is consumed by the rasterizer.
+    point_size_output = (REG_RASTOUT, 2)
+    if point_size_output in written_outputs and written_outputs[point_size_output] != 0xF:
+        reasons.append(
+            "mapped point-size output must use the full xyzw write mask"
+        )
 
     # The combined write mask for each oT# must be .x, .xy, .xyz or .xyzw;
     # if a higher texture-coordinate register is written, all lower ones must be.
@@ -780,16 +845,23 @@ def audit_vs3_bytes(
     reasons = list(dict.fromkeys(reasons))
     candidate = not reasons
     output_map_report = {
-        f"o{source}": {
-            "semantic": {
-                "usage": declaration["usage"],
-                "usage_index": declaration["usage_index"],
-            },
-            "declared_component_mask": declaration.get("component_mask", 0),
-            "vs_2_0_register_type": declaration.get("target_register_type"),
-            "vs_2_0_register_index": declaration.get("target_register_index"),
-        }
-        for source, declaration in sorted(output_declarations.items())
+        f"o{source}": [
+            {
+                "semantic": {
+                    "usage": declaration["usage"],
+                    "usage_name": declaration["usage_name"],
+                    "usage_index": declaration["usage_index"],
+                },
+                "declared_component_mask": declaration["component_mask"],
+                "vs_2_0_register_type": declaration.get("target_register_type"),
+                "vs_2_0_register_index": declaration.get("target_register_index"),
+                "requires_pixel_shader_interface_remap": declaration.get(
+                    "requires_pixel_shader_interface_remap", False
+                ),
+            }
+            for declaration in declarations
+        ]
+        for source, declarations in sorted(output_declarations.items())
     }
     return {
         "status": (
@@ -814,6 +886,14 @@ def audit_vs3_bytes(
             for number, declaration in sorted(input_declarations.items())
         },
         "output_mapping_plan": output_map_report,
+        "output_component_split_required": any(
+            len(declarations) > 1 for declarations in output_declarations.values()
+        ),
+        "requires_pixel_shader_interface_remap": any(
+            declaration.get("requires_pixel_shader_interface_remap", False)
+            for declarations in output_declarations.values()
+            for declaration in declarations
+        ),
         "written_outputs": [
             {
                 "register_type": register_type,
@@ -1043,7 +1123,7 @@ def _self_test() -> None:
     texcoord_gap_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 1), make_source_token(REG_INPUT, 0)),
     ]
@@ -1053,12 +1133,65 @@ def _self_test() -> None:
     texcoord_mask_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
-        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 0),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, usage_index=1),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0x5), make_source_token(REG_INPUT, 0)),
     ]
     texcoord_mask = audit_vs3_bytes(shader(*texcoord_mask_words))
     assert any("unsupported combined write mask" in reason for reason in texcoord_mask["reasons"])
+
+    # VS3 may pack different semantics into disjoint components of one output
+    # register. The lowering plan must split that source write into two outputs.
+    packed_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=0),
+        *dcl(3, REG_OUTPUT, 3, usage_index=0),  # intentionally duplicate semantic
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
+    ]
+    packed = audit_vs3_bytes(shader(*packed_words))
+    assert any("is declared more than once" in reason for reason in packed["reasons"])
+
+    packed_distinct_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 3, usage_index=0),
+        *dcl(3, REG_OUTPUT, 3, usage_index=0),
+    ]
+    # Make the second semantic distinct and give it a disjoint .zw mask.
+    packed_distinct_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(OP_DCL,
+            0x80000000 | (USAGE_COLOR & 0xF),
+            make_dest_token(REG_OUTPUT, 3, 0x3)),
+        *make_instruction(OP_DCL,
+            0x80000000 | (3 & 0xF) | (1 << 16),
+            make_dest_token(REG_OUTPUT, 3, 0xC)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
+    ]
+    packed_distinct = audit_vs3_bytes(shader(*packed_distinct_words))
+    assert packed_distinct["structural_candidate_for_manual_lowering"] is True
+    assert packed_distinct["output_component_split_required"] is True
+    assert packed_distinct["requires_pixel_shader_interface_remap"] is True
+
+    # The component masks on multiple DCL declarations for one output may not overlap.
+    overlapping_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(OP_DCL,
+            0x80000000 | (USAGE_COLOR & 0xF),
+            make_dest_token(REG_OUTPUT, 3, 0x3)),
+        *make_instruction(OP_DCL,
+            0x80000000 | (3 & 0xF) | (1 << 16),
+            make_dest_token(REG_OUTPUT, 3, 0x2)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 3), make_source_token(REG_INPUT, 0)),
+    ]
+    overlapping = audit_vs3_bytes(shader(*overlapping_words))
+    assert any("overlapping DCL component masks" in reason for reason in overlapping["reasons"])
 
     over_budget_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
