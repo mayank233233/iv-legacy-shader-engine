@@ -1208,7 +1208,7 @@ namespace
             "avg_frame_ms=%.3f p50_frame_ms=%.3f p95_frame_ms=%.3f "
             "p99_frame_ms=%.3f max_frame_ms=%.3f "
             "avg_present_ms=%.3f p95_present_ms=%.3f "
-            "avg_draw_cpu_ms=%.3f p95_draw_cpu_ms=%.3f "
+            "avg_draw_api_ms=%.3f p95_draw_api_ms=%.3f "
             "avg_unattributed_ms=%.3f p95_unattributed_ms=%.3f "
             "avg_draw_calls=%.2f draw_failures=%lld gpu_time=not_measured",
             count,
