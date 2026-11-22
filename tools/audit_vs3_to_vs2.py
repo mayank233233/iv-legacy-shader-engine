@@ -1,0 +1,755 @@
+#!/usr/bin/env python3
+"""Conservative D3D9 vs_3_0 compatibility audit against the vs_2_0 baseline.
+
+This tool does not rewrite or emit shader bytecode. It inventories a narrow,
+straight-line subset that appears structurally compatible with vs_2_0 and
+explains why other programs are rejected. Even a candidate needs interface,
+driver and rendered-output validation.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import struct
+import sys
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+VS3_VERSION = 0xFFFE0300
+OP_COMMENT = 0xFFFE
+OP_END = 0xFFFF
+OP_PHASE = 0xFFFD
+OP_DCL = 31
+OP_DEFB = 47
+OP_DEFI = 48
+OP_DEF = 81
+
+# Direct3D 9 vs_2_0 instruction-slot costs from the Microsoft instruction table.
+# Setup instructions have zero slot cost; matrix and transcendental instructions
+# can consume multiple slots.
+VS2_SLOT_COSTS = {
+    0: 1,   # nop
+    1: 1,   # mov
+    2: 1,   # add
+    3: 1,   # sub
+    4: 1,   # mad
+    5: 1,   # mul
+    6: 1,   # rcp
+    7: 1,   # rsq
+    8: 1,   # dp3
+    9: 1,   # dp4
+    10: 1,  # min
+    11: 1,  # max
+    12: 1,  # slt
+    13: 1,  # sge
+    14: 1,  # exp
+    15: 1,  # log
+    16: 3,  # lit
+    17: 1,  # dst
+    18: 2,  # lrp
+    19: 1,  # frc
+    20: 4,  # m4x4
+    21: 3,  # m4x3
+    22: 4,  # m3x4
+    23: 3,  # m3x3
+    24: 2,  # m3x2
+    25: 2,  # call
+    26: 3,  # callnz bool
+    27: 3,  # loop
+    28: 1,  # ret
+    29: 2,  # endloop
+    30: 0,  # label
+    31: 0,  # dcl
+    32: 3,  # pow
+    33: 2,  # crs
+    34: 3,  # sgn
+    35: 1,  # abs
+    36: 3,  # nrm
+    37: 8,  # sincos (vs_2_0 form)
+    38: 3,  # rep
+    39: 2,  # endrep
+    40: 3,  # if bool
+    42: 1,  # else
+    43: 1,  # endif
+    46: 1,  # mova
+    47: 0,  # defb
+    48: 0,  # defi
+    78: 1,  # expp
+    79: 1,  # logp
+    81: 0,  # def
+}
+VS2_OPCODE_NAMES = {
+    0: "nop", 1: "mov", 2: "add", 3: "sub", 4: "mad", 5: "mul",
+    6: "rcp", 7: "rsq", 8: "dp3", 9: "dp4", 10: "min", 11: "max",
+    12: "slt", 13: "sge", 14: "exp", 15: "log", 16: "lit", 17: "dst",
+    18: "lrp", 19: "frc", 20: "m4x4", 21: "m4x3", 22: "m3x4",
+    23: "m3x3", 24: "m3x2", 25: "call", 26: "callnz", 27: "loop",
+    28: "ret", 29: "endloop", 30: "label", 31: "dcl", 32: "pow",
+    33: "crs", 34: "sgn", 35: "abs", 36: "nrm", 37: "sincos",
+    38: "rep", 39: "endrep", 40: "if", 41: "ifc", 42: "else",
+    43: "endif", 44: "break", 45: "breakc", 46: "mova", 47: "defb",
+    48: "defi", 78: "expp", 79: "logp", 81: "def",
+}
+# Exact parameter-token counts for the opcodes this audit knows how to inspect.
+VS2_PARAMETER_COUNTS = {
+    0: 0,
+    1: 2, 2: 3, 3: 3, 4: 4, 5: 3, 6: 2, 7: 2, 8: 3, 9: 3,
+    10: 3, 11: 3, 12: 3, 13: 3, 14: 2, 15: 2, 16: 2, 17: 3,
+    18: 4, 19: 2, 20: 3, 21: 3, 22: 3, 23: 3, 24: 3,
+    25: 1, 26: 2, 27: 2, 28: 0, 29: 0, 30: 1, 31: 2,
+    32: 3, 33: 3, 34: 4, 35: 2, 36: 2,
+    38: 1, 39: 0, 40: 1, 42: 0, 43: 0, 46: 2,
+    47: 2, 48: 5, 78: 2, 79: 2, 81: 5,
+}
+# Static flow instructions exist in vs_2_0, but this first audit does not
+# validate control-flow structure, subroutine graphs or expansion costs.
+UNVALIDATED_STATIC_FLOW = {25, 26, 27, 28, 29, 30, 38, 39, 40, 42, 43}
+# vs_3_0 sincos has a different two-operand form from the four-operand vs_2_0 form.
+VERSION_SENSITIVE_OPS = {37}
+
+# D3DSHADER_PARAM_REGISTER_TYPE values used by D3D9 vertex shaders.
+REG_TEMP = 0
+REG_INPUT = 1
+REG_CONST = 2
+REG_ADDR = 3
+REG_RASTOUT = 4
+REG_ATTROUT = 5
+REG_OUTPUT = 6
+REG_CONSTINT = 7
+REG_SAMPLER = 10
+REG_CONSTBOOL = 14
+REG_LOOP = 15
+REG_LABEL = 18
+REG_PREDICATE = 19
+
+# D3DDECLUSAGE values used by the output declarations this tool can map to
+# the fixed vs_2_0 output register file.
+USAGE_POSITION = 0
+USAGE_PSIZE = 4
+USAGE_TEXCOORD = 5
+USAGE_COLOR = 10
+USAGE_FOG = 11
+
+@dataclass(frozen=True)
+class Instruction:
+    offset: int
+    token: int
+    opcode: int
+    operands: tuple[int, ...]
+
+
+class AuditError(ValueError):
+    """Raised when a bytecode stream is structurally malformed."""
+
+
+def decode_register(token: int) -> tuple[int, int] | None:
+    if (token & 0x80000000) == 0:
+        return None
+    register_type = ((token & 0x70000000) >> 28) | ((token & 0x00001800) >> 8)
+    return register_type, token & 0x7FF
+
+
+def make_parameter_token(register_type: int, register: int) -> int:
+    """Build a D3D9 register token for deterministic self-tests."""
+    return (
+        0x80000000
+        | (register & 0x7FF)
+        | ((register_type & 0x7) << 28)
+        | ((register_type & 0x18) << 8)
+    )
+
+
+def make_instruction(opcode: int, *operands: int) -> list[int]:
+    token = (opcode & 0xFFFF) | ((len(operands) & 0xF) << 24)
+    return [token, *operands]
+
+
+def parse_vs3(data: bytes) -> tuple[list[int], list[Instruction]]:
+    if len(data) < 8 or len(data) % 4:
+        raise AuditError("bytecode must be DWORD-aligned and contain a version plus END")
+    words = list(struct.unpack("<" + "I" * (len(data) // 4), data))
+    if words[0] != VS3_VERSION:
+        raise AuditError(
+            f"expected vs_3_0 token 0x{VS3_VERSION:08X}, got 0x{words[0]:08X}"
+        )
+
+    instructions: list[Instruction] = []
+    cursor = 1
+    found_end = False
+    while cursor < len(words):
+        start = cursor
+        token = words[cursor]
+        cursor += 1
+        opcode = token & 0xFFFF
+
+        if opcode == OP_END:
+            found_end = True
+            break
+        if opcode == OP_COMMENT:
+            comment_length = (token >> 16) & 0x7FFF
+            if comment_length > len(words) - cursor:
+                raise AuditError(
+                    f"COMMENT at DWORD {start} exceeds the remaining bytecode"
+                )
+            cursor += comment_length
+            continue
+        if opcode == OP_PHASE:
+            raise AuditError("PHASE token is not valid in a vs_3_0 vertex shader")
+
+        parameter_count = (token >> 24) & 0xF
+        if parameter_count > len(words) - cursor:
+            raise AuditError(
+                f"instruction at DWORD {start} claims {parameter_count} operands, "
+                f"but the bytecode ends early"
+            )
+        operands = tuple(words[cursor:cursor + parameter_count])
+        cursor += parameter_count
+        instructions.append(Instruction(start, token, opcode, operands))
+
+    if not found_end:
+        raise AuditError("missing D3DSIO_END token")
+    if any(words[cursor:]):
+        raise AuditError("non-zero DWORDs follow D3DSIO_END")
+    return words, instructions
+
+
+def output_mapping(usage: int, usage_index: int) -> tuple[int, int] | None:
+    if usage == USAGE_POSITION and usage_index == 0:
+        return (REG_RASTOUT, 0)       # oPos
+    if usage == USAGE_FOG and usage_index == 0:
+        return (REG_RASTOUT, 1)       # oFog
+    if usage == USAGE_PSIZE and usage_index == 0:
+        return (REG_RASTOUT, 2)       # oPts
+    if usage == USAGE_COLOR and usage_index in (0, 1):
+        return (REG_ATTROUT, usage_index)  # oD0/oD1
+    if usage == USAGE_TEXCOORD and usage_index <= 7:
+        return (REG_OUTPUT, usage_index)   # oT0-oT7
+    return None
+
+
+def _register_operands(ins: Instruction) -> tuple[int, ...]:
+    if ins.opcode == OP_DCL:
+        return ins.operands[1:2]
+    if ins.opcode in (OP_DEF, OP_DEFB, OP_DEFI):
+        return ins.operands[:1]
+    if ins.opcode in UNVALIDATED_STATIC_FLOW or ins.opcode in (41, 44, 45, 94, 95, 96):
+        return ()
+    if ins.opcode == 0:
+        return ()
+    return ins.operands
+
+
+def audit_vs3_bytes(
+    data: bytes,
+    *,
+    max_instruction_slots: int = 256,
+    max_temps: int = 12,
+    max_float_constants: int = 256,
+) -> dict[str, Any]:
+    if max_instruction_slots < 1 or max_temps < 1 or max_float_constants < 1:
+        raise ValueError("configured vs_2_0 limits must be positive")
+
+    try:
+        _, instructions = parse_vs3(data)
+    except AuditError as exc:
+        return {
+            "status": "parse_error",
+            "structural_candidate_for_manual_lowering": False,
+            "reasons": [str(exc)],
+        }
+
+    reasons: list[str] = []
+    opcode_counts: Counter[str] = Counter()
+    instruction_slots = 0
+    input_declarations: dict[int, dict[str, int]] = {}
+    output_declarations: dict[int, dict[str, Any]] = {}
+    output_targets: dict[tuple[int, int], int] = {}
+    written_outputs: set[tuple[int, int]] = set()
+    registers: dict[str, set[int]] = {
+        "temp": set(), "input": set(), "float_constant": set(),
+        "integer_constant": set(), "boolean_constant": set(),
+        "sampler": set(), "output": set(),
+    }
+
+    # Pass one: declarations must be known before validating use sites.
+    for ins in instructions:
+        if ins.opcode != OP_DCL:
+            continue
+        if len(ins.operands) != 2:
+            reasons.append(f"DCL at DWORD {ins.offset} has an invalid operand count")
+            continue
+
+        declaration, destination = ins.operands
+        decoded = decode_register(destination)
+        if decoded is None:
+            reasons.append(f"DCL at DWORD {ins.offset} has an invalid destination token")
+            continue
+        register_type, register_number = decoded
+        usage = declaration & 0xF
+        usage_index = (declaration >> 16) & 0xF
+
+        if register_type == REG_INPUT:
+            if register_number >= 16:
+                reasons.append(
+                    f"input v{register_number} exceeds the vs_2_0 v0-v15 limit"
+                )
+            if register_number in input_declarations:
+                reasons.append(f"input v{register_number} is declared more than once")
+            input_declarations[register_number] = {
+                "usage": usage, "usage_index": usage_index
+            }
+        elif register_type == REG_OUTPUT:
+            target = output_mapping(usage, usage_index)
+            semantic = {
+                "usage": usage,
+                "usage_index": usage_index,
+            }
+            if target is None:
+                reasons.append(
+                    f"output o{register_number} semantic usage={usage}, "
+                    f"index={usage_index} has no fixed vs_2_0 output mapping"
+                )
+            else:
+                if register_number in output_declarations:
+                    reasons.append(f"output o{register_number} is declared more than once")
+                if target in output_targets:
+                    reasons.append(
+                        f"output semantics collide on vs_2_0 register type={target[0]} "
+                        f"index={target[1]}"
+                    )
+                output_targets[target] = register_number
+                semantic["target_register_type"] = target[0]
+                semantic["target_register_index"] = target[1]
+            output_declarations[register_number] = semantic
+        elif register_type == REG_SAMPLER:
+            reasons.append(
+                f"vertex sampler s{register_number} is not supported by the vs_2_0 path"
+            )
+            registers["sampler"].add(register_number)
+        else:
+            reasons.append(
+                f"DCL at DWORD {ins.offset} targets register type {register_type}, "
+                "which this initial vs_2_0 audit does not map"
+            )
+
+    declared_outputs = {
+        number: (
+            declaration.get("target_register_type"),
+            declaration.get("target_register_index"),
+        )
+        for number, declaration in output_declarations.items()
+        if "target_register_type" in declaration
+    }
+
+    # Pass two: prove the straight-line instruction subset, register file and
+    # output interface fit the baseline vs_2_0 model.
+    for ins in instructions:
+        opcode = ins.opcode
+        name = VS2_OPCODE_NAMES.get(opcode, f"opcode_{opcode}")
+        opcode_counts[name] += 1
+
+        if opcode not in VS2_SLOT_COSTS:
+            reasons.append(
+                f"{name} at DWORD {ins.offset} is not in the vs_2_0 instruction set"
+            )
+            continue
+
+        instruction_slots += VS2_SLOT_COSTS[opcode]
+        expected = VS2_PARAMETER_COUNTS.get(opcode)
+        if expected is None or len(ins.operands) != expected:
+            reasons.append(
+                f"{name} at DWORD {ins.offset} has {len(ins.operands)} operands; "
+                f"expected {expected}"
+            )
+            continue
+
+        if ins.token & 0xE0000000:
+            reasons.append(
+                f"{name} at DWORD {ins.offset} sets reserved instruction-token bits"
+            )
+        if ins.token & (1 << 28):
+            reasons.append(
+                f"{name} at DWORD {ins.offset} uses instruction predication, "
+                "which is not part of baseline vs_2_0"
+            )
+        controls = (ins.token >> 16) & 0xFF
+        if controls:
+            reasons.append(
+                f"{name} at DWORD {ins.offset} uses unvalidated control bits 0x{controls:02X}"
+            )
+
+        if opcode in UNVALIDATED_STATIC_FLOW:
+            reasons.append(
+                f"{name} at DWORD {ins.offset} uses static flow control; "
+                "subroutine/flow structure is outside this first audit subset"
+            )
+            continue
+        if opcode in VERSION_SENSITIVE_OPS:
+            reasons.append(
+                "sincos at DWORD "
+                f"{ins.offset} uses the vs_3_0 two-operand form; vs_2_0 requires "
+                "a different four-operand form"
+            )
+            continue
+
+        # DEF-family payload DWORDs are literal values, not register tokens.
+        for operand_index, operand in enumerate(_register_operands(ins)):
+            decoded = decode_register(operand)
+            if decoded is None:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} has an invalid parameter token "
+                    f"at operand {operand_index}"
+                )
+                continue
+            register_type, register_number = decoded
+
+            if operand & (1 << 13):
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses relative register addressing; "
+                    "this initial audit does not lower relative operands"
+                )
+
+            # Operand zero is the destination for ordinary arithmetic instructions.
+            is_destination = (
+                operand_index == 0
+                and opcode not in (25, 26, 27, 28, 29, 30, 38, 39, 40, 42, 43)
+            )
+
+            if register_type == REG_TEMP:
+                registers["temp"].add(register_number)
+                if register_number >= max_temps:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} uses r{register_number}; "
+                        f"configured vs_2_0 limit is r0-r{max_temps - 1}"
+                    )
+            elif register_type == REG_INPUT:
+                registers["input"].add(register_number)
+                if register_number >= 16:
+                    reasons.append(f"{name} at DWORD {ins.offset} uses v{register_number}; vs_2_0 has v0-v15")
+                if register_number not in input_declarations:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} uses undeclared input v{register_number}"
+                    )
+            elif register_type == REG_CONST:
+                registers["float_constant"].add(register_number)
+                if register_number >= max_float_constants:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} reads c{register_number}; "
+                        f"configured vs_2_0 float-constant limit is c0-c{max_float_constants - 1}"
+                    )
+            elif register_type == REG_ADDR:
+                if register_number != 0:
+                    reasons.append(f"{name} at DWORD {ins.offset} uses unsupported address register a{register_number}")
+            elif register_type == REG_RASTOUT:
+                if register_number > 2:
+                    reasons.append(f"{name} at DWORD {ins.offset} writes invalid raster output o{register_number}")
+                elif not is_destination:
+                    reasons.append(f"{name} at DWORD {ins.offset} reads a write-only raster output")
+                else:
+                    written_outputs.add((REG_RASTOUT, register_number))
+            elif register_type == REG_ATTROUT:
+                if register_number > 1:
+                    reasons.append(f"{name} at DWORD {ins.offset} writes oD{register_number}; vs_2_0 has oD0-oD1")
+                elif not is_destination:
+                    reasons.append(f"{name} at DWORD {ins.offset} reads a write-only color output")
+                else:
+                    written_outputs.add((REG_ATTROUT, register_number))
+            elif register_type == REG_OUTPUT:
+                registers["output"].add(register_number)
+                target = declared_outputs.get(register_number)
+                if target is None:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} uses output o{register_number} "
+                        "without a supported semantic declaration"
+                    )
+                elif not is_destination:
+                    reasons.append(
+                        f"{name} at DWORD {ins.offset} reads a write-only vertex output"
+                    )
+                else:
+                    written_outputs.add(target)
+            elif register_type == REG_CONSTINT:
+                registers["integer_constant"].add(register_number)
+                if register_number > 15:
+                    reasons.append(f"{name} at DWORD {ins.offset} reads i{register_number}; vs_2_0 has i0-i15")
+            elif register_type == REG_CONSTBOOL:
+                registers["boolean_constant"].add(register_number)
+                if register_number > 15:
+                    reasons.append(f"{name} at DWORD {ins.offset} reads b{register_number}; vs_2_0 has b0-b15")
+            elif register_type == REG_LOOP:
+                if register_number != 0:
+                    reasons.append(f"{name} at DWORD {ins.offset} uses invalid loop register aL{register_number}")
+            elif register_type == REG_SAMPLER:
+                registers["sampler"].add(register_number)
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses sampler s{register_number}; "
+                    "vertex texture sampling is a vs_3_0 feature"
+                )
+            elif register_type == REG_LABEL:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses a subroutine label; "
+                    "call-graph lowering is not implemented"
+                )
+            elif register_type == REG_PREDICATE:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses predicate register p{register_number}; "
+                    "predication is not part of baseline vs_2_0"
+                )
+            else:
+                reasons.append(
+                    f"{name} at DWORD {ins.offset} uses unsupported register type "
+                    f"{register_type} (register {register_number})"
+                )
+
+    if instruction_slots > max_instruction_slots:
+        reasons.append(
+            f"instruction-slot count {instruction_slots} exceeds configured "
+            f"vs_2_0 limit {max_instruction_slots}"
+        )
+
+    position_output = (REG_RASTOUT, 0)
+    if position_output not in written_outputs:
+        reasons.append("shader does not write the required vs_2_0 position output oPos")
+
+    reasons = list(dict.fromkeys(reasons))
+    candidate = not reasons
+    output_map_report = {
+        f"o{source}": {
+            "semantic": {
+                "usage": declaration["usage"],
+                "usage_index": declaration["usage_index"],
+            },
+            "vs_2_0_register_type": declaration.get("target_register_type"),
+            "vs_2_0_register_index": declaration.get("target_register_index"),
+        }
+        for source, declaration in sorted(output_declarations.items())
+    }
+    return {
+        "status": (
+            "structural_candidate_for_manual_lowering"
+            if candidate else "rejected"
+        ),
+        "structural_candidate_for_manual_lowering": candidate,
+        "profile": "vs_3_0",
+        "target_profile": "vs_2_0",
+        "instruction_count": len(instructions),
+        "instruction_slots": instruction_slots,
+        "instruction_slot_limit": max_instruction_slots,
+        "highest_temporary_register": max(registers["temp"], default=None),
+        "highest_input_register": max(registers["input"], default=None),
+        "highest_float_constant_register": max(registers["float_constant"], default=None),
+        "registers": {
+            key: sorted(values) for key, values in registers.items() if values
+        },
+        "opcode_counts": dict(sorted(opcode_counts.items())),
+        "input_declarations": {
+            str(number): declaration
+            for number, declaration in sorted(input_declarations.items())
+        },
+        "output_mapping_plan": output_map_report,
+        "written_outputs": [
+            {"register_type": register_type, "register_index": register_index}
+            for register_type, register_index in sorted(written_outputs)
+        ],
+        "reasons": reasons,
+        "output_bytecode": None,
+        "scope_note": (
+            "This is a conservative structural audit only. It emits no vs_2_0 bytecode, "
+            "does not validate vertex-declaration linkage, constants, downstream pixel "
+            "shader interfaces, GMA driver acceptance, or rendered equivalence. Static "
+            "flow control and version-sensitive sincos are deliberately rejected."
+        ),
+    }
+
+
+def inspect_file(path: Path, **limits: int) -> dict[str, Any]:
+    data = path.read_bytes()
+    base = {
+        "file": str(path),
+        "size_bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    if len(data) < 4:
+        return {
+            **base,
+            "status": "parse_error",
+            "structural_candidate_for_manual_lowering": False,
+            "reasons": ["file is shorter than a version DWORD"],
+        }
+    version = struct.unpack_from("<I", data)[0]
+    if version != VS3_VERSION:
+        return {
+            **base,
+            "status": "skipped_non_vs3",
+            "profile_token": f"0x{version:08X}",
+            "structural_candidate_for_manual_lowering": False,
+            "reasons": ["input is not a vs_3_0 vertex shader"],
+        }
+    return {**base, **audit_vs3_bytes(data, **limits)}
+
+
+def _self_test() -> None:
+    def shader(*instruction_words: int) -> bytes:
+        words = [VS3_VERSION, *instruction_words, OP_END]
+        return struct.pack("<" + "I" * len(words), *words)
+
+    def dcl(usage: int, register_type: int, register: int, usage_index: int = 0) -> list[int]:
+        declaration = 0x80000000 | (usage & 0xF) | ((usage_index & 0xF) << 16)
+        return make_instruction(OP_DCL, declaration, make_parameter_token(register_type, register))
+
+    basic_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+    ]
+    basic = audit_vs3_bytes(shader(*basic_words))
+    assert basic["structural_candidate_for_manual_lowering"] is True
+    assert basic["instruction_slots"] == 1
+    assert basic["output_mapping_plan"]["o0"]["vs_2_0_register_type"] == REG_RASTOUT
+    assert basic["output_mapping_plan"]["o0"]["vs_2_0_register_index"] == 0
+
+    temp12_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_TEMP, 12)),
+    ]
+    temp12 = audit_vs3_bytes(shader(*temp12_words))
+    assert temp12["structural_candidate_for_manual_lowering"] is False
+    assert any("r12" in reason for reason in temp12["reasons"])
+
+    sampler_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(0, REG_SAMPLER, 0),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+    ]
+    sampler = audit_vs3_bytes(shader(*sampler_words))
+    assert any("vertex sampler" in reason for reason in sampler["reasons"])
+
+    dynamic_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(95, make_parameter_token(REG_TEMP, 0), make_parameter_token(REG_INPUT, 0), make_parameter_token(REG_SAMPLER, 0)),
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+    ]
+    dynamic = audit_vs3_bytes(shader(*dynamic_words))
+    assert any("not in the vs_2_0 instruction set" in reason for reason in dynamic["reasons"])
+
+    output_semantic_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(3, REG_OUTPUT, 0),  # NORMAL is not a fixed vs_2_0 output register.
+        *make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0)),
+    ]
+    output_semantic = audit_vs3_bytes(shader(*output_semantic_words))
+    assert any("no fixed vs_2_0 output mapping" in reason for reason in output_semantic["reasons"])
+
+    over_budget_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+    ]
+    for _ in range(257):
+        over_budget_words.extend(make_instruction(0))
+    over_budget_words.extend(
+        make_instruction(1, make_parameter_token(REG_OUTPUT, 0), make_parameter_token(REG_INPUT, 0))
+    )
+    over_budget = audit_vs3_bytes(shader(*over_budget_words))
+    assert over_budget["instruction_slots"] == 258
+    assert any("exceeds configured vs_2_0 limit" in reason for reason in over_budget["reasons"])
+
+    truncated = struct.pack("<II", VS3_VERSION, (4 << 24) | 1)
+    parse_failure = audit_vs3_bytes(truncated)
+    assert parse_failure["status"] == "parse_error"
+
+    print("PASS: conservative vs_3_0 to vs_2_0 vertex-shader audit self-tests")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input", nargs="?", type=Path)
+    parser.add_argument("--report", type=Path, help="Write the JSON audit report")
+    parser.add_argument("--max-instruction-slots", type=int, default=256)
+    parser.add_argument("--max-temps", type=int, default=12)
+    parser.add_argument("--max-float-constants", type=int, default=256)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+
+    if args.self_test:
+        _self_test()
+        return 0
+    if args.input is None:
+        parser.error("input is required unless --self-test is used")
+    if not args.input.exists():
+        print(f"ERROR: input path does not exist: {args.input}", file=sys.stderr)
+        return 2
+
+    limits = {
+        "max_instruction_slots": args.max_instruction_slots,
+        "max_temps": args.max_temps,
+        "max_float_constants": args.max_float_constants,
+    }
+    if args.input.is_file():
+        paths = [args.input]
+    else:
+        paths = sorted(
+            path for pattern in ("*.bin", "*.vso", "*.vs")
+            for path in args.input.glob(pattern) if path.is_file()
+        )
+    if not paths:
+        print(f"ERROR: no .bin, .vso or .vs shader files found at {args.input}", file=sys.stderr)
+        return 2
+
+    results: list[dict[str, Any]] = []
+    for path in paths:
+        try:
+            results.append(inspect_file(path, **limits))
+        except (OSError, struct.error) as exc:
+            results.append({
+                "file": str(path),
+                "status": "parse_error",
+                "structural_candidate_for_manual_lowering": False,
+                "reasons": [str(exc)],
+            })
+
+    report = {
+        "schema_version": 1,
+        "input": str(args.input),
+        "audited_file_count": len(results),
+        "vs_3_0_file_count": sum(1 for item in results if item.get("profile") == "vs_3_0"),
+        "candidate_count": sum(
+            1 for item in results
+            if item.get("structural_candidate_for_manual_lowering")
+        ),
+        "rejected_count": sum(1 for item in results if item.get("status") == "rejected"),
+        "skipped_non_vs3_count": sum(1 for item in results if item.get("status") == "skipped_non_vs3"),
+        "parse_error_count": sum(1 for item in results if item.get("status") == "parse_error"),
+        "limits": limits,
+        "scope_note": (
+            "No replacement bytecode is generated. Candidate means only that this "
+            "straight-line subset passes the static register, instruction and output "
+            "checks; runtime driver acceptance and visual equivalence remain unproven."
+        ),
+        "results": results,
+    }
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    for item in results:
+        print(f"{item.get('status', 'unknown')}: {item.get('file', args.input)}")
+        for reason in item.get("reasons", []):
+            print(f"  - {reason}")
+    print(
+        "Audit complete: "
+        f"{report['candidate_count']} candidate(s), "
+        f"{report['rejected_count']} rejected, "
+        f"{report['skipped_non_vs3_count']} non-vs_3_0 skipped, "
+        f"{report['parse_error_count']} parse error(s)."
+    )
+    return 1 if report["parse_error_count"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
