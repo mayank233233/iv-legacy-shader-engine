@@ -1498,10 +1498,11 @@ namespace
                 InterlockedExchange(&g_renderStates[state], 0);
                 InterlockedExchange(&g_renderStateKnown[state], 0);
             }
-            // Reset invalidates every device state. Do this after the
-            // telemetry snapshots are cleared so no stale value is reused.
-            InvalidateRedundantStateCache(self);
         }
+        // A Reset attempt is a conservative cache boundary even when the
+        // runtime reports failure. Re-sending later state is safer than
+        // trusting values across a lost-device transition.
+        InvalidateRedundantStateCache(self);
         return hr;
     }
 
