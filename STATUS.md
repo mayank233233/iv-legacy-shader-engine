@@ -407,12 +407,13 @@ The new shader hooks only run when GTA IV calls `CreateVertexShader` / `CreatePi
 - Its actual `build/bin/IVLegacy.log` has 105 lines. The ending sequence is: successful Reset; post-reset render-state call forwarded; `STATE_BLOCK_BEGIN_ENTER`; `STATE_CACHE_DISABLED`; `STATE_BLOCK_BEGIN_FORWARD`; `STATE_BLOCK_BEGIN_RETURN hr=0`; following render-state call forwarded with `cached=0`.
 - The smoke host also printed `PASS: synthetic D3D9 interface/device hooks, shader capture and constant telemetry executed.`
 
-### Additional regression coverage in progress
+### Additional regression coverage — PASS in run #314
 
-- Added a direct `GetRenderState` test before duplicate-state suppression, so accidentally mapping slot 58 to a state-block hook will now fail the smoke test.
+- Added a direct `GetRenderState` test before duplicate-state suppression, so accidentally mapping slot 58 to a state-block hook fails the smoke test.
 - Added direct CreateStateBlock and EndStateBlock calls and checks, alongside the existing BeginStateBlock test.
 - Added static source assertions for the exact D3D9 slots 58/59/60/61.
-- **The new tests are not yet confirmed by a passing CI run.** Run #312 predates these latest additions; runs #313/#314 are checking them.
+- Windows x86 run #314 passed both jobs. Artifact ID `14756277716`; SHA-256 `05421799a25be07b1edc0f7bca7036608ce7dd0399332d2c33a1090c69273206`.
+- Its 109-line log confirms BeginStateBlock enter/disable/forward/return, then CreateStateBlock and EndStateBlock enter/return. The fake Create/End implementations intentionally return `D3DERR_INVALIDCALL`; the test expects these results and verifies their call counters.
 
 ### Interpretation limits
 
