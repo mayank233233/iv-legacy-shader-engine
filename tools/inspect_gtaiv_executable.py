@@ -171,6 +171,11 @@ class PE32Image:
             if thunk == 0:
                 return imports
             iat_entry_rva = iat_rva + index * 4 if iat_rva else None
+            if iat_entry_rva is not None:
+                # The ASI ultimately patches this RVA in the loaded module.
+                # Reject malformed import descriptors whose IAT entry is not
+                # backed by mapped file data rather than calling them hookable.
+                self.rva_to_offset(iat_entry_rva, 4)
 
             if thunk & IMAGE_ORDINAL_FLAG32:
                 imports.append({
@@ -615,6 +620,16 @@ def _self_test() -> None:
     missing_iat_assessment = assess_factory_hook_path(missing_iat_imports, [])
     assert missing_iat_assessment["classification"] == "normal_import_without_first_thunk"
     assert missing_iat_assessment["hook_candidate"] is False
+
+    # A non-zero but unmapped FirstThunk must be rejected by the PE parser.
+    unmapped_iat_image = bytearray(_synthetic_pe32())
+    struct.pack_into("<I", unmapped_iat_image, 0x210, 0x3000)
+    try:
+        PE32Image(bytes(unmapped_iat_image)).normal_imports()
+    except PEFormatError:
+        pass
+    else:
+        raise AssertionError("unmapped FirstThunk entry must be rejected")
 
     normal_candidate = assess_factory_hook_path(imports, [])
     assert normal_candidate["classification"] == "normal_iat_candidate"
