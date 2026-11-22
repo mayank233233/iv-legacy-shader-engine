@@ -309,3 +309,12 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Latest run #236 has the independent vertex-audit job passing; the full Windows x86 job was still installing the legacy DirectX SDK at the last status check.
 - CI uses fake D3D9 devices and synthetic logs. No actual GTA IV 1.0.0.0 execution, GMA 3100 driver capture or FPS measurement has occurred.
 - `main` remains untouched. All work stays on `feature/vs3-vs2-vertex-audit`.
+## Final Windows verification for the render-pipeline capture update — 2026-11-22
+
+- Run #239 passed both jobs on commit `8034e2508b3a9c71d7a9ec91311de4460432d354`.
+- The Windows x86 job passed source sanity, six SM2 shader builds, D3D9 probe build, ASI build, synthetic D3D9 runtime smoke, shader inventory and artifact upload.
+- The smoke test exercises signature-correct `GetRenderTarget` and `GetDepthStencilSurface` stubs on successful device creation and reset. It confirms the telemetry path does not call generic zero-argument fake vtable stubs.
+- The standalone VS3-to-VS2 audit self-tests also passed.
+- Artifact: `iv-legacy-shader-engine-windows-x86`, 237,403 bytes, SHA-256 `baaf821d66560a20d2aafebe34982aec5e307ede6e4fa4ce338105f34c8ca556`, run #239.
+- These are Windows CI and synthetic tests only. They do not establish that GTA IV 1.0.0.0 launches, renders correctly, or reaches any FPS on an Intel GMA 3100.
+- Branch `feature/vs3-vs2-vertex-audit` remains separate; `main` was not changed.
