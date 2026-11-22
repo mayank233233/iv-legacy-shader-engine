@@ -27,7 +27,9 @@ namespace
     void* g_fakeShaderVTable[3] = {};
     void* g_fakeTextureVTable[3] = {};
     DWORD g_fakeLastPixelShaderVersion = 0;
+    DWORD g_fakeLastVertexShaderVersion = 0;
     volatile LONG g_fakePixelShaderCreateCount = 0;
+    volatile LONG g_fakeVertexShaderCreateCount = 0;
     volatile LONG g_fakePixelShaderObjectCount = 0;
     volatile LONG g_fakeGetRenderTargetCount = 0;
     volatile LONG g_fakeGetDepthStencilSurfaceCount = 0;
@@ -37,6 +39,7 @@ namespace
     volatile LONG g_fakeBeginStateBlockCalls = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
+    DWORD g_syntheticVs3VertexShader[11] = {};
 
     DWORD MakeShaderRegisterToken(DWORD registerType, DWORD registerIndex)
     {
@@ -57,6 +60,28 @@ namespace
             | ((swizzle & 0xFFUL) << 16)
             | ((registerType & 0x7UL) << 28)
             | ((registerType & 0x18UL) << 8);
+    }
+
+    void BuildSyntheticVs3Shader()
+    {
+        DWORD index = 0;
+        g_syntheticVs3VertexShader[index++] = 0xFFFE0300UL;
+        // dcl_position v0
+        g_syntheticVs3VertexShader[index++] = (2UL << 24) | 31UL;
+        g_syntheticVs3VertexShader[index++] = 0x80000000UL;
+        g_syntheticVs3VertexShader[index++] = MakeShaderRegisterToken(1, 0);
+        // dcl_position o0
+        g_syntheticVs3VertexShader[index++] = (2UL << 24) | 31UL;
+        g_syntheticVs3VertexShader[index++] = 0x80000000UL;
+        g_syntheticVs3VertexShader[index++] = MakeShaderRegisterToken(6, 0);
+        // mov o0, v0
+        g_syntheticVs3VertexShader[index++] = (2UL << 24) | 1UL;
+        g_syntheticVs3VertexShader[index++] = MakeShaderRegisterToken(6, 0);
+        g_syntheticVs3VertexShader[index++] = MakeShaderSourceToken(1, 0);
+        g_syntheticVs3VertexShader[index++] = 0x0000FFFFUL;
+
+        if (index != _countof(g_syntheticVs3VertexShader))
+            std::abort();
     }
 
     void BuildSyntheticPs3Shader()
@@ -394,11 +419,13 @@ namespace
 
     HRESULT WINAPI FakeDeviceCreateVertexShader(
         IDirect3DDevice9*,
-        const DWORD*,
+        const DWORD* function,
         IDirect3DVertexShader9** shader)
     {
-        if (!shader)
+        if (!shader || !function)
             return D3DERR_INVALIDCALL;
+        g_fakeLastVertexShaderVersion = function[0];
+        InterlockedIncrement(&g_fakeVertexShaderCreateCount);
         *shader = reinterpret_cast<IDirect3DVertexShader9*>(&g_fakeVertexShader);
         return D3D_OK;
     }
@@ -808,6 +835,7 @@ int main()
 {
     SetUnhandledExceptionFilter(SmokeUnhandledExceptionFilter);
     InitializeFakeObjects();
+    BuildSyntheticVs3Shader();
     BuildSyntheticPs3Shader();
 
     // First touch the real export so the executable has a normal d3d9.dll
@@ -862,6 +890,33 @@ int main()
     {
         return Fail("Could not stage synthetic PS2 fallback bytecode");
     }
+    if (!CopyFileW(
+        L"build\\out\\basic_vs20.vso",
+        L"build\\bin\\IVLegacyFallbacks\\smoke.vs20.vso",
+        FALSE))
+    {
+        return Fail("Could not stage synthetic VS2 fallback bytecode");
+    }
+
+    const unsigned __int64 syntheticVertexHash = HashShaderBytes(
+        reinterpret_cast<const BYTE*>(g_syntheticVs3VertexShader),
+        sizeof(g_syntheticVs3VertexShader));
+    wchar_t syntheticVertexHashKey[32] = {};
+    _snwprintf_s(
+        syntheticVertexHashKey,
+        _countof(syntheticVertexHashKey),
+        _TRUNCATE,
+        L"%016llX",
+        syntheticVertexHash);
+    const wchar_t* fallbackIniPath = L"build\\bin\\IVLegacyShaderFallbacks.ini";
+    if (!WritePrivateProfileStringW(
+        L"VertexShaderFallbacks",
+        syntheticVertexHashKey,
+        L"IVLegacyFallbacks\\smoke.vs20.vso",
+        fallbackIniPath))
+    {
+        return Fail("Could not write synthetic VS3-to-VS2 fallback mapping");
+    }
 
     const unsigned __int64 syntheticHash = HashShaderBytes(
         reinterpret_cast<const BYTE*>(g_syntheticPs3PixelShader),
@@ -873,13 +928,17 @@ int main()
         _TRUNCATE,
         L"%016llX",
         syntheticHash);
-    const wchar_t* fallbackIniPath = L"build\\bin\\IVLegacyShaderFallbacks.ini";
     DeleteFileW(fallbackIniPath);
     if (!WritePrivateProfileStringW(
         L"ShaderFallbacks",
         syntheticHashKey,
         L"IVLegacyFallbacks\\smoke.ps20.pso",
-        fallbackIniPath))
+        fallbackIniPath) ||
+        !WritePrivateProfileStringW(
+            L"VertexShaderFallbacks",
+            syntheticVertexHashKey,
+            L"IVLegacyFallbacks\\smoke.vs20.vso",
+            fallbackIniPath))
     {
         return Fail("Could not write synthetic hash-to-PS2 fallback mapping");
     }
@@ -1035,19 +1094,26 @@ int main()
     }
 
     IDirect3DVertexShader9* vertexShader = NULL;
+    IDirect3DVertexShader9* fallbackVertexShader = NULL;
     IDirect3DPixelShader9* fallbackPixelShader = NULL;
     IDirect3DPixelShader9* unmappedPixelShader = NULL;
     IDirect3DPixelShader9* pixelShader = NULL;
     HRESULT vertexShaderHr = D3DERR_INVALIDCALL;
+    HRESULT fallbackVertexShaderHr = D3DERR_INVALIDCALL;
     HRESULT pixelShaderHr = D3DERR_INVALIDCALL;
     HRESULT fallbackShaderHr = D3DERR_INVALIDCALL;
     HRESULT unmappedShaderHr = D3DERR_INVALIDCALL;
+    DWORD mappedVertexShaderVersion = 0;
     DWORD mappedShaderVersion = 0;
     DWORD unmappedShaderVersion = 0;
 
     if (vertexBytecode)
         vertexShaderHr = device->CreateVertexShader(
             reinterpret_cast<const DWORD*>(vertexBytecode), &vertexShader);
+
+    fallbackVertexShaderHr = device->CreateVertexShader(
+        g_syntheticVs3VertexShader, &fallbackVertexShader);
+    mappedVertexShaderVersion = g_fakeLastVertexShaderVersion;
 
     fallbackShaderHr = device->CreatePixelShader(
         g_syntheticPs3PixelShader, &fallbackPixelShader);
@@ -1061,7 +1127,7 @@ int main()
         pixelShaderHr = device->CreatePixelShader(
             reinterpret_cast<const DWORD*>(pixelBytecode), &pixelShader);
 
-    const HRESULT setVertexShaderHr = device->SetVertexShader(vertexShader);
+    const HRESULT setVertexShaderHr = device->SetVertexShader(fallbackVertexShader);
     // Draw with the actual PS2 replacement object to test end-to-end correlation.
     const HRESULT setPixelShaderHr = device->SetPixelShader(fallbackPixelShader);
 
@@ -1212,6 +1278,8 @@ int main()
         pixelShader->Release();
     if (unmappedPixelShader)
         unmappedPixelShader->Release();
+    if (fallbackVertexShader)
+        fallbackVertexShader->Release();
     if (fallbackPixelShader)
         fallbackPixelShader->Release();
     if (fakeTexture)
@@ -1251,6 +1319,13 @@ int main()
         return Fail("Device render/depth surface creation hooks were not observed");
     if (!HasText("CREATE_VERTEX_SHADER") || !HasText("CREATE_PIXEL_SHADER"))
         return Fail("Device shader creation hooks were not observed");
+    if (!HasText("VERTEX_SHADER_FALLBACK_ATTEMPT") ||
+        !HasText("VERTEX_SHADER_FALLBACK_APPLIED") ||
+        !HasText("VERTEX_SHADER_FALLBACK_OBJECT_MAP"))
+        return Fail("Configured VS2 fallback was not applied to the matching VS3 shader");
+    if (FAILED(fallbackVertexShaderHr) ||
+        mappedVertexShaderVersion != 0xFFFE0200UL)
+        return Fail("Hash-mapped VS2 replacement did not preserve the expected VS2 profile");
     if (!HasText("SHADER_FALLBACKS_ENABLED") ||
         !HasText("SHADER_FALLBACK_APPLIED"))
         return Fail("Configured PS2 fallback was not applied to the matching PS3 shader");
