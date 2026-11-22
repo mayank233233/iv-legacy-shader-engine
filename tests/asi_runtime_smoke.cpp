@@ -909,15 +909,6 @@ int main()
         L"%016llX",
         syntheticVertexHash);
     const wchar_t* fallbackIniPath = L"build\\bin\\IVLegacyShaderFallbacks.ini";
-    if (!WritePrivateProfileStringW(
-        L"VertexShaderFallbacks",
-        syntheticVertexHashKey,
-        L"IVLegacyFallbacks\\smoke.vs20.vso",
-        fallbackIniPath))
-    {
-        return Fail("Could not write synthetic VS3-to-VS2 fallback mapping");
-    }
-
     const unsigned __int64 syntheticHash = HashShaderBytes(
         reinterpret_cast<const BYTE*>(g_syntheticPs3PixelShader),
         sizeof(g_syntheticPs3PixelShader));
