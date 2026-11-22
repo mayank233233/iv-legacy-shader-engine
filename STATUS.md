@@ -348,5 +348,7 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Draw-method hooks are installed for profiler-only mode without enabling the verbose draw-state telemetry hooks.
 - The profiler explicitly reports `gpu_time=not_measured`. Present/draw API wall times may include driver waits; unattributed time includes simulation and non-draw API work and is not a direct world-simulation measurement.
 - Extended the synthetic Windows runtime test: its fake D3D9 caps advertise HW-T&L, CreateDevice requests software VP, four fake draw methods execute between Present calls, and the test requires a one-sample profile summary showing four draw calls.
-- **Verification pending:** Windows x86 CI must compile the updated ASI, run the synthetic host and pass source checks.
+- **Verification PASS:** [Windows x86 CI run #254](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44999020323), commit `3984059b4c65ced1c7917ffbb03a711e075bdf50`. Both `vertex-audit` and `build` jobs passed, including source sanity, SM2 shader compilation, x86 probe/ASI builds, the synthetic D3D9 runtime test, captured-shader inventory and artifact upload.
+- Artifact: [iv-legacy-shader-engine-windows-x86](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/44999020323/artifacts/14744669712), ID `14744669712`, 242,306 bytes.
+- The synthetic runtime test verified the HW-T&L cap log, software-VP request logging, and a one-frame profile summary containing four draw calls. These values are synthetic fixtures, not actual GMA 3100 measurements.
 - **Not tested:** original GTA IV 1.0.0.0 loading, the physical GMA 3100 capability response, real-game Present cadence, fixed-function rendering performance, GPU execution time or FPS.
