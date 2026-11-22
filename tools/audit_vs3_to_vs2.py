@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 VS3_VERSION = 0xFFFE0300
+VS2_VERSION = 0xFFFE0200
 OP_COMMENT = 0xFFFE
 OP_END = 0xFFFF
 OP_PHASE = 0xFFFD
@@ -1273,7 +1274,161 @@ def audit_vs3_bytes(
     }
 
 
-def inspect_file(path: Path, **limits: int) -> dict[str, Any]:
+def _replace_register(token: int, register_type: int, register_number: int) -> int:
+    """Replace only the D3D9 register type/index bits, preserving masks/swizzles."""
+    register_bits = 0x7FF | 0x70001800
+    encoded_type = (
+        ((register_type & 0x7) << 28)
+        | ((register_type & 0x18) << 8)
+    )
+    return (token & ~register_bits) | encoded_type | (register_number & 0x7FF)
+
+
+def lower_vs3_to_vs2(
+    data: bytes,
+    *,
+    max_instruction_slots: int = 256,
+    max_temps: int = 12,
+    max_float_constants: int = 256,
+) -> dict[str, Any]:
+    """Emit VS2 bytecode only for shaders accepted by the strict VS2 audit.
+
+    VS3 output DCLs are removed because VS2 uses fixed oPos/oD#/oT# outputs.
+    Their declared semantic mappings are applied to every output-register
+    destination. A VS3 output register carrying multiple semantics is rejected:
+    splitting its component writes needs a coordinated instruction rewrite.
+    """
+    result = audit_vs3_bytes(
+        data,
+        max_instruction_slots=max_instruction_slots,
+        max_temps=max_temps,
+        max_float_constants=max_float_constants,
+    )
+    if not result.get("structural_candidate_for_manual_lowering"):
+        return {
+            **result,
+            "bytecode_emitted": False,
+            "emission_reasons": ["shader did not pass the structural VS2 audit"],
+            "output_bytecode": None,
+        }
+
+    output_register_map: dict[int, tuple[int, int]] = {}
+    emission_reasons: list[str] = []
+    for source_name, declarations in result.get("output_mapping_plan", {}).items():
+        match = re.fullmatch(r"o(\\d+)", str(source_name))
+        if not match:
+            emission_reasons.append(f"invalid source output key {source_name!r}")
+            continue
+        source_register = int(match.group(1))
+        if len(declarations) != 1:
+            emission_reasons.append(
+                f"VS3 output o{source_register} carries {len(declarations)} semantics; "
+                "component-split output rewriting is not implemented"
+            )
+            continue
+        declaration = declarations[0]
+        target_type = declaration.get("vs_2_0_register_type")
+        target_index = declaration.get("vs_2_0_register_index")
+        if target_type is None or target_index is None:
+            emission_reasons.append(
+                f"VS3 output o{source_register} has no concrete VS2 output mapping"
+            )
+            continue
+        output_register_map[source_register] = (int(target_type), int(target_index))
+
+    if emission_reasons:
+        return {
+            **result,
+            "bytecode_emitted": False,
+            "emission_reasons": emission_reasons,
+            "output_bytecode": None,
+        }
+
+    try:
+        _, instructions = parse_vs3(data)
+    except AuditError as exc:
+        return {
+            **result,
+            "bytecode_emitted": False,
+            "emission_reasons": [str(exc)],
+            "output_bytecode": None,
+        }
+
+    lowered_words: list[int] = [VS2_VERSION]
+    removed_output_declarations = 0
+    remapped_output_operands = 0
+    for instruction in instructions:
+        if instruction.opcode == OP_DCL:
+            if len(instruction.operands) != 2:
+                return {
+                    **result,
+                    "bytecode_emitted": False,
+                    "emission_reasons": [
+                        f"DCL at DWORD {instruction.offset} has an invalid operand count"
+                    ],
+                    "output_bytecode": None,
+                }
+            destination = decode_register(instruction.operands[1])
+            if destination is None:
+                return {
+                    **result,
+                    "bytecode_emitted": False,
+                    "emission_reasons": [
+                        f"DCL at DWORD {instruction.offset} has an invalid destination token"
+                    ],
+                    "output_bytecode": None,
+                }
+            if destination[0] == REG_OUTPUT:
+                # VS2 outputs are fixed semantic registers and are not declared
+                # with DCL instructions.
+                removed_output_declarations += 1
+                continue
+
+        operands = list(instruction.operands)
+        if operands:
+            destination = decode_register(operands[0])
+            if destination is not None and destination[0] == REG_OUTPUT:
+                target = output_register_map.get(destination[1])
+                if target is None:
+                    return {
+                        **result,
+                        "bytecode_emitted": False,
+                        "emission_reasons": [
+                            f"instruction at DWORD {instruction.offset} writes "
+                            f"o{destination[1]} without an emitted VS2 output mapping"
+                        ],
+                        "output_bytecode": None,
+                    }
+                operands[0] = _replace_register(
+                    operands[0], target[0], target[1]
+                )
+                remapped_output_operands += 1
+
+        lowered_words.append(instruction.token)
+        lowered_words.extend(operands)
+
+    lowered_words.append(OP_END)
+    bytecode = struct.pack("<" + "I" * len(lowered_words), *lowered_words)
+    if struct.unpack_from("<I", bytecode, 0)[0] != VS2_VERSION:
+        raise AssertionError("VS2 emitter produced an invalid version token")
+    return {
+        **result,
+        "bytecode_emitted": True,
+        "emission_reasons": [],
+        "output_bytecode": bytecode,
+        "output_bytes": len(bytecode),
+        "removed_output_declarations": removed_output_declarations,
+        "remapped_output_operands": remapped_output_operands,
+    }
+
+
+def inspect_file(
+    path: Path,
+    *,
+    emit_dir: Path | None = None,
+    fallback_prefix: str = "IVLegacyFallbacks",
+    **limits: int,
+) -> dict[str, Any]:
     data = path.read_bytes()
     base = {
         "file": str(path),
@@ -1296,7 +1451,30 @@ def inspect_file(path: Path, **limits: int) -> dict[str, Any]:
             "structural_candidate_for_manual_lowering": False,
             "reasons": ["input is not a vs_3_0 vertex shader"],
         }
-    return {**base, **audit_vs3_bytes(data, **limits)}
+    if emit_dir is None:
+        return {**base, **audit_vs3_bytes(data, **limits)}
+
+    lowered = lower_vs3_to_vs2(data, **limits)
+    bytecode = lowered.pop("output_bytecode", None)
+    item = {**base, **lowered}
+    if bytecode is None:
+        item["status"] = "emission_rejected" if item.get(
+            "structural_candidate_for_manual_lowering"
+        ) else item.get("status", "rejected")
+        return item
+
+    emit_dir.mkdir(parents=True, exist_ok=True)
+    output_path = emit_dir / f"{path.stem}.vs20.vso"
+    output_path.write_bytes(bytecode)
+    item["status"] = "vs2_candidate_emitted"
+    item["output_file"] = str(output_path)
+    item["output_sha256"] = hashlib.sha256(bytecode).hexdigest()
+    item["fallback_relative_path"] = (
+        fallback_prefix.replace("/", "\\\\").strip("\\\\")
+        + "\\\\"
+        + output_path.name
+    )
+    return item
 
 
 def _self_test() -> None:
@@ -1322,11 +1500,31 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
-    basic = audit_vs3_bytes(shader(*basic_words))
+    basic_shader_bytes = shader(*basic_words)
+    basic = audit_vs3_bytes(basic_shader_bytes)
     assert basic["structural_candidate_for_manual_lowering"] is True
     assert basic["instruction_slots"] == 1
     assert basic["output_mapping_plan"]["o0"][0]["vs_2_0_register_type"] == REG_RASTOUT
     assert basic["output_mapping_plan"]["o0"][0]["vs_2_0_register_index"] == 0
+
+    basic_lowered = lower_vs3_to_vs2(basic_shader_bytes)
+    assert basic_lowered["bytecode_emitted"] is True
+    basic_words_out = list(struct.unpack(
+        "<" + "I" * (len(basic_lowered["output_bytecode"]) // 4),
+        basic_lowered["output_bytecode"],
+    ))
+    assert basic_words_out[0] == VS2_VERSION
+    assert basic_words_out[-1] == OP_END
+    assert sum(1 for ins in parse_vs3(data=struct.pack(
+        "<" + "I" * len(basic_words_out),
+        VS3_VERSION, *basic_words_out[1:-1], OP_END,
+    ))[1] if ins.opcode == OP_DCL) == 1
+    lowered_move = next(
+        ins for ins in parse_vs3(
+            struct.pack("<" + "I" * (len(basic_words_out) // 4), *basic_words_out[:1], *basic_words_out[1:])
+        )[1] if ins.opcode == 1
+    )
+    assert decode_register(lowered_move.operands[0]) == (REG_RASTOUT, 0)
 
     temp12_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1336,6 +1534,23 @@ def _self_test() -> None:
     temp12 = audit_vs3_bytes(shader(*temp12_words))
     assert temp12["structural_candidate_for_manual_lowering"] is False
     assert any("r12" in reason for reason in temp12["reasons"])
+
+    split_output_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_COLOR, REG_OUTPUT, 1, component_mask=0x3),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1, component_mask=0xC),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0x3), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0xC), make_source_token(REG_INPUT, 0)),
+    ]
+    split_output_bytes = shader(*split_output_words)
+    split_output_audit = audit_vs3_bytes(split_output_bytes)
+    assert split_output_audit["structural_candidate_for_manual_lowering"] is True
+    split_output_lowered = lower_vs3_to_vs2(split_output_bytes)
+    assert split_output_lowered["bytecode_emitted"] is False
+    assert any("component-split output rewriting is not implemented" in reason
+               for reason in split_output_lowered["emission_reasons"])
 
     uninitialized_temp_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -2389,6 +2604,14 @@ def main() -> int:
     parser.add_argument("--max-instruction-slots", type=int, default=256)
     parser.add_argument("--max-temps", type=int, default=12)
     parser.add_argument("--max-float-constants", type=int, default=256)
+    parser.add_argument(
+        "--emit-dir", type=Path,
+        help="Emit restricted VS2 candidate bytecode for shaders that pass the audit",
+    )
+    parser.add_argument(
+        "--fallback-prefix", default="IVLegacyFallbacks",
+        help="Game-directory-relative folder prefix recorded for emitted candidates",
+    )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
@@ -2420,7 +2643,12 @@ def main() -> int:
     results: list[dict[str, Any]] = []
     for path in paths:
         try:
-            results.append(inspect_file(path, **limits))
+            results.append(inspect_file(
+                path,
+                emit_dir=args.emit_dir,
+                fallback_prefix=args.fallback_prefix,
+                **limits,
+            ))
         except (OSError, struct.error) as exc:
             results.append({
                 "file": str(path),
@@ -2443,9 +2671,12 @@ def main() -> int:
         "parse_error_count": sum(1 for item in results if item.get("status") == "parse_error"),
         "limits": limits,
         "scope_note": (
-            "No replacement bytecode is generated. Candidate means only that this "
-            "straight-line subset passes the static register, instruction and output "
-            "checks; runtime driver acceptance and visual equivalence remain unproven."
+            "With --emit-dir, bytecode is emitted only for the audited straight-line "
+            "subset. Output DCL instructions are removed and output registers are mapped "
+            "to fixed VS2 semantic registers. Shaders that pack multiple semantics into "
+            "one VS3 output register are rejected until component-split rewriting exists. "
+            "Emitted candidates are not automatically paired with PS2 shaders or injected "
+            "at runtime; driver acceptance and visual equivalence remain unproven."
         ),
         "results": results,
     }
