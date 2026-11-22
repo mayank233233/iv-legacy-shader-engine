@@ -390,3 +390,33 @@ The new shader hooks only run when GTA IV calls `CreateVertexShader` / `CreatePi
 - Neither stage converter is a general HLSL compiler, automatic material simplifier or complete GTA IV renderer replacement.
 - No shader bytecode emitted by these tools has yet been accepted/rendered by the target GMA 3100 driver.
 
+## Smoke-log forensic update — 2026-11-22
+
+### Failed run #295 diagnosis
+
+- The failed run #295 built the ASI successfully but the synthetic runtime process raised `0xC0000005` at `0x00542EA6`.
+- The exact source commit used the wrong state-block vtable slots: Create/Begin/End were assigned to 58/59/60. D3D9 method order is `GetRenderState=58`, `CreateStateBlock=59`, `BeginStateBlock=60`, `EndStateBlock=61`.
+- This made slot 58's GetRenderState call enter a CreateStateBlock wrapper, and shifted the state-block wrappers so calls reached functions with incompatible signatures. That matches the access-violation timing and the premature cache-disable log.
+- Current source uses the correct Create/Begin/End slots 59/60/61.
+
+### Passing baseline run #312
+
+- [Windows x86 workflow run #312](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45026226124) passed both the `build` and `vertex-audit` jobs.
+- The Windows job passed source checks, all six FXC shader builds, D3D9 probe build, ASI build, runtime smoke test, capture inventory, artifact staging and upload.
+- Artifact ID: `14756021066`; artifact SHA-256: `e93b484a7e08322aa0aac7b306d10b730874d6d3d7320fcfd8d7e57983e861ea`.
+- Its actual `build/bin/IVLegacy.log` has 105 lines. The ending sequence is: successful Reset; post-reset render-state call forwarded; `STATE_BLOCK_BEGIN_ENTER`; `STATE_CACHE_DISABLED`; `STATE_BLOCK_BEGIN_FORWARD`; `STATE_BLOCK_BEGIN_RETURN hr=0`; following render-state call forwarded with `cached=0`.
+- The smoke host also printed `PASS: synthetic D3D9 interface/device hooks, shader capture and constant telemetry executed.`
+
+### Additional regression coverage in progress
+
+- Added a direct `GetRenderState` test before duplicate-state suppression, so accidentally mapping slot 58 to a state-block hook will now fail the smoke test.
+- Added direct CreateStateBlock and EndStateBlock calls and checks, alongside the existing BeginStateBlock test.
+- Added static source assertions for the exact D3D9 slots 58/59/60/61.
+- **The new tests are not yet confirmed by a passing CI run.** Run #312 predates these latest additions; runs #313/#314 are checking them.
+
+### Interpretation limits
+
+- Run #312 used a fake D3D9 adapter that reports synthetic PCI ID `8086:29C2`; it was not a physical GMA 3100.
+- The one-sample profiler value in the log is synthetic. `gpu_time=not_measured`; it is not a GTA IV frame-time or FPS result.
+- The CI result proves the tested instrumentation and hook execution path only. GTA IV startup, real shader-pair output, GMA driver acceptance, gameplay correctness and 30 genuine FPS remain untested.
+
