@@ -1246,8 +1246,17 @@ int main()
 
     const LONG renderCallsBeforeStateBlock =
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0);
+    std::printf("SMOKE: before-BeginStateBlock\\n");
+    std::fflush(stdout);
     const HRESULT beginStateBlockHr = device->BeginStateBlock();
+    std::printf("SMOKE: after-BeginStateBlock hr=0x%08lX calls=%ld\\n",
+        static_cast<unsigned long>(beginStateBlockHr),
+        InterlockedCompareExchange(&g_fakeBeginStateBlockCalls, 0, 0));
+    std::fflush(stdout);
     const HRESULT stateBlockStateHr = device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    std::printf("SMOKE: after-stateblock-SetRenderState hr=0x%08lX\\n",
+        static_cast<unsigned long>(stateBlockStateHr));
+    std::fflush(stdout);
     if (FAILED(beginStateBlockHr) || FAILED(stateBlockStateHr) ||
         InterlockedCompareExchange(&g_fakeBeginStateBlockCalls, 0, 0) != 1 ||
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0) -
