@@ -379,7 +379,7 @@ def assess_factory_hook_path(
         "normal_direct_imports_with_lookup_table": len(normal_with_lookup),
         "normal_direct_imports_missing_original_first_thunk": len(missing_original_lookup),
         "normal_direct_imports_missing_first_thunk": len(missing_iat),
-        "normal_direct_imports_unhookable": len(missing_original_lookup) + len(missing_iat),
+        "normal_direct_imports_unhookable": len(normal_factory) - len(normal_with_lookup),
         "message": message,
     }
 
