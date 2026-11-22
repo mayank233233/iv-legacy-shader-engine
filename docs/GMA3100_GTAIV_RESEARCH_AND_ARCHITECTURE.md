@@ -279,3 +279,14 @@ The analyzer now enforces the exact D3D9 vertex-shader matrix-op destination mas
 | m3x2 | `.xy` | 2 |
 
 The number of constant registers follows the result dimension (the second dimension of the matrix op). The source matrix register may not be swizzled or negated, and the destination may not alias the vector source. These rules are covered by synthetic boundary and negative fixtures. See the Microsoft [m4x4](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m4x4---vs), [m4x3](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m4x3---vs), [m3x4](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x4---vs), [m3x3](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x3---vs), and [m3x2](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/m3x2---vs) references.
+
+
+### Component-aware temporary initialization and input-port checks — 2026-11-22
+
+The VS2 register reference gives temporary registers no default value, a single write port, and three read ports. Each input register has one read port; a single instruction may access only one distinct input register. Float constants allow at most two reads per instruction. The analyzer now checks the input/constant read-port limits and performs straight-line definite-initialization analysis for temporary components.
+
+The component tracker maps source swizzles to the actual source components read. It models DP3/DP4 as xyz/xyzw; CRS according to its cross-product component dependencies; LIT using src.x for dest.y and src.x/src.y/src.w for dest.z (src.z is ignored); DST using its separate src0.y/src0.z and src1.y/src1.w dependencies; NRM using xyz for the normalization factor and src.w only when dest.w is written; SGN using the destination write mask for src0 and marking src1/src2 scratch registers undefined after execution; and matrix operations using the vector dimension of each matrix instruction.
+
+Static flow control remains outside this analysis. IF/loop/call shaders are rejected before a candidate is reported, so the tool never claims that initialization is definite across unanalysed branches or loops.
+
+References: [VS2 register read-port table](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-2-0), [input-register rules](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-input), [LIT](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/lit---vs), [DST](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dst---vs), [NRM](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/nrm---vs), [CRS](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/crs---vs), and [SGN](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/sgn---vs).
