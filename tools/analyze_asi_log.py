@@ -58,6 +58,54 @@ def shader_key(shader: dict[str, Any] | None, pointer: str | None) -> str:
     return f"{shader['stage']}:{shader['hash']}"
 
 
+def parse_render_target_bindings(raw: str) -> list[dict[str, Any]]:
+    """Parse per-draw RT snapshots: slot:pointer:width:height:format:type:usage:pool:ms:quality."""
+    targets: list[dict[str, Any]] = []
+    for item in raw.split(";"):
+        if not item:
+            continue
+        parts = item.split(":")
+        if len(parts) != 10:
+            continue
+        try:
+            targets.append({
+                "index": int(parts[0], 0),
+                "object": normalize_pointer(parts[1]),
+                "width": int(parts[2], 0),
+                "height": int(parts[3], 0),
+                "format": int(parts[4], 0),
+                "type": int(parts[5], 0),
+                "usage": int(parts[6], 0),
+                "pool": int(parts[7], 0),
+                "multisample_type": int(parts[8], 0),
+                "multisample_quality": int(parts[9], 0),
+            })
+        except ValueError:
+            continue
+    return targets
+
+
+def parse_depth_stencil_target(raw: str) -> dict[str, Any] | None:
+    """Parse one depth snapshot: pointer:width:height:format:type:usage:pool:ms:quality."""
+    parts = raw.split(":")
+    if len(parts) != 9:
+        return None
+    try:
+        return {
+            "object": normalize_pointer(parts[0]),
+            "width": int(parts[1], 0),
+            "height": int(parts[2], 0),
+            "format": int(parts[3], 0),
+            "type": int(parts[4], 0),
+            "usage": int(parts[5], 0),
+            "pool": int(parts[6], 0),
+            "multisample_type": int(parts[7], 0),
+            "multisample_quality": int(parts[8], 0),
+        }
+    except ValueError:
+        return None
+
+
 def analyze_log(path: Path) -> dict[str, Any]:
     shaders_by_address: dict[tuple[str, str], dict[str, Any]] = {}
     fallback_by_address: dict[tuple[str, str], dict[str, Any]] = {}
@@ -231,6 +279,12 @@ def analyze_log(path: Path) -> dict[str, Any]:
             vs = shaders_by_address.get(("VS", vs_pointer)) if vs_pointer else None
             ps = shaders_by_address.get(("PS", ps_pointer)) if ps_pointer else None
             ps_fallback = fallback_by_address.get(("PS", ps_pointer)) if ps_pointer else None
+            render_targets = parse_render_target_bindings(
+                fields.get("render_targets", "")
+            )
+            depth_stencil_target = parse_depth_stencil_target(
+                fields.get("depth_target", "")
+            )
             texture_bindings = []
             for binding in fields.get("textures", "").split(";"):
                 if not binding or ":" not in binding:
@@ -283,6 +337,8 @@ def analyze_log(path: Path) -> dict[str, Any]:
                     for stream in stream_bindings
                 ],
                 "texture_bindings": texture_bindings,
+                "render_targets": render_targets,
+                "depth_stencil_target": depth_stencil_target,
                 "sampler_state_hash": fields.get("sampler_hash", "").lower() or None,
                 "sampler_state_count": int_field(fields, "sampler_count"),
                 "render_state_hash": fields.get("render_state_hash", "").lower() or None,
@@ -317,6 +373,8 @@ def analyze_log(path: Path) -> dict[str, Any]:
     unresolved_shader_references = 0
     fallback_usage: dict[tuple[str, str], dict[str, Any]] = {}
     texture_usage: dict[str, dict[str, Any]] = {}
+    render_target_usage: dict[str, dict[str, Any]] = {}
+    depth_stencil_usage: dict[str, dict[str, Any]] = {}
     vertex_input_usage: dict[str, dict[str, Any]] = {}
 
     for draw in draws:
@@ -410,6 +468,44 @@ def analyze_log(path: Path) -> dict[str, Any]:
             item["stages"].add(binding["stage"])
             item["shader_pairs"].add(pair_key)
 
+        for target in draw["render_targets"]:
+            target_key = (
+                f"RT{target['index']}:{target['object'] or 'null'}:"
+                f"{target['width']}x{target['height']}:fmt{target['format']}"
+            )
+            item = render_target_usage.setdefault(target_key, {
+                "target_key": target_key,
+                **target,
+                "draw_calls": 0,
+                "primitive_submissions": 0,
+                "frames": set(),
+                "shader_pairs": set(),
+            })
+            item["draw_calls"] += 1
+            item["primitive_submissions"] += draw["primitive_count"]
+            item["frames"].add(draw["frame"])
+            item["shader_pairs"].add(pair_key)
+
+        depth_target = draw["depth_stencil_target"]
+        if depth_target is not None:
+            depth_key = (
+                f"{depth_target['object'] or 'null'}:"
+                f"{depth_target['width']}x{depth_target['height']}:"
+                f"fmt{depth_target['format']}"
+            )
+            item = depth_stencil_usage.setdefault(depth_key, {
+                "target_key": depth_key,
+                **depth_target,
+                "draw_calls": 0,
+                "primitive_submissions": 0,
+                "frames": set(),
+                "shader_pairs": set(),
+            })
+            item["draw_calls"] += 1
+            item["primitive_submissions"] += draw["primitive_count"]
+            item["frames"].add(draw["frame"])
+            item["shader_pairs"].add(pair_key)
+
         fallback = draw["pixel_shader_fallback"]
         if fallback:
             fallback_key = (
@@ -480,6 +576,30 @@ def analyze_log(path: Path) -> dict[str, Any]:
         key=lambda x: (-x["draw_calls"], x["object"])
     )
 
+    normalized_render_target_usage = [
+        {
+            **item,
+            "frames": sorted(item["frames"]),
+            "shader_pairs": sorted(item["shader_pairs"]),
+        }
+        for item in render_target_usage.values()
+    ]
+    normalized_render_target_usage.sort(
+        key=lambda x: (-x["draw_calls"], x["target_key"])
+    )
+
+    normalized_depth_stencil_usage = [
+        {
+            **item,
+            "frames": sorted(item["frames"]),
+            "shader_pairs": sorted(item["shader_pairs"]),
+        }
+        for item in depth_stencil_usage.values()
+    ]
+    normalized_depth_stencil_usage.sort(
+        key=lambda x: (-x["draw_calls"], x["target_key"])
+    )
+
     normalized_vertex_input_usage = [
         {
             **item,
@@ -523,6 +643,18 @@ def analyze_log(path: Path) -> dict[str, Any]:
         "shader_fallback_usage": normalized_fallback_usage,
         "texture_object_usage": normalized_texture_usage,
         "texture_objects_observed": len(textures_by_address),
+        "render_target_usage": normalized_render_target_usage,
+        "render_target_objects_observed": len({
+            item["object"]
+            for item in normalized_render_target_usage
+            if item["object"] is not None
+        }),
+        "depth_stencil_target_usage": normalized_depth_stencil_usage,
+        "depth_stencil_objects_observed": len({
+            item["object"]
+            for item in normalized_depth_stencil_usage
+            if item["object"] is not None
+        }),
         "vertex_declarations_observed": len(vertex_declarations),
         "vertex_input_usage": normalized_vertex_input_usage,
         "buffer_objects_observed": len(buffers_by_address),
