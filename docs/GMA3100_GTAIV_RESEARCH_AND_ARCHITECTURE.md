@@ -308,8 +308,23 @@ Reference: [Microsoft — Constant float register](https://learn.microsoft.com/e
 
 The output allocation model is grounded in the Microsoft D3D9 `dcl_usage` reference: among the 12 VS3 output registers, one is position, up to ten are general interpolators (any ten register indices may be used), and one optional register is point size. The point-size DCL uses the full write mask even though only scalar `x` is consumed. Distinct semantics may share one output register through non-overlapping component masks. The audit translates this into a diagnostic plan for the ten VS2 generic outputs: two color registers plus eight texture-coordinate registers.
 
-Sparse component masks are preserved; the audit does not force `.xz` or `.yz` masks into another register class. It also does not require a contiguous sequence of used VS2 `oT#` indices. A target semantic such as TEXCOORD3 may be compacted to TEXCOORD0, but the report flags the downstream pixel-shader interface change.
+Sparse component masks are preserved; the audit does not force `.xz` or `.yz` masks into another register class. It also does not require a contiguous sequence of used VS2 `oT#` indices. A target semantic such as TEXCOORD3 may be compacted to TEXCOORD0, but the report flags the downstream pixel-shader interface change. POSITION0 and optional PSIZE0 occupy exclusive VS3 source output registers; neither can share an `o#` register with another semantic. The remaining ten registers carry generic interpolators, and the spec allows any ten of the twelve source indices, not just o0-o9.
 
 The standalone synthetic vertex-audit test passed in Windows-independent run #219. The Windows x86 build for the same commit was still running at the last status check. No GTA IV shader capture, game execution or GMA 3100 hardware test has occurred.
 
 Reference: [Microsoft D3D9 dcl_usage output register](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dcl-usage-outut-register---vs), [VS2 output registers](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-2-0), and [VS3 output register model](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-3-0).
+
+
+### Special output exclusivity and arbitrary VS3 output indices — 2026-11-22
+
+The Microsoft D3D9 output DCL reference explicitly makes position and point size special register classes, not general varying lanes. The audit now rejects any attempt to pack another semantic into the same VS3 source register as POSITION0 or PSIZE0. The remaining ten registers carry generic interpolators, and the spec allows any ten of the twelve register indices, not just o0-o9.
+
+Synthetic tests now verify:
+- Ten generic interpolators plus POSITION0 and PSIZE0, with position at o1 and point size at o10 while general semantics use nonconsecutive remaining indices.
+- Ten generic interpolators plus POSITION0 when PSIZE0 is omitted.
+- Rejection when an eleventh general interpolator would exceed the VS2 ten-slot output budget.
+- Rejection of a TEXCOORD declaration sharing the PSIZE0 or POSITION0 source register.
+
+Standalone vertex-audit CI run #224 passed these cases. The Windows x86 job for the same commit was still in environment setup at the last check. No real GTA IV shader or Intel GMA 3100 hardware has been tested.
+
+Reference: [Microsoft D3D9 dcl_usage output register](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dcl-usage-outut-register---vs).
