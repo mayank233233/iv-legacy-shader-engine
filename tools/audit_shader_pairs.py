@@ -611,7 +611,19 @@ def audit_draw(
     interface = audit_shader_interface(vs_result, ps_result, cached["pixel_inputs"])
     result["interface"] = interface
     result["warnings"].extend(interface["interpolation_review"])
-    layout = validate_vertex_layout(vs_result, draw)
+    if "UP" in str(draw.get("kind", "")).upper():
+        layout = {
+            "status": "unverified_user_pointer_draw",
+            "source": "Draw*UP transient memory",
+            "matched_inputs": [],
+            "reasons": [],
+            "warnings": [
+                "DrawPrimitiveUP/DrawIndexedPrimitiveUP provide transient vertex/index data; "
+                "the current telemetry does not capture those per-draw memory layouts or ranges"
+            ],
+        }
+    else:
+        layout = validate_vertex_layout(vs_result, draw)
     result["vertex_input_layout"] = layout
     if layout["reasons"]:
         result["reasons"].extend(layout["reasons"])
@@ -619,7 +631,8 @@ def audit_draw(
 
     declared_samplers = set(ps_result.get("declared_samplers", []))
     used_samplers = set(ps_result.get("used_samplers", []))
-    required_samplers = sorted(declared_samplers | used_samplers)
+    # A declaration alone does not prove the shader samples that stage.
+    required_samplers = sorted(used_samplers)
     bound_textures = {
         int(binding["stage"]): binding
         for binding in draw.get("texture_bindings", [])
@@ -629,6 +642,7 @@ def audit_draw(
         sampler for sampler in required_samplers if sampler not in bound_textures
     ]
     result["sampler_bindings"] = {
+        "declared_sampler_stages": sorted(declared_samplers),
         "required_sampler_stages": required_samplers,
         "bound_texture_stages": sorted(bound_textures),
         "missing_sampler_stages": missing_samplers,
