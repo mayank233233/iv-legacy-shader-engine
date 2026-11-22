@@ -1424,7 +1424,7 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_INPUT, 0),
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
         *make_instruction(
-            4,
+            2,
             make_dest_token(REG_TEMP, 0),
             make_source_token(REG_CONST, 0),
             make_source_token(REG_CONST, 1),
