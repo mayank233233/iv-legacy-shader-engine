@@ -1,3 +1,14 @@
+## Prototype 0.5.7-alpha — restricted VS3-to-VS2 emission
+
+- Added a strict VS3-to-VS2 bytecode emitter for the subset that passes the existing straight-line register, instruction, data-flow and output audit.
+- Removes VS3 output declarations and maps output operands to VS2 fixed semantic registers; rejects packed multi-semantic output registers until component-split rewriting is implemented.
+- Added optional `.vs20.vso` emission, source/output hashes and a separate hash-keyed `[VertexShaderFallbacks]` runtime map.
+- Added ASI VS3 vertex-shader replacement at `CreateVertexShader`, with VS2 profile validation, object/hash logging and original-shader retry on replacement failure.
+- Generalised the fallback bytecode-envelope validator for both SM2 shader stages.
+- PS and VS map writers now require explicit source-hash approval after paired-interface and visual review; bytecode emission alone no longer creates an approved runtime mapping.
+- Extended synthetic converter and ASI runtime tests, plus the Windows workflow to emit an SM2 candidate from its synthetic VS3 capture.
+- **Verification pending:** no confirmed Windows x86 CI result for this commit series. No GTA IV or physical GMA 3100 testing has been performed.
+
 ## Prototype 0.5.6-alpha — conservative D3D9 scalar state cache
 
 - Added opt-in suppression of consecutive duplicate `SetRenderState`, `SetTextureStageState` and `SetSamplerState` calls after a successful call established the same value on the current device.
