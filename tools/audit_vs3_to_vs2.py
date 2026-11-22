@@ -1070,6 +1070,14 @@ def audit_vs3_bytes(
                         part_mask = write_mask & entry["component_mask"]
                         if not part_mask or "target_register_type" not in entry:
                             continue
+                        if (
+                            entry["usage"] == USAGE_PSIZE
+                            and entry["usage_index"] == 0
+                            and not (part_mask & 0x1)
+                        ):
+                            reasons.append(
+                                f"{name} at DWORD {ins.offset} writes PSIZE0 without its scalar x component"
+                            )
                         target_part_mask = (
                             part_mask & 0x1
                             if entry["usage"] == USAGE_PSIZE and entry["usage_index"] == 0
@@ -2195,7 +2203,7 @@ def _self_test() -> None:
         *make_instruction(1, make_dest_token(REG_OUTPUT, 2, 0x2), make_source_token(REG_INPUT, 0)),
     ]
     point_size_bad_write = audit_vs3_bytes(shader(*point_size_bad_write_words))
-    assert any("point-size output must write only the x component" in reason for reason in point_size_bad_write["reasons"])
+    assert any("writes PSIZE0 without its scalar x component" in reason for reason in point_size_bad_write["reasons"])
 
     packed_unwritten_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
