@@ -238,3 +238,14 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Synthetic self-tests cover a simple candidate, excessive temporary register, vertex sampler, VS3-only texture lookup, unsupported output semantic, declaration-without-write, output register overflow, version-sensitive `sincos`, slot-budget overflow and truncated bytecode.
 - The new self-test is wired into the Windows x86 source-sanity workflow. CI result for this feature commit is pending.
 - All fixtures are synthetic; no original GTA IV shader or GMA 3100 device has been inspected.
+
+
+## Vertex output-interface audit expansion — 2026-11-22
+
+- Corrected the VS3 output model: multiple DCL declarations may describe disjoint component masks on the same output register, each carrying a distinct semantic.
+- The analyzer now preserves each declaration separately, rejects overlapping masks and duplicate semantic identifiers, and fans writes from one source register into the mapped VS2 output targets in its diagnostic plan.
+- Direct `COLOR0/1` and `TEXCOORD0-7` mappings are preserved. Other generic semantics are allocated to unused VS2 interpolation outputs and flagged as requiring a paired pixel-shader input semantic remap.
+- VS3 `FOG` is treated as a generic varying, not as the legacy scalar `oFog` register. `POSITION0` and `PSIZE0` are treated as special outputs with full-mask requirements.
+- Added tests for packed semantic mappings, repeated semantic declarations, overlapping masks, point-size masks, undeclared/unwritten components, and TEXCOORD output-register constraints.
+- The tool remains diagnostic-only and emits no VS2 bytecode. All tests use synthetic tokens, not captured GTA IV shaders.
+- Latest Windows x86 CI after this expansion: run #187 is queued; prior run #185 failed on an outdated assertion, not on the output mapping implementation.
