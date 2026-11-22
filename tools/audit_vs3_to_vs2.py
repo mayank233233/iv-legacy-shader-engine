@@ -902,7 +902,7 @@ def _self_test() -> None:
         *dcl(USAGE_POSITION, REG_OUTPUT, 0),
     ))
     assert declaration_only["structural_candidate_for_manual_lowering"] is False
-    assert any("does not write" in reason for reason in declaration_only["reasons"])
+    assert any("write all four position components" in reason for reason in declaration_only["reasons"])
 
     output12 = audit_vs3_bytes(shader(
         *dcl(USAGE_POSITION, REG_INPUT, 0),
@@ -1013,6 +1013,52 @@ def _self_test() -> None:
     ]
     matrix_bad = audit_vs3_bytes(shader(*matrix_bad_words))
     assert any("requires a float-constant matrix source" in reason for reason in matrix_bad["reasons"])
+
+    # Baseline vs_2_0 does not provide the vs_3_0 _sat instruction modifier.
+    sat_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            1,
+            make_dest_token(REG_OUTPUT, 0) | (1 << 20),
+            make_source_token(REG_INPUT, 0),
+        ),
+    ]
+    sat = audit_vs3_bytes(shader(*sat_words))
+    assert any("_sat is not supported by baseline vs_2_0" in reason for reason in sat["reasons"])
+
+    scalar_mask_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            6,
+            make_dest_token(REG_TEMP, 0, 0x3),
+            make_source_token(REG_INPUT, 0, 0x00),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+    ]
+    scalar_mask = audit_vs3_bytes(shader(*scalar_mask_words))
+    assert any("single-component destination mask" in reason for reason in scalar_mask["reasons"])
+
+    texcoord_gap_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 1),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 1), make_source_token(REG_INPUT, 0)),
+    ]
+    texcoord_gap = audit_vs3_bytes(shader(*texcoord_gap_words))
+    assert any("without the required lower output oT0" in reason for reason in texcoord_gap["reasons"])
+
+    texcoord_mask_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *dcl(USAGE_TEXCOORD, REG_OUTPUT, 0),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 1, 0x5), make_source_token(REG_INPUT, 0)),
+    ]
+    texcoord_mask = audit_vs3_bytes(shader(*texcoord_mask_words))
+    assert any("unsupported combined write mask" in reason for reason in texcoord_mask["reasons"])
 
     over_budget_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
