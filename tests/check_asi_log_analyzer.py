@@ -10,7 +10,7 @@ from analyze_asi_log import analyze_log  # noqa: E402
 
 def main() -> None:
     fixture = """\
-[11:59:59.990] D3D9_ADAPTER adapter=0 vendor=0x8086 device=0x29C2 subsys=0x00000001 revision=0x00000002 driver_version=00000001:00000002 description=Intel driver=igdumdim32.dll
+[11:59:59.990] D3D9_ADAPTER adapter=0 vendor=0x8086 device=0x29C2 subsys=0x00000001 revision=0x00000002 driver_version=00000001:00000002 description=Intel Graphics Media Accelerator driver=Intel Graphics Media Accelerator Driver
 [11:59:59.991] D3D9_GET_DEVICE_CAPS adapter=0 type=1 VS=0xFFFE0200 PS=0xFFFF0200 MaxSimTextures=2 MaxTextureStages=2 MaxRTs=1 MaxVSConst=96 VS20Temps=12 VS20DynamicFlow=0 VS20StaticFlow=1 PS20Caps=0x00000000 PS20Temps=12 PS20Slots=96 PS20DynamicFlow=0 PS20StaticFlow=0
 [11:59:59.992] D3D9_CHECK_DEVICE_FORMAT adapter=0 type=1 adapter_format=22 usage=0x00000001 resource_type=3 check_format=21 hr=0x00000000
 [11:59:59.993] D3D9_CHECK_DEVICE_FORMAT adapter=0 type=1 adapter_format=22 usage=0x00000001 resource_type=3 check_format=75 hr=0x8876086A
@@ -61,7 +61,8 @@ def main() -> None:
     assert adapter["device_id"] == 0x29C2
     assert adapter["driver_version_high"] == 1
     assert adapter["driver_version_low"] == 2
-    assert adapter["description"] == "Intel"
+    assert adapter["description"] == "Intel Graphics Media Accelerator"
+    assert adapter["driver"] == "Intel Graphics Media Accelerator Driver"
     assert report["device_capability_snapshots"][0]["vertex_shader"]["profile"] == "vs_2_0"
     assert report["device_capability_snapshots"][0]["pixel_shader"]["profile"] == "ps_2_0"
     assert report["device_capability_snapshots"][0]["max_simultaneous_render_targets"] == 1
