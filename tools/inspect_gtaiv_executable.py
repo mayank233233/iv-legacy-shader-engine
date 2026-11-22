@@ -314,7 +314,20 @@ def assess_factory_hook_path(
     ]
 
     if normal_with_lookup:
-        if delay_factory:
+        if missing_original_lookup or missing_iat:
+            if delay_factory:
+                classification = "normal_iat_candidate_with_unsupported_imports"
+                message = (
+                    "at least one normal Direct3DCreate9 import is hookable, "
+                    "but other normal descriptors or delay-import paths are not"
+                )
+            else:
+                classification = "normal_iat_candidate_with_unsupported_normal_imports"
+                message = (
+                    "at least one normal Direct3DCreate9 import is hookable, "
+                    "but one or more other normal descriptors are not"
+                )
+        elif delay_factory:
             classification = "normal_iat_candidate_plus_delay_import"
             message = (
                 "a supported normal-IAT candidate exists, but any delay-import "
@@ -366,6 +379,7 @@ def assess_factory_hook_path(
         "normal_direct_imports_with_lookup_table": len(normal_with_lookup),
         "normal_direct_imports_missing_original_first_thunk": len(missing_original_lookup),
         "normal_direct_imports_missing_first_thunk": len(missing_iat),
+        "normal_direct_imports_unhookable": len(missing_original_lookup) + len(missing_iat),
         "message": message,
     }
 
@@ -498,6 +512,10 @@ def inspect_file(path: Path) -> dict[str, Any]:
                 "kind": x["kind"],
                 "table": x["table"],
                 "lookup_rva": f"0x{x['lookup_rva']:08X}",
+                "iat_entry_rva": (
+                    f"0x{x['iat_rva']:08X}" if x.get("iat_rva") is not None else None
+                ),
+                "descriptor_index": x.get("descriptor_index"),
                 "original_first_thunk_rva": (
                     f"0x{x['original_first_thunk_rva']:08X}"
                     if "original_first_thunk_rva" in x else None
@@ -536,6 +554,8 @@ def inspect_file(path: Path) -> dict[str, Any]:
                 hook_path["normal_direct_imports_missing_original_first_thunk"],
             "normal_direct_imports_missing_first_thunk":
                 hook_path["normal_direct_imports_missing_first_thunk"],
+            "normal_direct_imports_unhookable":
+                hook_path["normal_direct_imports_unhookable"],
         },
         "limitations": [
             "The current ASI scans only the main executable's normal import table.",
@@ -654,6 +674,23 @@ def _self_test() -> None:
     }])
     assert mixed_paths["classification"] == "normal_iat_candidate_plus_delay_import"
     assert mixed_paths["hook_candidate"] is True
+
+    mixed_normal_paths = assess_factory_hook_path(
+        imports + oft_zero_imports, []
+    )
+    assert mixed_normal_paths["classification"] == (
+        "normal_iat_candidate_with_unsupported_normal_imports"
+    )
+    assert mixed_normal_paths["hook_candidate"] is True
+
+    mixed_normal_and_delay_paths = assess_factory_hook_path(
+        imports + oft_zero_imports,
+        [{"dll": "d3d9.dll", "name": "Direct3DCreate9", "table": "delay"}]
+    )
+    assert mixed_normal_and_delay_paths["classification"] == (
+        "normal_iat_candidate_with_unsupported_imports"
+    )
+    assert mixed_normal_and_delay_paths["hook_candidate"] is True
 
     try:
         PE32Image(b"not a PE file")
