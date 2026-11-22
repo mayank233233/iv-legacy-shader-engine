@@ -660,13 +660,62 @@ def audit_vs3_bytes(
                     f"{name} at DWORD {ins.offset} requires a single-component destination mask"
                 )
 
+        if opcode == 33:
+            destination = decode_register(ins.operands[0])
+            source0 = decode_register(ins.operands[1])
+            source1 = decode_register(ins.operands[2])
+            if destination is None or destination[0] != REG_TEMP:
+                reasons.append(
+                    f"CRS at DWORD {ins.offset} requires a temporary destination register"
+                )
+            if destination is not None and source0 == destination:
+                reasons.append(
+                    f"CRS at DWORD {ins.offset} destination aliases src0"
+                )
+            if destination is not None and source1 == destination:
+                reasons.append(
+                    f"CRS at DWORD {ins.offset} destination aliases src1"
+                )
+            if source_swizzle(ins.operands[1]) != IDENTITY_SWIZZLE:
+                reasons.append(
+                    f"CRS at DWORD {ins.offset} requires the default src0 swizzle"
+                )
+            if source_swizzle(ins.operands[2]) != IDENTITY_SWIZZLE:
+                reasons.append(
+                    f"CRS at DWORD {ins.offset} requires the default src1 swizzle"
+                )
+            crs_masks = {0x1, 0x2, 0x4, 0x3, 0x5, 0x6, 0x7}
+            if destination_mask(ins.operands[0]) not in crs_masks:
+                reasons.append(
+                    f"CRS at DWORD {ins.offset} has an unsupported destination mask"
+                )
+
+        if opcode == 36:
+            destination = decode_register(ins.operands[0])
+            source = decode_register(ins.operands[1])
+            if destination is None or destination[0] != REG_TEMP:
+                reasons.append(
+                    f"NRM at DWORD {ins.offset} requires a temporary destination register"
+                )
+            if destination is not None and source == destination:
+                reasons.append(
+                    f"NRM at DWORD {ins.offset} destination and source must not be the same register"
+                )
+
         if opcode == 34:
+            scratch_registers = []
             for temp_operand in ins.operands[2:4]:
                 decoded_temp = decode_register(temp_operand)
                 if decoded_temp is None or decoded_temp[0] != REG_TEMP:
                     reasons.append(
                         f"SGN at DWORD {ins.offset} requires its final two operands to be temporary registers"
                     )
+                else:
+                    scratch_registers.append(decoded_temp)
+            if len(scratch_registers) == 2 and scratch_registers[0] == scratch_registers[1]:
+                reasons.append(
+                    f"SGN at DWORD {ins.offset} requires two different temporary scratch registers"
+                )
 
         # DEF-family payload DWORDs are literal values, not register tokens.
         for operand_index, operand in enumerate(_register_operands(ins)):
@@ -1202,6 +1251,88 @@ def _self_test() -> None:
     ]
     partial_position = audit_vs3_bytes(shader(*partial_position_words))
     assert any("write all four position components" in reason for reason in partial_position["reasons"])
+
+    crs_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            33,
+            make_dest_token(REG_TEMP, 0, 0x7),
+            make_source_token(REG_INPUT, 0),
+            make_source_token(REG_CONST, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    crs = audit_vs3_bytes(shader(*crs_words))
+    assert crs["structural_candidate_for_manual_lowering"] is True
+
+    crs_bad_mask_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            33,
+            make_dest_token(REG_TEMP, 0, 0xF),
+            make_source_token(REG_INPUT, 0),
+            make_source_token(REG_CONST, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    crs_bad_mask = audit_vs3_bytes(shader(*crs_bad_mask_words))
+    assert any("unsupported destination mask" in reason for reason in crs_bad_mask["reasons"])
+
+    crs_bad_swizzle_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            33,
+            make_dest_token(REG_TEMP, 0, 0x7),
+            make_source_token(REG_INPUT, 0, 0x1B),
+            make_source_token(REG_CONST, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    crs_bad_swizzle = audit_vs3_bytes(shader(*crs_bad_swizzle_words))
+    assert any("default src0 swizzle" in reason for reason in crs_bad_swizzle["reasons"])
+
+    crs_alias_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            33,
+            make_dest_token(REG_TEMP, 0, 0x7),
+            make_source_token(REG_TEMP, 0),
+            make_source_token(REG_CONST, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    crs_alias = audit_vs3_bytes(shader(*crs_alias_words))
+    assert any("destination aliases src0" in reason for reason in crs_alias["reasons"])
+
+    nrm_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            36,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_INPUT, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_TEMP, 0)),
+    ]
+    nrm = audit_vs3_bytes(shader(*nrm_words))
+    assert nrm["structural_candidate_for_manual_lowering"] is True
+
+    nrm_alias_words = [
+        *dcl(USAGE_POSITION, REG_INPUT, 0),
+        *dcl(USAGE_POSITION, REG_OUTPUT, 0),
+        *make_instruction(
+            36,
+            make_dest_token(REG_TEMP, 0),
+            make_source_token(REG_TEMP, 0),
+        ),
+        *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
+    ]
+    nrm_alias = audit_vs3_bytes(shader(*nrm_alias_words))
+    assert any("destination and source must not be the same" in reason for reason in nrm_alias["reasons"])
 
     matrix_words = [
         *dcl(USAGE_POSITION, REG_INPUT, 0),
