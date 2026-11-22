@@ -283,7 +283,7 @@ The number of constant registers follows the result dimension (the second dimens
 
 ### Component-aware temporary initialization and input-port checks — 2026-11-22
 
-The VS2 register reference gives temporary registers no default value, a single write port, and three read ports. Each input register has one read port; a single instruction may access only one distinct input register. Float constants allow at most two reads per instruction. The analyzer now checks the input/constant read-port limits and performs straight-line definite-initialization analysis for temporary components.
+The VS2 register reference gives temporary registers no default value, a single write port, and three read ports. Each input register has one read port; a single instruction may access only one distinct input register. The Microsoft constant-float register reference further states that one instruction may access only one distinct constant register, while separate sources can swizzle or negate that same vector independently. Matrix instructions encode one base constant whose additional rows are implied by the opcode. The analyzer now checks those input/constant read-port limits and performs straight-line definite-initialization analysis for temporary components.
 
 The component tracker maps source swizzles to the actual source components read. It models DP3/DP4 as xyz/xyzw; CRS according to its cross-product component dependencies; LIT using src.x for dest.y and src.x/src.y/src.w for dest.z (src.z is ignored); DST using its separate src0.y/src0.z and src1.y/src1.w dependencies; NRM using xyz for the normalization factor and src.w only when dest.w is written; SGN using the destination write mask for src0 and marking src1/src2 scratch registers undefined after execution; and matrix operations using the vector dimension of each matrix instruction.
 
@@ -295,3 +295,10 @@ References: [VS2 register read-port table](https://learn.microsoft.com/en-us/win
 ### Point-size output mask correction — 2026-11-22
 
 The VS3 PSIZE0 DCL must use a full xyzw declaration mask, and no other semantic may share that register. The point-size value itself is scalar: only x is consumed, so the lowered VS2 point-size output is written through its x component. The analyzer now keeps the full declaration-mask check separate from the x-only effective write check. Synthetic tests cover the valid full-DCL/x-write case and reject a partial PSIZE declaration or y-only output write. See the Microsoft [output DCL usage rules](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dcl-usage-outut-register---vs) and [point-size register reference](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-point-size).
+
+
+### Constant register read-port rule — 2026-11-22
+
+The previous audit threshold of two distinct float constants was too permissive. The Microsoft reference specifies that any single instruction may access only one constant register; sources within the same instruction may apply independent swizzles and negation to that same constant. The analyzer now enforces one distinct c-register for ordinary instructions. Matrix operations remain valid because their encoded matrix operand is a base c-register and the required consecutive matrix rows are implicit. Tests verify that two sources reading c4 with different swizzles are accepted, an instruction that uses c0 and c1 is rejected, and matrix operations still pass their dedicated constant-span tests.
+
+Reference: [Microsoft — Constant float register](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-constant-float).
