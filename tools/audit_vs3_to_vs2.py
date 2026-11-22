@@ -1406,7 +1406,6 @@ def _self_test() -> None:
             make_dest_token(REG_TEMP, 0),
             make_source_token(REG_CONST, 0),
             make_source_token(REG_CONST, 1),
-            make_source_token(REG_CONST, 2),
         ),
         *make_instruction(1, make_dest_token(REG_OUTPUT, 0), make_source_token(REG_INPUT, 0)),
     ]
