@@ -751,9 +751,12 @@ def audit_draw(
         vs_highest_constant = vs_result.get("highest_float_constant_register")
         result["device_limits"]["vs20_temporary_registers"] = vs_temp_limit
         result["device_limits"]["vs20_highest_float_constant"] = vs_highest_constant
-        if (
-            vs_constant_limit >= 0
-            and vs_highest_constant is not None
+        if vs_constant_limit <= 0:
+            result["warnings"].append(
+                "captured MaxVertexShaderConst is unavailable; VS2 constant-register compatibility is not certified"
+            )
+        elif (
+            vs_highest_constant is not None
             and int(vs_highest_constant) >= vs_constant_limit
         ):
             result["reasons"].append(
