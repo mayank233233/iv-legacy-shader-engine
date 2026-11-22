@@ -37,6 +37,9 @@ namespace
     volatile LONG g_fakeSetTextureStageStateCalls = 0;
     volatile LONG g_fakeSetSamplerStateCalls = 0;
     volatile LONG g_fakeBeginStateBlockCalls = 0;
+    volatile LONG g_fakeCreateStateBlockCalls = 0;
+    volatile LONG g_fakeEndStateBlockCalls = 0;
+    volatile LONG g_fakeGetRenderStateCalls = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
     DWORD g_syntheticVs3VertexShader[11] = {};
@@ -584,6 +587,7 @@ namespace
     {
         if (!value)
             return D3DERR_INVALIDCALL;
+        InterlockedIncrement(&g_fakeGetRenderStateCalls);
         *value = 0;
         return D3D_OK;
     }
@@ -611,6 +615,7 @@ namespace
     HRESULT WINAPI FakeDeviceCreateStateBlock(
         IDirect3DDevice9*, D3DSTATEBLOCKTYPE, IDirect3DStateBlock9** stateBlock)
     {
+        InterlockedIncrement(&g_fakeCreateStateBlockCalls);
         if (stateBlock)
             *stateBlock = NULL;
         return D3DERR_INVALIDCALL;
@@ -625,6 +630,7 @@ namespace
     HRESULT WINAPI FakeDeviceEndStateBlock(
         IDirect3DDevice9*, IDirect3DStateBlock9** stateBlock)
     {
+        InterlockedIncrement(&g_fakeEndStateBlockCalls);
         if (stateBlock)
             *stateBlock = NULL;
         return D3DERR_INVALIDCALL;
@@ -1155,6 +1161,19 @@ int main()
     const HRESULT setTextureStageStateHr = device->SetTextureStageState(
         0, D3DTSS_COLOROP, D3DTOP_MODULATE);
 
+    // GetRenderState is slot 58 and must remain untouched. Older incorrect
+    // state-block hook indices replaced this read method and disabled/corrupted
+    // the cache before the BeginStateBlock test could run.
+    DWORD queriedRenderState = 0xFFFFFFFFUL;
+    const LONG getRenderStateCallsBefore =
+        InterlockedCompareExchange(&g_fakeGetRenderStateCalls, 0, 0);
+    const HRESULT getRenderStateHr = device->GetRenderState(
+        D3DRS_ZENABLE, &queriedRenderState);
+    if (FAILED(getRenderStateHr) || queriedRenderState != 0 ||
+        InterlockedCompareExchange(&g_fakeGetRenderStateCalls, 0, 0) -
+            getRenderStateCallsBefore != 1)
+        return Fail("GetRenderState slot 58 was overwritten by a state-block hook");
+
     // Each group submits one new value, repeats it (cache hit), changes it,
     // then repeats the changed value (second cache hit).
     const LONG renderCallsBeforeCacheTest =
@@ -1277,6 +1296,16 @@ int main()
             renderCallsBeforeStateBlock != 1)
         return Fail("state-block API use did not disable redundant state suppression");
 
+    IDirect3DStateBlock9* createdStateBlock = NULL;
+    const HRESULT createStateBlockHr = device->CreateStateBlock(
+        D3DSBT_ALL, &createdStateBlock);
+    IDirect3DStateBlock9* endedStateBlock = NULL;
+    const HRESULT endStateBlockHr = device->EndStateBlock(&endedStateBlock);
+    if (createStateBlockHr != D3DERR_INVALIDCALL || endStateBlockHr != D3DERR_INVALIDCALL ||
+        InterlockedCompareExchange(&g_fakeCreateStateBlockCalls, 0, 0) != 1 ||
+        InterlockedCompareExchange(&g_fakeEndStateBlockCalls, 0, 0) != 1)
+        return Fail("CreateStateBlock/EndStateBlock vtable hooks did not preserve their original signatures");
+
     if (vertexBytecode)
         HeapFree(GetProcessHeap(), 0, vertexBytecode);
     if (pixelBytecode)
@@ -1370,8 +1399,12 @@ int main()
         !HasText("texture_stage_forwarded=3 texture_stage_skipped=2") ||
         !HasText("sampler_forwarded=3 sampler_skipped=2"))
         return Fail("State-cache counters did not report the expected forwarded and skipped setter calls");
-    if (!HasText("STATE_CACHE_DISABLED reason=state_block_api_used"))
-        return Fail("State-block use did not disable the redundant state cache");
+    if (!HasText("STATE_CACHE_DISABLED reason=state_block_api_used") ||
+        !HasText("STATE_BLOCK_BEGIN_FORWARD") ||
+        !HasText("STATE_BLOCK_BEGIN_RETURN") ||
+        !HasText("STATE_BLOCK_CREATE_RETURN") ||
+        !HasText("STATE_BLOCK_END_RETURN"))
+        return Fail("State-block hooks did not preserve the three original D3D9 API call paths");
     if (!HasText("DRAW_TELEMETRY_ENABLED") ||
         !HasText("frame=1") ||
         !HasText("kind=DrawPrimitive") ||
