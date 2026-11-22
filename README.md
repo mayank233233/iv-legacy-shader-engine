@@ -24,6 +24,7 @@ Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86
 | `tools/audit_vs3_to_vs2.py` | Conservative `vs_3_0` to `vs_2_0` auditor and restricted bytecode emitter; rejects unsupported instructions, packed output semantics and unsafe remaps |
 | `tools/audit_shader_pairs.py` | Draw-level VS3/PS3 pairing audit: semantic/component linkage, vertex declaration/FVF layout, captured texture bindings and render-target caps |\n| `tools/lower_shader_pairs.py` | Emits conservative paired VS2/PS2 candidates from audited draw captures; runtime mappings require explicit VS-hash:PS-hash approval |
 | `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls in `IVLegacy.log` |
+| `tools/audit_runtime_capability_gaps.py` | Read-only correlation of reported D3D9 caps, requested shader profiles, device creation and failed format checks |
 | `tools/inspect_gtaiv_executable.py` | Read-only PE32 import/version inspector for the original `GTAIV.exe`; reports normal and delay imports without modifying the file |
 | `tools/analyze_asi_constants.py` | Validates float, integer and boolean shader-constant sidecars and resolves them to shader hashes from `IVLegacy.log` |
 | `build/run_probe.bat` | Launches the probe after checking its six bytecode files |
@@ -315,3 +316,19 @@ The profiler measures successful-`Present`-return intervals, wall time spent ins
 `draw_api_ms` is elapsed time inside the D3D9 API call, not a pure count of CPU instructions; it can include driver stalls. `unattributed_ms` is the interval remaining after subtracting measured draw and Present call durations. It includes game simulation, other D3D9 calls and other work, so it is not a direct measurement of world-simulation time. **GPU execution time is not measured** by this profiler (`gpu_time=not_measured`).
 
 The Windows synthetic smoke test enables a one-frame window, advertises a fake HW-T&L capability, requests software vertex processing, submits four synthetic draw calls and checks the profiler summary. Those values verify the instrumentation path only. They are not measurements from the physical GMA 3100 or GTA IV.
+
+
+## Runtime capability-gap audit
+
+Run the read-only analyzer against a real `IVLegacy.log`:
+
+```bat
+py -3 tools\\audit_runtime_capability_gaps.py IVLegacy.log --json capability-gap-report.json
+py -3 tools\\audit_runtime_capability_gaps.py --self-test
+```
+
+It compares the adapter's reported VS/PS version caps with the shader profiles observed at runtime, and records whether D3D9 device creation was requested before or after the first caps record. It also lists failed format/depth-match checks. This helps distinguish a shader-model rejection from later resource-format or device-creation failures.
+
+The report is intentionally conservative: a profile above the reported cap proves that passing that shader through unchanged is unsupported, but the log alone cannot prove why GTA IV exits. Likewise, seeing a device-creation request does not prove the renderer initialized successfully. The tool does not spoof capabilities or patch the game's gate. It is an evidence-gathering step before implementing any cap override.
+
+A cap override is unsafe until every affected feature has a working fallback. In particular, advertising SM3 while still forwarding SM3 bytecode to the GMA 3100 driver would simply move the failure to shader creation. The intended order remains: record real caps, identify the exact gate, build and validate SM2 replacements for observed shader pairs, then consider narrowly scoped capability presentation.
