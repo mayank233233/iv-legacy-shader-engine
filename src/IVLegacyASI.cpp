@@ -103,8 +103,8 @@ namespace
     volatile LONG g_stateCacheLock = 0;
     PVOID volatile g_stateCacheDevice = NULL;
     DWORD g_stateCacheThreadId = 0;
-    volatile LONG64 g_stateCacheForwarded[3] = {};
-    volatile LONG64 g_stateCacheSkipped[3] = {};
+    volatile LONG g_stateCacheForwarded[3] = {};
+    volatile LONG g_stateCacheSkipped[3] = {};
     BOOL g_frameProfilerEnabled = FALSE;
     DWORD g_frameProfilerWindowFrames = 120;
     LONGLONG g_qpcFrequency = 0;
@@ -389,8 +389,8 @@ namespace
         InterlockedExchange(&g_stateCacheWindowFrameCount, 0);
         for (LONG index = 0; index < 3; ++index)
         {
-            InterlockedExchange64(&g_stateCacheForwarded[index], 0);
-            InterlockedExchange64(&g_stateCacheSkipped[index], 0);
+            InterlockedExchange(&g_stateCacheForwarded[index], 0);
+            InterlockedExchange(&g_stateCacheSkipped[index], 0);
         }
     }
 
@@ -465,18 +465,18 @@ namespace
         }
 
         InterlockedExchange(&g_stateCacheWindowFrameCount, 0);
-        const LONGLONG renderForwarded =
-            InterlockedExchange64(&g_stateCacheForwarded[kStateCacheRenderState], 0);
-        const LONGLONG renderSkipped =
-            InterlockedExchange64(&g_stateCacheSkipped[kStateCacheRenderState], 0);
-        const LONGLONG stageForwarded =
-            InterlockedExchange64(&g_stateCacheForwarded[kStateCacheTextureStageState], 0);
-        const LONGLONG stageSkipped =
-            InterlockedExchange64(&g_stateCacheSkipped[kStateCacheTextureStageState], 0);
-        const LONGLONG samplerForwarded =
-            InterlockedExchange64(&g_stateCacheForwarded[kStateCacheSamplerState], 0);
-        const LONGLONG samplerSkipped =
-            InterlockedExchange64(&g_stateCacheSkipped[kStateCacheSamplerState], 0);
+        const LONG renderForwarded =
+            InterlockedExchange(&g_stateCacheForwarded[kStateCacheRenderState], 0);
+        const LONG renderSkipped =
+            InterlockedExchange(&g_stateCacheSkipped[kStateCacheRenderState], 0);
+        const LONG stageForwarded =
+            InterlockedExchange(&g_stateCacheForwarded[kStateCacheTextureStageState], 0);
+        const LONG stageSkipped =
+            InterlockedExchange(&g_stateCacheSkipped[kStateCacheTextureStageState], 0);
+        const LONG samplerForwarded =
+            InterlockedExchange(&g_stateCacheForwarded[kStateCacheSamplerState], 0);
+        const LONG samplerSkipped =
+            InterlockedExchange(&g_stateCacheSkipped[kStateCacheSamplerState], 0);
         ReleaseStateCacheLock();
 
         Log(
@@ -554,7 +554,7 @@ namespace
             &g_renderStates[index], 0, 0));
         if (known && current == value)
         {
-            InterlockedIncrement64(&g_stateCacheSkipped[kStateCacheRenderState]);
+            InterlockedIncrement(&g_stateCacheSkipped[kStateCacheRenderState]);
             if (skipped)
                 *skipped = TRUE;
             ReleaseStateCacheLock();
@@ -573,7 +573,7 @@ namespace
         {
             InterlockedExchange(&g_renderStateKnown[index], 0);
         }
-        InterlockedIncrement64(&g_stateCacheForwarded[kStateCacheRenderState]);
+        InterlockedIncrement(&g_stateCacheForwarded[kStateCacheRenderState]);
         ReleaseStateCacheLock();
         return hr;
     }
@@ -640,7 +640,7 @@ namespace
             &g_textureStageStates[stage][index], 0, 0));
         if (known && current == value)
         {
-            InterlockedIncrement64(&g_stateCacheSkipped[kStateCacheTextureStageState]);
+            InterlockedIncrement(&g_stateCacheSkipped[kStateCacheTextureStageState]);
             if (skipped)
                 *skipped = TRUE;
             ReleaseStateCacheLock();
@@ -659,7 +659,7 @@ namespace
         {
             InterlockedExchange(&g_textureStageStateKnown[stage][index], 0);
         }
-        InterlockedIncrement64(&g_stateCacheForwarded[kStateCacheTextureStageState]);
+        InterlockedIncrement(&g_stateCacheForwarded[kStateCacheTextureStageState]);
         ReleaseStateCacheLock();
         return hr;
     }
@@ -726,7 +726,7 @@ namespace
             &g_samplerStates[sampler][index], 0, 0));
         if (known && current == value)
         {
-            InterlockedIncrement64(&g_stateCacheSkipped[kStateCacheSamplerState]);
+            InterlockedIncrement(&g_stateCacheSkipped[kStateCacheSamplerState]);
             if (skipped)
                 *skipped = TRUE;
             ReleaseStateCacheLock();
@@ -745,7 +745,7 @@ namespace
         {
             InterlockedExchange(&g_samplerStateKnown[sampler][index], 0);
         }
-        InterlockedIncrement64(&g_stateCacheForwarded[kStateCacheSamplerState]);
+        InterlockedIncrement(&g_stateCacheForwarded[kStateCacheSamplerState]);
         ReleaseStateCacheLock();
         return hr;
     }
