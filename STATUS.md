@@ -296,3 +296,16 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - The valid full-bank fixture deliberately places `POSITION0` at `o1`, `PSIZE0` at `o10`, and spreads the ten general interpolators across other nonconsecutive indices, verifying that source register numbers are not hard-wired to output classes.
 - Standalone vertex-audit CI run #224 passed. Its Windows x86 build job was still running environment setup at the last status check.
 - This validates synthetic declaration and write-mask layouts only. No actual GTA IV shader or target GPU has been tested.
+
+## Render/depth surface and adapter capability telemetry — 2026-11-22
+
+- Added read-only per-draw snapshots for up to four active D3D9 render-target slots and the depth-stencil surface. Each record includes surface pointer, dimensions, format, surface type, usage, pool and multisample settings.
+- After successful `CreateDevice` and `Reset`, the ASI queries the standard D3D9 `GetRenderTarget` / `GetDepthStencilSurface` methods (vtable slots 38 and 40) to capture the initial implicit surfaces. Missing getter entries are skipped safely.
+- Successful `SetRenderTarget` / `SetDepthStencilSurface` calls refresh snapshots. Failed state changes do not update cached state. Reset clears stale snapshots before re-querying.
+- No arguments, capabilities, render states, targets or game simulation are modified. No pass is dropped. The larger log buffers preserve full draw records with the added surface descriptors.
+- `tools/analyze_asi_log.py` now parses the per-draw descriptors and produces surface usage summaries grouped by object, resolution, format and shader pair. It also parses adapter ID/driver details, vertex/pixel shader caps, format support checks, depth-format match checks, device-create events and render/depth-surface creation/binding records.
+- Adapter strings with spaces and split driver-version fields have regression coverage.
+- Static source checks cover getter slots and the read-only snapshot path. Parser fixtures cover multiple render-target slots, depth descriptors, format support/failure, shader-model caps and older logs with no new fields.
+- Latest run #236 has the independent vertex-audit job passing; the full Windows x86 job was still installing the legacy DirectX SDK at the last status check.
+- CI uses fake D3D9 devices and synthetic logs. No actual GTA IV 1.0.0.0 execution, GMA 3100 driver capture or FPS measurement has occurred.
+- `main` remains untouched. All work stays on `feature/vs3-vs2-vertex-audit`.
