@@ -161,10 +161,15 @@ jobs:
           New-Item -ItemType Directory -Force build\bin\IVLegacyFallbacks | Out-Null
           python tools\audit_sm3_to_sm2.py build\bin\IVLegacyCaptures --emit-dir build\bin\IVLegacyFallbacks --fallback-ini build\bin\IVLegacyShaderFallbacks.ini --fallback-prefix IVLegacyFallbacks --report build\bin\captured_shader_downlevel_audit.json --max-samplers 16 --dependent-read-limit 3
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools\audit_vs3_to_vs2.py build\bin\IVLegacyCaptures --report build\bin\captured_vertex_shader_downlevel_audit.json
+          python tools\audit_vs3_to_vs2.py build\bin\IVLegacyCaptures --emit-dir build\bin\IVLegacyFallbacks --fallback-ini build\bin\IVLegacyShaderFallbacks.ini --fallback-prefix IVLegacyFallbacks --report build\bin\captured_vertex_shader_downlevel_audit.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $vertexAudit = Get-Content build\bin\captured_vertex_shader_downlevel_audit.json -Raw | ConvertFrom-Json
-          if ($vertexAudit.audited_file_count -lt 2 -or $vertexAudit.vs_3_0_file_count -ne 0 -or $vertexAudit.skipped_non_vs3_count -lt 2) { throw 'Expected the two known synthetic SM2 captures to be counted and skipped by the VS3 downlevel audit.' }
+          if ($vertexAudit.audited_file_count -lt 3 -or $vertexAudit.vs_3_0_file_count -lt 1) { throw 'Expected captured synthetic VS3 source and SM2 fallback shaders in the VS downlevel audit.' }
+          if ($vertexAudit.emitted_count -lt 1 -or $vertexAudit.runtime_fallback_mapping_count -lt 1) { throw 'Expected at least one VS3 shader to emit VS2 bytecode and a hash-keyed runtime fallback mapping.' }
+          $fallbackMap = Get-Content build\bin\IVLegacyShaderFallbacks.ini -Raw
+          if ($fallbackMap -notmatch '\[VertexShaderFallbacks\]' -or $fallbackMap -notmatch '\[ShaderFallbacks\]') { throw 'Expected both pixel and vertex shader fallback sections to survive combined map generation.' }
+          $generatedVs = @(Get-ChildItem build\bin\IVLegacyFallbacks -File -Filter '*.vs20.vso')
+          if ($generatedVs.Count -lt 1) { throw 'Expected an emitted VS2 vertex-shader bytecode candidate.' }
 
       - name: Stage build outputs with repository-relative paths
         shell: pwsh
