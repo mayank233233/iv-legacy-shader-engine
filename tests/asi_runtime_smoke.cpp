@@ -579,6 +579,15 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceGetRenderState(
+        IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD* value)
+    {
+        if (!value)
+            return D3DERR_INVALIDCALL;
+        *value = 0;
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeDeviceSetTextureStageState(
         IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD)
     {
@@ -723,6 +732,7 @@ namespace
         g_fakeDeviceVTable[113] = reinterpret_cast<void*>(FakeDeviceSetPixelShaderConstantB);
         g_fakeDeviceVTable[23] = reinterpret_cast<void*>(FakeDeviceCreateTexture);
         g_fakeDeviceVTable[57] = reinterpret_cast<void*>(FakeDeviceSetRenderState);
+        g_fakeDeviceVTable[58] = reinterpret_cast<void*>(FakeDeviceGetRenderState);
         g_fakeDeviceVTable[59] = reinterpret_cast<void*>(FakeDeviceCreateStateBlock);
         g_fakeDeviceVTable[60] = reinterpret_cast<void*>(FakeDeviceBeginStateBlock);
         g_fakeDeviceVTable[61] = reinterpret_cast<void*>(FakeDeviceEndStateBlock);
