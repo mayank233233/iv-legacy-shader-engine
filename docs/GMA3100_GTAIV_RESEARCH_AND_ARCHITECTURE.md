@@ -242,3 +242,22 @@ Next sequence:
 5. Implement and validate a guarded fallback for one evidenced material family; unknown shaders remain on the original path and capabilities are never spoofed.
 
 This remains an instrumentation/analysis foundation, not an installable playable mod. The actual GMA 3100 driver, original GTA IV scenes, mission/gameplay integrity and 30 FPS objective remain untested. A compatibility renderer and repeatable frame-time data are required before any performance claim.
+
+## Vertex-stage audit prototype — 2026-11-22
+
+The development branch `feature/vs3-vs2-vertex-audit` adds a read-only structural audit for `vs_3_0` bytecode. It uses the documented baseline `vs_2_0` constraints: 256 instruction slots, 12 temporary registers, 16 input registers, at least 256 float constants, and fixed output classes (position, fog, point size, two colors and eight texture-coordinate outputs). The tool checks a limited straight-line subset and produces a semantic output-mapping plan; it does not emit replacement bytecode.
+
+The initial subset explicitly rejects:
+- Static flow control until the IF/loop/subroutine structure and cost can be validated.
+- The two-operand VS3 `sincos` form, because VS2 uses a different four-operand form.
+- Vertex texture sampling, predicate registers and VS3-only instructions.
+- Relative register addressing and output semantics without a verified VS2 register mapping.
+- Missing writes to the required position output.
+
+This analyzer is a triage tool for future shader-family work, not a translator or compatibility fix. The CI fixtures are synthetic. No claim is made about the actual GTA IV vertex-shader inventory or GMA 3100 driver.
+
+Specification references:
+- [Microsoft: Vertex Shader Differences](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-differences)
+- [Microsoft: Registers — vs_2_0](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-vs-2-0)
+- [Microsoft: Instructions — vs_2_0](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-instructions-vs-2-0)
+- [Microsoft: Flow Control Nesting Limits](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx9-graphics-reference-asm-vs-instructions-flow-control)
