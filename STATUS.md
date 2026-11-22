@@ -251,3 +251,12 @@ The initial hook is an IAT hook for a direct d3d9.dll!Direct3DCreate9 import in 
 - Latest Windows x86 CI after this expansion: run #187 is queued; prior run #185 failed on an outdated assertion, not on the output mapping implementation.
 - Corrected D3D9 LOOP operand arity to two parameter tokens (`aL,i#`) and restricted VS2 address-register writes to MOVA; MOV-to-a0 is now a negative regression case.
 - Windows CI captures a separate `captured_vertex_shader_downlevel_audit.json` report alongside the pixel-shader audit. The synthetic SM2-only capture batch is expected to contain zero VS3 shaders and is reported as skipped, not as a successful conversion.
+
+
+## Matrix operand audit expansion — 2026-11-22
+
+- Tightened matrix destination masks to the per-instruction D3D9 requirements: m4x4 `.xyzw`, m4x3 `.xyz`, m3x4 `.xyzw`, m3x3 `.xyz`, and m3x2 `.xy`.
+- Confirmed each matrix instruction reads consecutive float constants equal to the result dimension: 4, 3, 4, 3 and 2 registers respectively. The earlier apparent mismatch was a false alarm; the existing span table was already correct.
+- Added matrix destination/vector-source alias rejection and regression fixtures for exact masks, valid m4x3/m3x4/m3x2 forms, constant-register boundary overflow, and aliasing.
+- Tightened baseline address-register handling to `MOVA a0.x`; MOV-to-a0 is rejected as a VS1.1 form, and vector masks on MOVA are rejected for VS2.0.
+- Windows x86 CI run #200 passed with the complete existing pipeline. Run #201, which includes the new matrix fixtures, is in progress.
