@@ -1536,8 +1536,11 @@ int main()
         !HasText("D3D9_BINDING_CACHE_WINDOW") ||
         !HasText("texture_forwarded=3 texture_skipped=3") ||
         !HasText("stream_forwarded=3 stream_skipped=3") ||
-        !HasText("index_forwarded=3 index_skipped=3"))
-        return Fail("Binding-cache counters did not report expected texture/stream/index suppression");
+        !HasText("index_forwarded=3 index_skipped=3") ||
+        !HasText("vs_forwarded=3 vs_skipped=3") ||
+        !HasText("ps_forwarded=3 ps_skipped=3") ||
+        !HasText("vertex_format_forwarded=2 vertex_format_skipped=4"))
+        return Fail("Binding-cache counters did not report expected texture/stream/index/shader/format suppression");
     if (!HasText("STATE_CACHE_DISABLED reason=state_block_api_used") ||
         !HasText("BINDING_CACHE_DISABLED reason=state_block_api_used") ||
         !HasText("STATE_BLOCK_BEGIN_FORWARD") ||
