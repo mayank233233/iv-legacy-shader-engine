@@ -127,7 +127,7 @@ required_source_markers = (
     "D3D9_BINDING_CACHE_WINDOW",
     "viewportForwarded",
     "viewportSkipped",
-    "SetRenderTarget viewport cache invalidation",
+    "SetRenderTarget resets the viewport to the full target extent",
     "StateCacheReportFrames",
     "D3D9_STATE_CACHE_WINDOW",
     "STATE_CACHE_DISABLED reason=state_block_api_used",
