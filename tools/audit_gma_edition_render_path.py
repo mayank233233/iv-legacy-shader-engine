@@ -19,6 +19,10 @@ def audit(path: Path, width: int = 320, height: int = 240,
           draw_limit: int = 10) -> dict:
     data = analyze_log(path)
     draws = data.get("draw_calls", [])
+    successful_draws = [draw for draw in draws if draw.get("succeeded") is True]
+    failed_draw_sequences = [
+        draw.get("seq") for draw in draws if draw.get("succeeded") is not True
+    ]
     target_pairs = []
     mismatches = []
     ff_candidates = []
@@ -27,9 +31,10 @@ def audit(path: Path, width: int = 320, height: int = 240,
     viewport_rt0_extent_differences = []
     rt0_missing_draws = []
     depth_missing_draws = []
+    invalid_surface_draws = []
     viewport_known_count = 0
 
-    for draw in draws:
+    for draw in successful_draws:
         targets = draw.get("render_targets", [])
         depth = draw.get("depth_stencil_target")
         viewport = draw.get("viewport")
@@ -41,7 +46,7 @@ def audit(path: Path, width: int = 320, height: int = 240,
             viewport_unknown_draws.append(draw.get("seq"))
 
         rt0 = next((target for target in targets if target.get("index") == 0), None)
-        if rt0 is None:
+        if rt0 is None or rt0.get("object") is None:
             rt0_missing_draws.append(draw.get("seq"))
         else:
             if viewport and (
@@ -56,7 +61,7 @@ def audit(path: Path, width: int = 320, height: int = 240,
                     "rt0_height": rt0.get("height"),
                 })
 
-            if depth is None:
+            if depth is None or depth.get("object") is None:
                 depth_missing_draws.append(draw.get("seq"))
             else:
                 depth_covers_rt0 = (
@@ -70,6 +75,23 @@ def audit(path: Path, width: int = 320, height: int = 240,
                     depth.get("multisample_quality") == rt0.get("multisample_quality")
                 )
                 mismatch_reasons = []
+                rt0_descriptor_valid = (
+                    rt0.get("width", 0) > 0 and
+                    rt0.get("height", 0) > 0 and
+                    rt0.get("format", 0) > 0 and
+                    rt0.get("multisample_type", -1) >= 0 and
+                    rt0.get("multisample_quality", -1) >= 0
+                )
+                depth_descriptor_valid = (
+                    depth.get("width", 0) > 0 and
+                    depth.get("height", 0) > 0 and
+                    depth.get("format", 0) > 0 and
+                    depth.get("multisample_type", -1) >= 0 and
+                    depth.get("multisample_quality", -1) >= 0
+                )
+                if not rt0_descriptor_valid or not depth_descriptor_valid:
+                    invalid_surface_draws.append(draw.get("seq"))
+                    mismatch_reasons.append("incomplete_or_invalid_surface_descriptor")
                 if not depth_covers_rt0:
                     mismatch_reasons.append("depth_surface_smaller_than_render_target")
                 if not multisample_type_matches:
@@ -131,20 +153,26 @@ def audit(path: Path, width: int = 320, height: int = 240,
                 "eligibility": "candidate_only_not_replay_approved",
             })
 
-    if not draws:
+    if not successful_draws:
         pair_status = "not_observed"
     elif mismatches:
-        pair_status = "extent_or_multisample_mismatch_observed"
-    elif rt0_missing_draws or depth_missing_draws or not target_pairs:
+        pair_status = "surface_descriptor_or_multisample_mismatch_observed"
+    elif (
+        rt0_missing_draws or depth_missing_draws or
+        invalid_surface_draws or len(target_pairs) != len(successful_draws)
+    ):
         pair_status = "incomplete_rt_depth_evidence"
     else:
-        pair_status = "extent_and_multisample_compatible_pairs_observed"
+        pair_status = "extent_and_multisample_compatible_format_unverified"
 
     return {
         "input_log": str(path),
         "draw_calls_observed": len(draws),
+        "successful_draw_calls_observed": len(successful_draws),
+        "failed_draw_calls_observed": len(failed_draw_sequences),
+        "failed_draw_sequences": failed_draw_sequences,
         "viewport_capture_status": (
-            "complete" if draws and viewport_known_count == len(draws)
+            "complete" if successful_draws and viewport_known_count == len(successful_draws)
             else "partial" if viewport_known_count
             else "not_observed"
         ),
@@ -154,6 +182,7 @@ def audit(path: Path, width: int = 320, height: int = 240,
         "viewport_rt0_extent_differences": viewport_rt0_extent_differences,
         "rt0_missing_draw_sequences": rt0_missing_draws,
         "depth_stencil_missing_draw_sequences": depth_missing_draws,
+        "invalid_surface_descriptor_draw_sequences": invalid_surface_draws,
         "render_target_depth_pair_count": len(target_pairs),
         "requested_internal_size": {"width": width, "height": height},
         "lowres_capture_status": pair_status,
@@ -162,8 +191,11 @@ def audit(path: Path, width: int = 320, height: int = 240,
         "fixed_function_candidates": ff_candidates[:max(0, draw_limit)],
         "fixed_function_candidate_count": len(ff_candidates),
         "limitations": [
+            "Only successful Draw* submissions contribute render-path evidence; failed submissions are listed separately.",
+            "Null RT0/depth COM pointers and incomplete or invalid surface descriptors are not accepted as usable pair evidence.",
             "Pair classification checks only that the depth surface covers RT0 and that multisample type and quality match.",
             "D3D9 depth-format compatibility via CheckDepthStencilMatch is not verified by this pair classifier; numeric formats are reported for review.",
+            "The compatible status is limited to extent and multisample metadata; it is not full D3D9 depth compatibility or low-resolution redirection approval.",
             "A depth surface larger than RT0 is valid under D3D9 and is not treated as a mismatch.",
             "Viewport dimensions are recorded per draw; a viewport/RT0 size difference may be intentional cropping and is not automatically an error.",
             "This audit does not prove a selected RT is the main scene target or identify surface lifetime and pass ordering.",
@@ -186,7 +218,7 @@ def self_test() -> None:
         "render_targets={render_targets} depth_target={depth_target} "
         "viewport={viewport} sampler_hash=0 sampler_count=0 "
         "render_state_hash=0 render_state_count=0 "
-        "texture_stage_hash=0 texture_stage_count=0 hr=0x00000000\n"
+        "texture_stage_hash=0 texture_stage_count=0 hr={hr}\n"
     )
     rt0 = "0:0x10:320:240:21:3:1:0:0:0"
     depth_equal = "0x20:320:240:75:2:0:0:0:0"
@@ -196,12 +228,13 @@ def self_test() -> None:
         root = Path(temp)
 
         def run_case(name: str, rt: str, depth: str,
-                     viewport: str = viewport_full) -> dict:
+                     viewport: str = viewport_full,
+                     hr: str = "0x00000000") -> dict:
             path = root / f"{name}.log"
             path.write_text(
                 template.format(
                     seq=1, render_targets=rt, depth_target=depth,
-                    viewport=viewport,
+                    viewport=viewport, hr=hr,
                 ),
                 encoding="utf-8",
             )
@@ -211,7 +244,7 @@ def self_test() -> None:
         assert matching["draw_calls_observed"] == 1
         assert matching["fixed_function_candidate_count"] == 1
         assert matching["lowres_capture_status"] == (
-            "extent_and_multisample_compatible_pairs_observed"
+            "extent_and_multisample_compatible_format_unverified"
         )
         assert matching["render_target_depth_pair_count"] == 1
         assert matching["render_target_depth_pairs"][0]["rt_object"] == "10"
@@ -225,7 +258,7 @@ def self_test() -> None:
             "larger-depth", rt0, "0x20:320:256:75:2:0:0:0:0"
         )
         assert larger_depth["lowres_capture_status"] == (
-            "extent_and_multisample_compatible_pairs_observed"
+            "extent_and_multisample_compatible_format_unverified"
         )
         assert larger_depth["render_target_depth_pairs"][0][
             "depth_extent_relation"
@@ -235,7 +268,7 @@ def self_test() -> None:
             "smaller-depth", rt0, "0x20:320:239:75:2:0:0:0:0"
         )
         assert smaller_depth["lowres_capture_status"] == (
-            "extent_or_multisample_mismatch_observed"
+            "surface_descriptor_or_multisample_mismatch_observed"
         )
         assert "depth_surface_smaller_than_render_target" in (
             smaller_depth["render_target_depth_mismatches"][0]["mismatch_reasons"]
@@ -271,7 +304,7 @@ def self_test() -> None:
             "10:10:300:220:00000000:3F800000",
         )
         assert cropped_viewport["lowres_capture_status"] == (
-            "extent_and_multisample_compatible_pairs_observed"
+            "extent_and_multisample_compatible_format_unverified"
         )
         assert len(cropped_viewport["viewport_rt0_extent_differences"]) == 1
 
@@ -279,6 +312,44 @@ def self_test() -> None:
         empty_path.write_text("", encoding="utf-8")
         empty = audit(empty_path)
         assert empty["lowres_capture_status"] == "not_observed"
+
+        # Failed Draw* submissions must not masquerade as observed scene work.
+        failed_draw = run_case(
+            "failed-draw", rt0, depth_equal, hr="0x80004005"
+        )
+        assert failed_draw["draw_calls_observed"] == 1
+        assert failed_draw["successful_draw_calls_observed"] == 0
+        assert failed_draw["failed_draw_calls_observed"] == 1
+        assert failed_draw["failed_draw_sequences"] == [1]
+        assert failed_draw["render_target_depth_pair_count"] == 0
+        assert failed_draw["fixed_function_candidate_count"] == 0
+        assert failed_draw["lowres_capture_status"] == "not_observed"
+
+        # A logged descriptor with a null COM pointer is not valid evidence.
+        null_rt0 = run_case(
+            "null-rt0", "0:0x0:320:240:21:3:1:0:0:0", depth_equal
+        )
+        assert null_rt0["lowres_capture_status"] == "incomplete_rt_depth_evidence"
+        assert null_rt0["rt0_missing_draw_sequences"] == [1]
+        assert null_rt0["render_target_depth_pair_count"] == 0
+
+        null_depth = run_case(
+            "null-depth", rt0, "0x0:320:240:75:2:0:0:0:0"
+        )
+        assert null_depth["lowres_capture_status"] == "incomplete_rt_depth_evidence"
+        assert null_depth["depth_stencil_missing_draw_sequences"] == [1]
+        assert null_depth["render_target_depth_pair_count"] == 0
+
+        # Zero-sized/unknown-format descriptors cannot be called compatible.
+        invalid_descriptor = run_case(
+            "invalid-descriptor",
+            "0:0x10:0:240:0:3:1:0:0:0",
+            depth_equal,
+        )
+        assert invalid_descriptor["lowres_capture_status"] == (
+            "surface_descriptor_or_multisample_mismatch_observed"
+        )
+        assert invalid_descriptor["invalid_surface_descriptor_draw_sequences"] == [1]
 
     print("GMA edition render-path audit self-test passed")
 
