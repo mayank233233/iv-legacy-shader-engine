@@ -2574,18 +2574,51 @@ namespace
         IDirect3DDevice9* self,
         IDirect3DVertexShader9* shader)
     {
-        const HRESULT hr = g_realDeviceSetVertexShader
-            ? g_realDeviceSetVertexShader(self, shader)
-            : D3DERR_INVALIDCALL;
-
-        if (SUCCEEDED(hr))
-            InterlockedExchangePointer(&g_currentVertexShader, shader);
-
-        if (InterlockedIncrement(&g_setVertexShaderLogCount) <= 2048)
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (BindingCacheThreadAllowed(self))
         {
-            Log(
-                "SET_VERTEX_SHADER object=%p hr=0x%08lX",
-                shader, static_cast<unsigned long>(hr));
+            const BOOL known = InterlockedCompareExchange(
+                &g_vertexShaderBindingKnown, 0, 0) != 0;
+            const PVOID current = InterlockedCompareExchangePointer(
+                &g_currentVertexShader, NULL, NULL);
+            if (known && current == shader)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[3]);
+            }
+            else
+            {
+                hr = g_realDeviceSetVertexShader
+                    ? g_realDeviceSetVertexShader(self, shader)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchangePointer(&g_currentVertexShader, shader);
+                    InterlockedExchange(&g_vertexShaderBindingKnown, 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[3]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_vertexShaderBindingKnown, 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetVertexShader
+                ? g_realDeviceSetVertexShader(self, shader)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+                InterlockedExchangePointer(&g_currentVertexShader, shader);
+        }
+
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_setVertexShaderLogCount) <= 2048)
+        {
+            Log("SET_VERTEX_SHADER object=%p hr=0x%08lX cached=%u",
+                shader, static_cast<unsigned long>(hr), skipped ? 1 : 0);
         }
         return hr;
     }
@@ -2594,18 +2627,51 @@ namespace
         IDirect3DDevice9* self,
         IDirect3DPixelShader9* shader)
     {
-        const HRESULT hr = g_realDeviceSetPixelShader
-            ? g_realDeviceSetPixelShader(self, shader)
-            : D3DERR_INVALIDCALL;
-
-        if (SUCCEEDED(hr))
-            InterlockedExchangePointer(&g_currentPixelShader, shader);
-
-        if (InterlockedIncrement(&g_setPixelShaderLogCount) <= 2048)
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (BindingCacheThreadAllowed(self))
         {
-            Log(
-                "SET_PIXEL_SHADER object=%p hr=0x%08lX",
-                shader, static_cast<unsigned long>(hr));
+            const BOOL known = InterlockedCompareExchange(
+                &g_pixelShaderBindingKnown, 0, 0) != 0;
+            const PVOID current = InterlockedCompareExchangePointer(
+                &g_currentPixelShader, NULL, NULL);
+            if (known && current == shader)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[4]);
+            }
+            else
+            {
+                hr = g_realDeviceSetPixelShader
+                    ? g_realDeviceSetPixelShader(self, shader)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchangePointer(&g_currentPixelShader, shader);
+                    InterlockedExchange(&g_pixelShaderBindingKnown, 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[4]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_pixelShaderBindingKnown, 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetPixelShader
+                ? g_realDeviceSetPixelShader(self, shader)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+                InterlockedExchangePointer(&g_currentPixelShader, shader);
+        }
+
+        if (g_drawTelemetryEnabled &&
+            InterlockedIncrement(&g_setPixelShaderLogCount) <= 2048)
+        {
+            Log("SET_PIXEL_SHADER object=%p hr=0x%08lX cached=%u",
+                shader, static_cast<unsigned long>(hr), skipped ? 1 : 0);
         }
         return hr;
     }
@@ -2873,39 +2939,113 @@ namespace
         IDirect3DDevice9* self,
         IDirect3DVertexDeclaration9* declaration)
     {
-        const HRESULT hr = g_realDeviceSetVertexDeclaration
-            ? g_realDeviceSetVertexDeclaration(self, declaration)
-            : D3DERR_INVALIDCALL;
-        if (SUCCEEDED(hr))
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (BindingCacheThreadAllowed(self))
         {
-            InterlockedExchangePointer(&g_currentVertexDeclaration, declaration);
-            InterlockedExchange(&g_currentFVF, 0);
+            const BOOL known = InterlockedCompareExchange(
+                &g_vertexFormatBindingKnown, 0, 0) != 0;
+            const PVOID current = InterlockedCompareExchangePointer(
+                &g_currentVertexDeclaration, NULL, NULL);
+            const DWORD currentFVF = static_cast<DWORD>(InterlockedCompareExchange(
+                &g_currentFVF, 0, 0));
+            if (known && current == declaration && currentFVF == 0)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[5]);
+            }
+            else
+            {
+                hr = g_realDeviceSetVertexDeclaration
+                    ? g_realDeviceSetVertexDeclaration(self, declaration)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchangePointer(&g_currentVertexDeclaration, declaration);
+                    InterlockedExchange(&g_currentFVF, 0);
+                    InterlockedExchange(&g_vertexFormatBindingKnown, 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[5]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_vertexFormatBindingKnown, 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetVertexDeclaration
+                ? g_realDeviceSetVertexDeclaration(self, declaration)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchangePointer(&g_currentVertexDeclaration, declaration);
+                InterlockedExchange(&g_currentFVF, 0);
+            }
         }
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
-            Log("SET_VERTEX_DECLARATION object=%p hr=0x%08lX",
-                declaration, static_cast<unsigned long>(hr));
+            Log("SET_VERTEX_DECLARATION object=%p hr=0x%08lX cached=%u",
+                declaration, static_cast<unsigned long>(hr), skipped ? 1 : 0);
         }
         return hr;
     }
 
     HRESULT WINAPI HookDeviceSetFVF(IDirect3DDevice9* self, DWORD fvf)
     {
-        const HRESULT hr = g_realDeviceSetFVF
-            ? g_realDeviceSetFVF(self, fvf)
-            : D3DERR_INVALIDCALL;
-        if (SUCCEEDED(hr))
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (BindingCacheThreadAllowed(self))
         {
-            InterlockedExchangePointer(&g_currentVertexDeclaration, NULL);
-            InterlockedExchange(&g_currentFVF, static_cast<LONG>(fvf));
+            const BOOL known = InterlockedCompareExchange(
+                &g_vertexFormatBindingKnown, 0, 0) != 0;
+            const PVOID currentDeclaration = InterlockedCompareExchangePointer(
+                &g_currentVertexDeclaration, NULL, NULL);
+            const DWORD currentFVF = static_cast<DWORD>(InterlockedCompareExchange(
+                &g_currentFVF, 0, 0));
+            if (known && currentDeclaration == NULL && currentFVF == fvf)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[5]);
+            }
+            else
+            {
+                hr = g_realDeviceSetFVF
+                    ? g_realDeviceSetFVF(self, fvf)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchangePointer(&g_currentVertexDeclaration, NULL);
+                    InterlockedExchange(&g_currentFVF, static_cast<LONG>(fvf));
+                    InterlockedExchange(&g_vertexFormatBindingKnown, 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[5]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_vertexFormatBindingKnown, 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetFVF
+                ? g_realDeviceSetFVF(self, fvf)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+            {
+                InterlockedExchangePointer(&g_currentVertexDeclaration, NULL);
+                InterlockedExchange(&g_currentFVF, static_cast<LONG>(fvf));
+            }
         }
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
-            Log("SET_FVF value=0x%08lX hr=0x%08lX",
+            Log("SET_FVF value=0x%08lX hr=0x%08lX cached=%u",
                 static_cast<unsigned long>(fvf),
-                static_cast<unsigned long>(hr));
+                static_cast<unsigned long>(hr), skipped ? 1 : 0);
         }
         return hr;
     }
@@ -3978,6 +4118,11 @@ namespace
             hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
             hooked[kDeviceSetStreamSourceSlot] = reinterpret_cast<void*>(HookDeviceSetStreamSource);
             hooked[kDeviceSetIndicesSlot] = reinterpret_cast<void*>(HookDeviceSetIndices);
+            hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
+            hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
+            hooked[kDeviceSetVertexDeclarationSlot] =
+                reinterpret_cast<void*>(HookDeviceSetVertexDeclaration);
+            hooked[kDeviceSetFVFSlot] = reinterpret_cast<void*>(HookDeviceSetFVF);
         }
         if (g_drawTelemetryEnabled)
         {
