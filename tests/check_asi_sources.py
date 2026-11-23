@@ -65,6 +65,12 @@ required_source_markers = (
     "ClearSurfaceSnapshot",
     "FormatSurfaceSnapshot",
     "CaptureCurrentSurfaceState",
+    "CaptureCurrentViewport",
+    "FormatObservedViewportSnapshot",
+    "UpdateObservedViewportSnapshot",
+    "ClearObservedViewportSnapshot",
+    "ViewportSnapshot",
+    "viewport=%s",
     "kDeviceSetViewportSlot = 47",
     "kDeviceGetRenderTargetSlot = 38",
     "kDeviceGetDepthStencilSurfaceSlot = 40",
@@ -404,6 +410,7 @@ expected_draw_test_markers = (
     "g_fakeDeviceVTable[27] = reinterpret_cast<void*>(FakeDeviceCreateIndexBuffer)",
     "g_fakeDeviceVTable[38] = reinterpret_cast<void*>(FakeDeviceGetRenderTarget)",
     "g_fakeDeviceVTable[40] = reinterpret_cast<void*>(FakeDeviceGetDepthStencilSurface)",
+    "g_fakeDeviceVTable[48] = reinterpret_cast<void*>(FakeDeviceGetViewport)",
     "InterlockedIncrement(&g_fakeGetRenderTargetCount)",
     "InterlockedIncrement(&g_fakeGetDepthStencilSurfaceCount)",
     'return Fail("initial surface inventory did not call the typed D3D9 getter slots")',
@@ -503,6 +510,7 @@ expected_draw_test_markers = (
     'HasText("FRAME_PROFILE_WINDOW samples=1")',
     'HasText("avg_draw_calls=4.00")',
     'HasText("gpu_time=not_measured")',
+    'HasText("viewport=0:0:64:64:00000000:3F800000")',
 )
 for marker in expected_draw_test_markers:
     if marker not in smoke_source:
