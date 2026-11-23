@@ -74,12 +74,17 @@ bottlenecks remain possible.
 - Fixed-function live draw replacement: not implemented.
 - Fixed-function candidate audit: implemented, diagnostic only.
 - SetViewport telemetry: implemented, observational only; hardware/game validation pending.
-- Texture/vertex-stream/index binding cache: implemented as an independent
-  `EnableBindingCache=0` experiment. It skips only exact repeated bindings,
-  checks buffer offset and stride, and disables on state-block APIs,
-  D3DCREATE_MULTITHREADED, non-strict executable mode, device/thread changes,
-  Reset and failed Present. The synthetic smoke test exercises duplicate and
-  changed bindings plus Reset/state-block invalidation. No real-game performance
-  claim is made.
+- D3D9 binding cache: implemented as an independent `EnableBindingCache=0`
+  experiment for textures, vertex streams (buffer + offset + stride), index
+  buffers, vertex/pixel shaders and vertex-declaration/FVF state. It disables
+  on state-block APIs, D3DCREATE_MULTITHREADED, non-strict executable mode,
+  device/thread changes, Reset and failed Present.
+- Shader constant cache: implemented separately as
+  `EnableShaderConstantCache=0` for VS/PS float, integer and boolean register
+  ranges. It compares exact register bytes, updates shadows only after
+  successful setters, and shares the same version/thread/device/state-block
+  protections. It invalidates its shadow on Reset and failed Present.
+  Synthetic tests cover duplicate/changed values and lifecycle invalidation.
+  Neither cache has a physical GTA IV/GMA performance result.
 - Windows x86 CI: validates Python audit and existing ASI build; not a game/GMA
   hardware acceptance test.
