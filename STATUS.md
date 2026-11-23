@@ -7,7 +7,8 @@ Active work is isolated on `feature/gma-edition-renderer-prototype`; `main` is u
 ### Implemented in source
 
 - Read-only per-draw viewport capture: explicit successful SetViewport updates plus GetViewport refresh immediately before each captured draw. Render-target and depth-stencil descriptors are attached to the same draw records.
-- `tools/audit_gma_edition_render_path.py` reports viewport-capture completeness, viewport dimensions, viewport/RT0 extent differences, RT0/depth dimension pairs and conservative fixed-function candidates. It does not identify the main scene target or modify rendering.
+- `tools/audit_gma_edition_render_path.py` reports viewport-capture completeness, viewport/RT0 extent differences, RT0/depth object/format/MSAA descriptors and conservative fixed-function candidates. Its RT/depth gate fails closed for missing snapshots, checks that depth covers RT0 (larger is valid) and checks matching multisample type/quality. It does not verify format compatibility via `CheckDepthStencilMatch`, identify the main scene target or modify rendering.
+- Added synthetic regression coverage for missing RT/depth snapshots, depth surfaces smaller/larger than RT0, multisample type/quality mismatches and intentional viewport cropping. The Ubuntu `vertex-audit` workflow now runs this test.
 - Three independent default-off D3D9 cache experiments:
   - `EnableRedundantStateCache=0`: render state, texture-stage state and sampler state.
   - `EnableBindingCache=0`: texture, vertex stream (buffer/offset/stride), stream frequency, index buffer, vertex/pixel shader, vertex declaration/FVF and viewport bindings.
