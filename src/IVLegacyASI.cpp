@@ -2143,6 +2143,7 @@ namespace
                 ClearSurfaceSnapshot(&g_renderTargetSnapshots[target]);
             ClearSurfaceSnapshot(&g_depthStencilSnapshot);
             CaptureCurrentSurfaceState(self);
+            CaptureCurrentViewport(self);
             InterlockedExchange64(&g_previousPresentEndQpc, 0);
             InterlockedExchange64(&g_frameDrawQpcTicks, 0);
             InterlockedExchange(&g_frameDrawCalls, 0);
@@ -2659,6 +2660,8 @@ namespace
         // discard the viewport shadow before any later duplicate check.
         if (SUCCEEDED(hr) && index == 0 && g_bindingCacheEnabled)
             InterlockedExchange(&g_viewportBindingKnown, 0);
+        if (SUCCEEDED(hr) && index == 0 && g_drawTelemetryEnabled)
+            CaptureCurrentViewport(self);
 
         if (SUCCEEDED(hr) && g_drawTelemetryEnabled &&
             index < _countof(g_renderTargetSnapshots))
@@ -4862,6 +4865,7 @@ namespace
         {
             HookD3D9Device(*device);
             CaptureCurrentSurfaceState(*device);
+            CaptureCurrentViewport(*device);
             // A non-multithreaded D3D9 device belongs to its creation thread.
             // Seed the binding-cache owner here instead of trusting whichever
             // thread happens to issue the first setter.
