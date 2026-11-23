@@ -4373,6 +4373,9 @@ namespace
         if (depthTargetBinding[0] == '\0')
             strcpy_s(depthTargetBinding, _countof(depthTargetBinding), "unknown");
 
+        char viewportBinding[128] = "unknown";
+        FormatObservedViewportSnapshot(viewportBinding, _countof(viewportBinding));
+
         const DWORD currentFVF = static_cast<DWORD>(
             InterlockedCompareExchange(&g_currentFVF, 0, 0));
 
@@ -4440,7 +4443,7 @@ namespace
             "start_vertex=%u base_vertex=%ld min_vertex=%u num_vertices=%u "
             "start_index=%u bound_vs=%p bound_ps=%p vertex_decl=%p fvf=0x%08lX "
             "index_buffer=%p streams=%s textures=%s render_targets=%s "
-            "depth_target=%s sampler_hash=%016llX "
+            "depth_target=%s viewport=%s sampler_hash=%016llX "
             "sampler_count=%lu render_state_hash=%016llX render_state_count=%lu "
             "texture_stage_hash=%016llX texture_stage_count=%lu hr=0x%08lX",
             sequence,
@@ -4463,6 +4466,7 @@ namespace
             textureBindings,
             renderTargetBindings,
             depthTargetBinding,
+            viewportBinding,
             samplerHash,
             static_cast<unsigned long>(samplerStateCount),
             renderStateHash,
