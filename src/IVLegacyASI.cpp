@@ -2554,6 +2554,8 @@ namespace
             ? g_realDeviceSetRenderTarget(self, index, surface)
             : D3DERR_INVALIDCALL;
 
+        // SetRenderTarget resets the viewport to the full target extent;
+        // discard the viewport shadow before any later duplicate check.
         if (SUCCEEDED(hr) && index == 0 && g_bindingCacheEnabled)
             InterlockedExchange(&g_viewportBindingKnown, 0);
 
