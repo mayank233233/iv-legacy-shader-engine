@@ -1,5 +1,11 @@
-; GMA Edition renderer experiments — all disabled by default.
-; This is a template only. No runtime feature is enabled by this file yet.
+; GMA Edition experiments — all disabled by default.
+; Binding-cache experiment is implemented but remains opt-in and unvalidated
+; on real GTA IV hardware. Keep it off unless testing this branch.
+[General]
+EnableBindingCache=0
+StateCacheReportFrames=120
+
+; Reserved render-path experiments; not yet runtime implemented.
 [GMAEdition]
 LowResEnabled=0
 LowResWidth=320
