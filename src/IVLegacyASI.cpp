@@ -3767,11 +3767,8 @@ namespace
         const float* data,
         UINT vectorCount)
     {
-        const HRESULT hr = g_realDeviceSetVertexShaderConstantF
-            ? g_realDeviceSetVertexShaderConstantF(
-                self, startRegister, data, vectorCount)
-            : D3DERR_INVALIDCALL;
-
+        const HRESULT hr = SetShaderFloatConstantsWithCache(
+            self, FALSE, startRegister, data, vectorCount);
         if (SUCCEEDED(hr))
             CaptureShaderConstantRange(FALSE, startRegister, data, vectorCount);
         return hr;
@@ -3929,9 +3926,8 @@ namespace
     HRESULT WINAPI HookDeviceSetVertexShaderConstantI(
         IDirect3DDevice9* self, UINT startRegister, const int* data, UINT vectorCount)
     {
-        const HRESULT hr = g_realDeviceSetVertexShaderConstantI
-            ? g_realDeviceSetVertexShaderConstantI(self, startRegister, data, vectorCount)
-            : D3DERR_INVALIDCALL;
+        const HRESULT hr = SetShaderIntegerConstantsWithCache(
+            self, FALSE, startRegister, data, vectorCount);
         if (SUCCEEDED(hr))
             CaptureShaderIntegerConstantRange(FALSE, startRegister, data, vectorCount);
         return hr;
@@ -3940,9 +3936,8 @@ namespace
     HRESULT WINAPI HookDeviceSetPixelShaderConstantI(
         IDirect3DDevice9* self, UINT startRegister, const int* data, UINT vectorCount)
     {
-        const HRESULT hr = g_realDeviceSetPixelShaderConstantI
-            ? g_realDeviceSetPixelShaderConstantI(self, startRegister, data, vectorCount)
-            : D3DERR_INVALIDCALL;
+        const HRESULT hr = SetShaderIntegerConstantsWithCache(
+            self, TRUE, startRegister, data, vectorCount);
         if (SUCCEEDED(hr))
             CaptureShaderIntegerConstantRange(TRUE, startRegister, data, vectorCount);
         return hr;
@@ -3951,9 +3946,8 @@ namespace
     HRESULT WINAPI HookDeviceSetVertexShaderConstantB(
         IDirect3DDevice9* self, UINT startRegister, const BOOL* data, UINT boolCount)
     {
-        const HRESULT hr = g_realDeviceSetVertexShaderConstantB
-            ? g_realDeviceSetVertexShaderConstantB(self, startRegister, data, boolCount)
-            : D3DERR_INVALIDCALL;
+        const HRESULT hr = SetShaderBooleanConstantsWithCache(
+            self, FALSE, startRegister, data, boolCount);
         if (SUCCEEDED(hr))
             CaptureShaderBooleanConstantRange(FALSE, startRegister, data, boolCount);
         return hr;
@@ -3962,9 +3956,8 @@ namespace
     HRESULT WINAPI HookDeviceSetPixelShaderConstantB(
         IDirect3DDevice9* self, UINT startRegister, const BOOL* data, UINT boolCount)
     {
-        const HRESULT hr = g_realDeviceSetPixelShaderConstantB
-            ? g_realDeviceSetPixelShaderConstantB(self, startRegister, data, boolCount)
-            : D3DERR_INVALIDCALL;
+        const HRESULT hr = SetShaderBooleanConstantsWithCache(
+            self, TRUE, startRegister, data, boolCount);
         if (SUCCEEDED(hr))
             CaptureShaderBooleanConstantRange(TRUE, startRegister, data, boolCount);
         return hr;
@@ -3976,11 +3969,8 @@ namespace
         const float* data,
         UINT vectorCount)
     {
-        const HRESULT hr = g_realDeviceSetPixelShaderConstantF
-            ? g_realDeviceSetPixelShaderConstantF(
-                self, startRegister, data, vectorCount)
-            : D3DERR_INVALIDCALL;
-
+        const HRESULT hr = SetShaderFloatConstantsWithCache(
+            self, TRUE, startRegister, data, vectorCount);
         if (SUCCEEDED(hr))
             CaptureShaderConstantRange(TRUE, startRegister, data, vectorCount);
         return hr;
