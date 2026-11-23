@@ -76,8 +76,10 @@ bottlenecks remain possible.
 - SetViewport telemetry: implemented, observational only; hardware/game validation pending.
 - Texture/vertex-stream/index binding cache: implemented as an independent
   `EnableBindingCache=0` experiment. It skips only exact repeated bindings,
-  checks buffer offset and stride, and disables on state-block APIs, D3DCREATE_MULTITHREADED,
-  device/thread changes, Reset and failed Present. Synthetic coverage is being
-  added; no real-game performance claim is made.
+  checks buffer offset and stride, and disables on state-block APIs,
+  D3DCREATE_MULTITHREADED, non-strict executable mode, device/thread changes,
+  Reset and failed Present. The synthetic smoke test exercises duplicate and
+  changed bindings plus Reset/state-block invalidation. No real-game performance
+  claim is made.
 - Windows x86 CI: validates Python audit and existing ASI build; not a game/GMA
   hardware acceptance test.
