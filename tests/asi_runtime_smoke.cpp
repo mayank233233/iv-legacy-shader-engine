@@ -1576,13 +1576,6 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0) -
         viewportCallsBeforeStateBlock != 2)
         return Fail("state-block API use did not disable viewport suppression");
-    const LONG viewportCallsBeforeStateBlock =
-        InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0);
-    device->SetViewport(&changedViewport);
-    device->SetViewport(&changedViewport);
-    if (InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0) -
-        viewportCallsBeforeStateBlock != 2)
-        return Fail("state-block API use did not disable viewport suppression");
     const LONG frequencyCallsBeforeStateBlock =
         InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0);
     device->SetStreamSourceFreq(0, 1);
