@@ -11,10 +11,10 @@ import re
 from pathlib import Path
 
 WINDOW_RE = re.compile(
-    r"D3D9_BINDING_CACHE_WINDOW\\s+frames=(\\d+)\\s+"
-    r"texture_forwarded=(\\d+)\\s+texture_skipped=(\\d+)\\s+"
-    r"stream_forwarded=(\\d+)\\s+stream_skipped=(\\d+)\\s+"
-    r"index_forwarded=(\\d+)\\s+index_skipped=(\\d+)"
+    r"D3D9_BINDING_CACHE_WINDOW\s+frames=(\d+)\s+"
+    r"texture_forwarded=(\d+)\s+texture_skipped=(\d+)\s+"
+    r"stream_forwarded=(\d+)\s+stream_skipped=(\d+)\s+"
+    r"index_forwarded=(\d+)\s+index_skipped=(\d+)"
 )
 
 
@@ -97,7 +97,7 @@ def self_test() -> None:
             "D3D9_BINDING_CACHE_WINDOW frames=120 "
             "texture_forwarded=3 texture_skipped=3 "
             "stream_forwarded=3 stream_skipped=3 "
-            "index_forwarded=3 index_skipped=3\\n",
+            "index_forwarded=3 index_skipped=3\n",
             encoding="utf-8",
         )
         report = summarize(path)
@@ -128,7 +128,7 @@ def main() -> int:
         report["comparison"] = compare(report, summarize(args.compare))
     rendered = json.dumps(report, indent=2)
     if args.json:
-        args.json.write_text(rendered + "\\n", encoding="utf-8")
+        args.json.write_text(rendered + "\n", encoding="utf-8")
     print(rendered)
     return 0
 
