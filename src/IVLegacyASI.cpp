@@ -1437,16 +1437,36 @@ namespace
         }
 
         D3DVIEWPORT9 viewport = {};
-        const HRESULT hr = device->GetViewport(&viewport);
-        if (SUCCEEDED(hr))
+        HRESULT hr = D3DERR_INVALIDCALL;
+        BOOL queryCompleted = FALSE;
+        __try
+        {
+            hr = device->GetViewport(&viewport);
+            queryCompleted = TRUE;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log("GET_VIEWPORT_CAPTURE_EXCEPTION code=0x%08lX",
+                static_cast<unsigned long>(GetExceptionCode()));
+        }
+
+        if (queryCompleted && SUCCEEDED(hr))
         {
             UpdateObservedViewportSnapshot(&viewport);
+            Log("GET_VIEWPORT_CAPTURED x=%lu y=%lu width=%lu height=%lu",
+                static_cast<unsigned long>(viewport.X),
+                static_cast<unsigned long>(viewport.Y),
+                static_cast<unsigned long>(viewport.Width),
+                static_cast<unsigned long>(viewport.Height));
             return TRUE;
         }
 
         ClearObservedViewportSnapshot();
-        Log("GET_VIEWPORT_CAPTURE_FAILED hr=0x%08lX",
-            static_cast<unsigned long>(hr));
+        if (queryCompleted)
+        {
+            Log("GET_VIEWPORT_CAPTURE_FAILED hr=0x%08lX",
+                static_cast<unsigned long>(hr));
+        }
         return FALSE;
     }
 
