@@ -123,6 +123,7 @@ required_source_markers = (
     "RecordBindingCacheWindow",
     "InvalidateBindingCache",
     "BindingCacheThreadAllowed",
+    "shaderConstantCache ? !g_shaderConstantCacheEnabled : !g_bindingCacheEnabled",
     "D3D9_BINDING_CACHE_WINDOW",
     "StateCacheReportFrames",
     "D3D9_STATE_CACHE_WINDOW",
