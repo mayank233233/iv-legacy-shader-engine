@@ -934,7 +934,7 @@ int main()
     WritePrivateProfileStringW(
         L"General", L"CaptureShaderConstants", L"1", iniPath);
     WritePrivateProfileStringW(
-        L"General", L"CaptureShaderConstantMaxRecords", L"16", iniPath);
+        L"General", L"CaptureShaderConstantMaxRecords", L"6", iniPath);
     WritePrivateProfileStringW(
         L"General", L"EnableShaderFallbacks", L"1", iniPath);
 
