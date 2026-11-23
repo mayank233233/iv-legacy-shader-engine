@@ -148,5 +148,9 @@ not safe or not justified yet.
   change performance.
 - Separate CPU API time from GPU execution time. The current profiler reports
   `gpu_time=not_measured`.
+- Summarize binding-cache skipped calls with
+  `tools/analyze_binding_cache_benchmark.py IVLegacy.log` and constant-cache
+  skipped calls with `tools/analyze_shader_constant_cache.py IVLegacy.log`.
+  These counts are not FPS or frame-time measurements.
 - Record crashes, visual differences, missing assets, streaming stalls and
   memory use. Any regression disables that feature by default.
