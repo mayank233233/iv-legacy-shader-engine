@@ -514,6 +514,294 @@ namespace
         }
     }
 
+    HRESULT SetShaderFloatConstantsWithCache(
+        IDirect3DDevice9* self,
+        BOOL pixelStage,
+        UINT startRegister,
+        const float* data,
+        UINT vectorCount)
+    {
+        const DeviceSetShaderConstantFFn original = pixelStage
+            ? g_realDeviceSetPixelShaderConstantF
+            : g_realDeviceSetVertexShaderConstantF;
+        if (!original)
+            return D3DERR_INVALIDCALL;
+        if (!g_shaderConstantCacheEnabled || !data || vectorCount == 0 ||
+            startRegister > 255 || vectorCount > 256 - startRegister ||
+            !BindingCacheThreadAllowed(self))
+            return original(self, startRegister, data, vectorCount);
+
+        const DWORD stage = pixelStage ? 1 : 0;
+        BOOL identical = TRUE;
+        BOOL readable = TRUE;
+        __try
+        {
+            for (UINT index = 0; index < vectorCount; ++index)
+            {
+                const UINT reg = startRegister + index;
+                if (InterlockedCompareExchange(
+                        &g_shaderFloatConstantKnown[stage][reg], 0, 0) == 0 ||
+                    memcmp(g_cachedShaderFloatConstants[stage][reg],
+                        data + index * 4, 4 * sizeof(float)) != 0)
+                {
+                    identical = FALSE;
+                    break;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            readable = FALSE;
+        }
+
+        if (!readable)
+            return original(self, startRegister, data, vectorCount);
+
+        const LONG counter = pixelStage ? 1 : 0;
+        if (identical)
+        {
+            InterlockedIncrement(&g_shaderConstantCacheSkipped[counter]);
+            return D3D_OK;
+        }
+
+        const HRESULT hr = original(self, startRegister, data, vectorCount);
+        if (SUCCEEDED(hr))
+        {
+            BOOL copied = TRUE;
+            __try
+            {
+                for (UINT index = 0; index < vectorCount; ++index)
+                {
+                    const UINT reg = startRegister + index;
+                    memcpy(g_cachedShaderFloatConstants[stage][reg],
+                        data + index * 4, 4 * sizeof(float));
+                    InterlockedExchange(&g_shaderFloatConstantKnown[stage][reg], 1);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                copied = FALSE;
+            }
+            if (!copied)
+            {
+                for (UINT index = 0; index < vectorCount; ++index)
+                    InterlockedExchange(
+                        &g_shaderFloatConstantKnown[stage][startRegister + index], 0);
+            }
+            InterlockedIncrement(&g_shaderConstantCacheForwarded[counter]);
+        }
+        else
+        {
+            for (UINT index = 0; index < vectorCount; ++index)
+                InterlockedExchange(
+                    &g_shaderFloatConstantKnown[stage][startRegister + index], 0);
+        }
+        return hr;
+    }
+
+    HRESULT SetShaderIntegerConstantsWithCache(
+        IDirect3DDevice9* self,
+        BOOL pixelStage,
+        UINT startRegister,
+        const int* data,
+        UINT vectorCount)
+    {
+        const DeviceSetShaderConstantIFn original = pixelStage
+            ? g_realDeviceSetPixelShaderConstantI
+            : g_realDeviceSetVertexShaderConstantI;
+        if (!original)
+            return D3DERR_INVALIDCALL;
+        if (!g_shaderConstantCacheEnabled || !data || vectorCount == 0 ||
+            startRegister > 15 || vectorCount > 16 - startRegister ||
+            !BindingCacheThreadAllowed(self))
+            return original(self, startRegister, data, vectorCount);
+
+        const DWORD stage = pixelStage ? 1 : 0;
+        BOOL identical = TRUE;
+        BOOL readable = TRUE;
+        __try
+        {
+            for (UINT index = 0; index < vectorCount; ++index)
+            {
+                const UINT reg = startRegister + index;
+                if (InterlockedCompareExchange(
+                        &g_shaderIntegerConstantKnown[stage][reg], 0, 0) == 0 ||
+                    memcmp(g_cachedShaderIntegerConstants[stage][reg],
+                        data + index * 4, 4 * sizeof(int)) != 0)
+                {
+                    identical = FALSE;
+                    break;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            readable = FALSE;
+        }
+
+        if (!readable)
+            return original(self, startRegister, data, vectorCount);
+
+        const LONG counter = pixelStage ? 3 : 2;
+        if (identical)
+        {
+            InterlockedIncrement(&g_shaderConstantCacheSkipped[counter]);
+            return D3D_OK;
+        }
+
+        const HRESULT hr = original(self, startRegister, data, vectorCount);
+        if (SUCCEEDED(hr))
+        {
+            BOOL copied = TRUE;
+            __try
+            {
+                for (UINT index = 0; index < vectorCount; ++index)
+                {
+                    const UINT reg = startRegister + index;
+                    memcpy(g_cachedShaderIntegerConstants[stage][reg],
+                        data + index * 4, 4 * sizeof(int));
+                    InterlockedExchange(&g_shaderIntegerConstantKnown[stage][reg], 1);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                copied = FALSE;
+            }
+            if (!copied)
+            {
+                for (UINT index = 0; index < vectorCount; ++index)
+                    InterlockedExchange(
+                        &g_shaderIntegerConstantKnown[stage][startRegister + index], 0);
+            }
+            InterlockedIncrement(&g_shaderConstantCacheForwarded[counter]);
+        }
+        else
+        {
+            for (UINT index = 0; index < vectorCount; ++index)
+                InterlockedExchange(
+                    &g_shaderIntegerConstantKnown[stage][startRegister + index], 0);
+        }
+        return hr;
+    }
+
+    HRESULT SetShaderBooleanConstantsWithCache(
+        IDirect3DDevice9* self,
+        BOOL pixelStage,
+        UINT startRegister,
+        const BOOL* data,
+        UINT boolCount)
+    {
+        const DeviceSetShaderConstantBFn original = pixelStage
+            ? g_realDeviceSetPixelShaderConstantB
+            : g_realDeviceSetVertexShaderConstantB;
+        if (!original)
+            return D3DERR_INVALIDCALL;
+        if (!g_shaderConstantCacheEnabled || !data || boolCount == 0 ||
+            startRegister > 15 || boolCount > 16 - startRegister ||
+            !BindingCacheThreadAllowed(self))
+            return original(self, startRegister, data, boolCount);
+
+        const DWORD stage = pixelStage ? 1 : 0;
+        BOOL identical = TRUE;
+        BOOL readable = TRUE;
+        __try
+        {
+            for (UINT index = 0; index < boolCount; ++index)
+            {
+                const UINT reg = startRegister + index;
+                if (InterlockedCompareExchange(
+                        &g_shaderBooleanConstantKnown[stage][reg], 0, 0) == 0 ||
+                    memcmp(&g_cachedShaderBooleanConstants[stage][reg],
+                        &data[index], sizeof(BOOL)) != 0)
+                {
+                    identical = FALSE;
+                    break;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            readable = FALSE;
+        }
+
+        if (!readable)
+            return original(self, startRegister, data, boolCount);
+
+        const LONG counter = pixelStage ? 5 : 4;
+        if (identical)
+        {
+            InterlockedIncrement(&g_shaderConstantCacheSkipped[counter]);
+            return D3D_OK;
+        }
+
+        const HRESULT hr = original(self, startRegister, data, boolCount);
+        if (SUCCEEDED(hr))
+        {
+            BOOL copied = TRUE;
+            __try
+            {
+                for (UINT index = 0; index < boolCount; ++index)
+                {
+                    const UINT reg = startRegister + index;
+                    memcpy(&g_cachedShaderBooleanConstants[stage][reg],
+                        &data[index], sizeof(BOOL));
+                    InterlockedExchange(&g_shaderBooleanConstantKnown[stage][reg], 1);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                copied = FALSE;
+            }
+            if (!copied)
+            {
+                for (UINT index = 0; index < boolCount; ++index)
+                    InterlockedExchange(
+                        &g_shaderBooleanConstantKnown[stage][startRegister + index], 0);
+            }
+            InterlockedIncrement(&g_shaderConstantCacheForwarded[counter]);
+        }
+        else
+        {
+            for (UINT index = 0; index < boolCount; ++index)
+                InterlockedExchange(
+                    &g_shaderBooleanConstantKnown[stage][startRegister + index], 0);
+        }
+        return hr;
+    }
+
+    void RecordShaderConstantCacheWindow(IDirect3DDevice9* self)
+    {
+        if (!g_shaderConstantCacheEnabled || g_bindingCacheDevice != self)
+            return;
+
+        const LONG frames = InterlockedIncrement(&g_shaderConstantCacheWindowFrameCount);
+        if (frames < static_cast<LONG>(g_stateCacheReportFrames))
+            return;
+
+        InterlockedExchange(&g_shaderConstantCacheWindowFrameCount, 0);
+        Log(
+            "D3D9_SHADER_CONSTANT_CACHE_WINDOW frames=%ld "
+            "vs_float_forwarded=%ld vs_float_skipped=%ld "
+            "ps_float_forwarded=%ld ps_float_skipped=%ld "
+            "vs_int_forwarded=%ld vs_int_skipped=%ld "
+            "ps_int_forwarded=%ld ps_int_skipped=%ld "
+            "vs_bool_forwarded=%ld vs_bool_skipped=%ld "
+            "ps_bool_forwarded=%ld ps_bool_skipped=%ld",
+            frames,
+            InterlockedExchange(&g_shaderConstantCacheForwarded[0], 0),
+            InterlockedExchange(&g_shaderConstantCacheSkipped[0], 0),
+            InterlockedExchange(&g_shaderConstantCacheForwarded[1], 0),
+            InterlockedExchange(&g_shaderConstantCacheSkipped[1], 0),
+            InterlockedExchange(&g_shaderConstantCacheForwarded[2], 0),
+            InterlockedExchange(&g_shaderConstantCacheSkipped[2], 0),
+            InterlockedExchange(&g_shaderConstantCacheForwarded[3], 0),
+            InterlockedExchange(&g_shaderConstantCacheSkipped[3], 0),
+            InterlockedExchange(&g_shaderConstantCacheForwarded[4], 0),
+            InterlockedExchange(&g_shaderConstantCacheSkipped[4], 0),
+            InterlockedExchange(&g_shaderConstantCacheForwarded[5], 0),
+            InterlockedExchange(&g_shaderConstantCacheSkipped[5], 0));
+    }
+
     BOOL VerifyStateCacheThreadLocked(BOOL* disabled)
     {
         if (disabled)
