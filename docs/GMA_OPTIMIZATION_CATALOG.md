@@ -23,9 +23,10 @@ switchable, default OFF, reversible to the original path, and benchmarked.
   It is opt-in and must be measured; its lock/bookkeeping cost may exceed the
   savings on a two-core E5200.
 - A separate opt-in D3D9 binding cache has now been implemented for texture,
-  vertex-stream and index-buffer bindings. It uses exact object/offset/stride
-  identity, only runs on a single-threaded, single-device path, and disables
-  itself on state-block APIs, multithreaded device creation, thread/device
+  vertex-stream (buffer + offset + stride), index-buffer, vertex-shader,
+  pixel-shader, and vertex-declaration/FVF bindings. It only runs on a
+  single-threaded, single-device path, and disables itself on state-block APIs,
+  multithreaded device creation, non-strict executable mode, thread/device
   changes, Reset and failed Present. Synthetic smoke coverage exists; real
   GTA IV/GMA performance and behavior are not yet validated.
 
@@ -50,8 +51,10 @@ not safe or not justified yet.
    experiment for SetStreamSource (buffer + offset + stride) and SetIndices.
    Stream-frequency state is still forwarded normally; state-block and device
    lifecycle safeguards match the texture cache.
-7. **Shader object binding deduplication** — Measure first; shader fallback
-   hooks and state-block semantics make blind suppression unsafe.
+7. **Shader object binding deduplication** — Implemented as an opt-in
+   experiment for SetVertexShader and SetPixelShader. It tracks the actual
+   shader object passed to the device, including hash-mapped fallback objects.
+   State-block and device lifecycle safeguards match the other bindings.
 8. **Constant upload range deduplication** — Measure exact byte-identical
    constant ranges; NaNs, partial writes and shader changes complicate equality.
 9. **Draw-call batching** — Prototype only for proven compatible static groups;
