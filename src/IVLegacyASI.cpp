@@ -4455,7 +4455,7 @@ namespace
         if (g_bindingCacheEnabled)
         {
             InvalidateBindingCache(NULL);
-            Log("BINDING_CACHE_ENABLED groups=texture,vertex_stream,index_buffer "
+            Log("BINDING_CACHE_ENABLED groups=texture,vertex_stream,index_buffer,vertex_shader,pixel_shader,vertex_format "
                 "thread_policy=single_device_single_thread state_block_policy=disable default=off");
         }
         g_stateCacheReportFrames = GetPrivateProfileIntW(
