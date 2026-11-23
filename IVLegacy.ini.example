@@ -1,12 +1,22 @@
-; GMA Edition experiments — all disabled by default.
-; Binding-cache experiment is implemented but remains opt-in and unvalidated
-; on real GTA IV hardware. Keep it off unless testing this branch.
+; GMA Edition test template. All performance-affecting caches default OFF.
+; Strict mode is required for the runtime optimisation caches.
 [General]
+StrictGTAIV100=1
+EnableRedundantStateCache=0
 EnableBindingCache=0
 EnableShaderConstantCache=0
 StateCacheReportFrames=120
 
-; Reserved render-path experiments; not yet runtime implemented.
+; Read-only discovery instrumentation. Keep draw telemetry OFF during clean
+; performance measurements; it performs a GetViewport query and writes a
+; detailed record for every captured draw.
+CaptureDrawTelemetry=0
+CaptureDrawMaxCalls=4096
+EnableFrameProfiler=0
+FrameProfilerWindowFrames=120
+
+; Reserved renderer experiments. These switches are placeholders and are not
+; live low-resolution or fixed-function renderer implementations.
 [GMAEdition]
 LowResEnabled=0
 LowResWidth=320
