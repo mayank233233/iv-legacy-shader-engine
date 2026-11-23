@@ -26,16 +26,43 @@ switchable, default OFF, reversible to the original path, and benchmarked.
   vertex-stream (buffer + offset + stride), stream-frequency, index-buffer,
   vertex-shader, pixel-shader, vertex-declaration/FVF, and viewport bindings.
   Viewport state is invalidated after a successful RT0 change because D3D9
-  resets the viewport to the target extent. The cache only runs on a
-  single-threaded, single-device path, and disables itself on state-block APIs,
-  multithreaded device creation, non-strict executable mode, thread/device
-  changes, Reset and failed Present.
+  resets the viewport to the target extent. The cache is disabled on state-block
+  APIs, multithreaded device creation, non-strict executable mode, or device/thread
+  conflicts. Reset attempts and failed Presents invalidate its shadows but do
+  not permanently turn the feature off.
 - An independent opt-in shader-constant range cache now covers VS/PS float,
   integer and boolean constants. It uses bitwise equality for exact register
   ranges, forwards changed or untracked ranges, and invalidates on Reset and
-  failed Present. It shares the single-thread/single-device and state-block
-  safety gates. Synthetic tests cover all six register groups; physical
-  gameplay performance is still unknown.
+  failed Present. It is disabled on state-block APIs, multithreaded device
+  creation, non-strict executable mode, or device/thread conflicts. Synthetic
+  tests cover all six register groups; physical gameplay performance is unknown.
+
+## Render-path observability now available
+
+The ASI records render-target slots, the active depth-stencil surface and the
+active viewport for each captured draw when `CaptureDrawTelemetry=1`. It
+updates the viewport snapshot from successful `SetViewport` calls and queries
+`GetViewport` immediately before each captured draw, so state-block viewport
+restores are not missed merely because no explicit SetViewport call occurred.
+The viewport record includes origin, dimensions and the bit patterns of MinZ
+and MaxZ.
+
+Run the read-only report with:
+
+```sh
+python tools/audit_gma_edition_render_path.py IVLegacy.log --width 320 --height 240 --json gma_render_path.json
+```
+
+The report exposes viewport-capture completeness, viewport dimensions,
+viewport/RT0 extent differences, RT0/depth dimension pairs and conservative
+fixed-function candidates. A viewport/RT0 extent difference may be deliberate
+cropping; it is not automatically a failure. The audit cannot identify the
+main scene target or the correct UI/post-processing insertion point from
+surface metadata alone.
+
+**Capture cost:** draw telemetry performs a GetViewport query for each captured
+draw and writes detailed per-draw records. Keep it off during clean timing
+runs; use bounded captures for render-path discovery.
 
 ## 30 candidate optimisations
 
@@ -55,8 +82,8 @@ not safe or not justified yet.
    opt-in experiment. Texture bindings use pointer identity; viewports compare
    the complete D3DVIEWPORT9 structure. A successful RT0 change invalidates the
    viewport shadow because D3D9 resets the viewport to the new target extent.
-   State-block APIs, unsupported threading/device conditions and Reset disable
-   or invalidate the cache.
+   State-block APIs and unsupported threading/device conditions disable the
+   cache; Reset and failed Present invalidate its shadows.
 6. **Vertex/index buffer binding deduplication** — Implemented as an opt-in
    experiment for SetStreamSource (buffer + offset + stride), SetStreamSourceFreq
    (exact divider), and SetIndices. State-block and device lifecycle safeguards
@@ -68,8 +95,8 @@ not safe or not justified yet.
 8. **Shader constant upload deduplication** — Implemented as an independent
    opt-in cache for VS/PS float (256-register shadow), integer and boolean
    (16-register shadows). It compares the full updated range bitwise, updates
-   the shadow only after successful device calls, and invalidates on Reset,
-   failed Present and state-block use.
+   the shadow only after successful device calls, invalidates on Reset and
+   failed Present, and disables on state-block API use.
 9. **Draw-call batching** — Prototype only for proven compatible static groups;
    preserve ordering, blend/depth state, material, transform and visibility.
 10. **D3D9 state transition sorting** — Reject as a global reorder; GTA IV's
@@ -133,7 +160,8 @@ not safe or not justified yet.
 2. Run scalar state, binding and shader-constant caches independently OFF and
    ON on the same route. Compare suppression counters and frame-time
    distributions. Binding and constant cache windows are emitted separately;
-   skipped-call counts alone do not prove a gain.
+   skipped-call counts alone do not prove a gain. Keep draw telemetry off for
+   timed runs because per-draw GetViewport queries and log writes add work.
 3. Capture a full route and identify CPU draw-call overhead, scene target,
    post-process passes, shadows and texture churn.
 4. Only then choose between low-resolution rendering (GPU-bound evidence),
