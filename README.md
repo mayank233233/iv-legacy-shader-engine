@@ -55,7 +55,7 @@ With `CaptureDrawTelemetry=1`, each captured draw includes its render-target/dep
 
 **Latest integrated synthetic verification:** [Windows x86 CI run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585) passed both jobs. This is not a GTA IV gameplay or physical GMA 3100 benchmark. Low-resolution redirection, a UI-aware upscale, live fixed-function draw replacement and a general SM3 translator remain unimplemented. No 30 FPS result is established.
 
-The latest complete integrated code run is #45101202585 (both jobs passed). A newer run #45145510926, triggered by the sample INI update, has passed the audit job but its Windows build remains in progress at the DirectX SDK installation step; it is not yet a complete pass.
+The latest workflow, [#45145510926](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45145510926), triggered by the sample INI update, has now passed both the `vertex-audit` and Windows `build` jobs. This is automated synthetic verification, not a GTA IV gameplay or physical GMA 3100 benchmark.
 
 See [GMA Edition prototype status](docs/GMA_EDITION_PROTOTYPE.md), [optimization catalogue](docs/GMA_OPTIMIZATION_CATALOG.md), and [GMA 3100 architecture research](docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md).
 
