@@ -27,8 +27,13 @@ switchable, default OFF, reversible to the original path, and benchmarked.
   pixel-shader, and vertex-declaration/FVF bindings. It only runs on a
   single-threaded, single-device path, and disables itself on state-block APIs,
   multithreaded device creation, non-strict executable mode, thread/device
-  changes, Reset and failed Present. Synthetic smoke coverage exists; real
-  GTA IV/GMA performance and behavior are not yet validated.
+  changes, Reset and failed Present.
+- An independent opt-in shader-constant range cache now covers VS/PS float,
+  integer and boolean constants. It uses bitwise equality for exact register
+  ranges, forwards changed or untracked ranges, and invalidates on Reset and
+  failed Present. It shares the single-thread/single-device and state-block
+  safety gates. Synthetic tests cover all six register groups; physical
+  gameplay performance is still unknown.
 
 ## 30 candidate optimisations
 
@@ -55,6 +60,11 @@ not safe or not justified yet.
    experiment for SetVertexShader and SetPixelShader. It tracks the actual
    shader object passed to the device, including hash-mapped fallback objects.
    State-block and device lifecycle safeguards match the other bindings.
+8. **Shader constant upload deduplication** — Implemented as an independent
+   opt-in cache for VS/PS float (256-register shadow), integer and boolean
+   (16-register shadows). It compares the full updated range bitwise, updates
+   the shadow only after successful device calls, and invalidates on Reset,
+   failed Present and state-block use.
 8. **Constant upload range deduplication** — Measure exact byte-identical
    constant ranges; NaNs, partial writes and shader changes complicate equality.
 9. **Draw-call batching** — Prototype only for proven compatible static groups;
@@ -117,10 +127,10 @@ not safe or not justified yet.
 
 1. Get a clean baseline with telemetry mostly OFF; instrumentation itself adds
    CPU and disk work.
-2. Run the scalar state cache and binding cache independently OFF and ON on the
-   same route. Compare their suppression counters and frame-time distributions.
-   The new binding-cache counters are emitted as
-   `D3D9_BINDING_CACHE_WINDOW`; skipped-call counts alone do not prove a gain.
+2. Run scalar state, binding and shader-constant caches independently OFF and
+   ON on the same route. Compare suppression counters and frame-time
+   distributions. Binding and constant cache windows are emitted separately;
+   skipped-call counts alone do not prove a gain.
 3. Capture a full route and identify CPU draw-call overhead, scene target,
    post-process passes, shadows and texture churn.
 4. Only then choose between low-resolution rendering (GPU-bound evidence),
