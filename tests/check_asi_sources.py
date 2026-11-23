@@ -438,6 +438,8 @@ expected_draw_test_markers = (
     "pixel boolean-constant cache did not skip exact ranges",
     "Reset did not invalidate shader-constant range cache state",
     "state-block API use did not disable shader-constant suppression",
+    "InvalidateShaderConstantRange",
+    "unreadable shader-constant input did not invalidate the cached range",
     "g_fakeSetTextureCalls",
     "g_fakeSetStreamSourceCalls",
     "g_fakeSetStreamSourceFreqCalls",
