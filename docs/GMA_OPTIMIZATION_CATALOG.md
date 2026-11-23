@@ -55,10 +55,13 @@ python tools/audit_gma_edition_render_path.py IVLegacy.log --width 320 --height 
 
 The report exposes viewport-capture completeness, viewport dimensions,
 viewport/RT0 extent differences, RT0/depth pair descriptors and conservative
-fixed-function candidates. Its pair gate fails closed if RT0 or depth evidence is
-missing. It checks that the depth surface covers RT0 (it may be larger) and that
-multisample type and quality match. A viewport/RT0 extent difference may be
-deliberate cropping; it is not automatically a failure. The audit does not check
+fixed-function candidates. Only successful `Draw*` submissions contribute to
+these results; failed submissions are counted separately. Null RT0/depth pointers
+and incomplete or invalid surface descriptors fail closed. A positive pair status
+confirms only depth extent coverage and matching multisample type/quality; its
+status explicitly says format compatibility remains unverified. A viewport/RT0
+extent difference may be deliberate cropping; it is not automatically a failure.
+The audit does not check
 `CheckDepthStencilMatch` format compatibility and cannot identify the main scene
 target or the correct UI/post-processing insertion point from surface metadata
 alone.
