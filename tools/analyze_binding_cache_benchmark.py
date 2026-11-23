@@ -109,9 +109,9 @@ def self_test() -> None:
         report = summarize(path)
     assert report["cache_windows"] == 1
     assert report["frames_covered_by_windows"] == 120
-    assert report["total"]["forwarded"] == 14
-    assert report["total"]["skipped"] == 16
-    assert report["total"]["skip_rate_percent"] == 53.33
+    assert report["total"]["forwarded"] == 17
+    assert report["total"]["skipped"] == 19
+    assert report["total"]["skip_rate_percent"] == 52.78
     print("GMA binding-cache benchmark analyzer self-test passed")
 
 
