@@ -23,11 +23,11 @@ switchable, default OFF, reversible to the original path, and benchmarked.
   It is opt-in and must be measured; its lock/bookkeeping cost may exceed the
   savings on a two-core E5200.
 - A separate opt-in D3D9 binding cache has now been implemented for texture,
-  vertex-stream (buffer + offset + stride), index-buffer, vertex-shader,
-  pixel-shader, and vertex-declaration/FVF bindings. It only runs on a
-  single-threaded, single-device path, and disables itself on state-block APIs,
-  multithreaded device creation, non-strict executable mode, thread/device
-  changes, Reset and failed Present.
+  vertex-stream (buffer + offset + stride), stream-frequency, index-buffer,
+  vertex-shader, pixel-shader, and vertex-declaration/FVF bindings. It only
+  runs on a single-threaded, single-device path, and disables itself on
+  state-block APIs, multithreaded device creation, non-strict executable mode,
+  thread/device changes, Reset and failed Present.
 - An independent opt-in shader-constant range cache now covers VS/PS float,
   integer and boolean constants. It uses bitwise equality for exact register
   ranges, forwards changed or untracked ranges, and invalidates on Reset and
@@ -53,9 +53,9 @@ not safe or not justified yet.
    skips identical bound texture pointers. Disabled around state-block APIs,
    Reset/lost-device boundaries and unsupported threading/device conditions.
 6. **Vertex/index buffer binding deduplication** — Implemented as an opt-in
-   experiment for SetStreamSource (buffer + offset + stride) and SetIndices.
-   Stream-frequency state is still forwarded normally; state-block and device
-   lifecycle safeguards match the texture cache.
+   experiment for SetStreamSource (buffer + offset + stride), SetStreamSourceFreq
+   (exact divider), and SetIndices. State-block and device lifecycle safeguards
+   match the texture cache.
 7. **Shader object binding deduplication** — Implemented as an opt-in
    experiment for SetVertexShader and SetPixelShader. It tracks the actual
    shader object passed to the device, including hash-mapped fallback objects.
