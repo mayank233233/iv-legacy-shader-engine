@@ -68,7 +68,10 @@ bottlenecks remain possible.
 
 ## Current acceptance status
 
-- Original renderer unchanged: yes; this phase is read-only.
+- Original renderer pipeline unchanged: no live draw replacement, shader
+  rewrite or low-resolution redirection is enabled by this phase. Independently
+  switchable D3D9 state-cache experiments can suppress repeated setters only
+  when explicitly enabled.
 - Low-resolution render target redirection: not implemented.
 - UI-sharp upscale: not implemented or claimed.
 - Fixed-function live draw replacement: not implemented.
