@@ -243,7 +243,7 @@ def self_test() -> None:
 
         msaa_type_mismatch = run_case(
             "msaa-type", "0:0x10:320:240:21:3:1:0:4:1",
-            "0x20:320:240:75:2:0:0:0:2:1",
+            "0x20:320:240:75:2:0:0:2:1",
         )
         assert "multisample_type_mismatch" in (
             msaa_type_mismatch["render_target_depth_mismatches"][0]["mismatch_reasons"]
@@ -251,7 +251,7 @@ def self_test() -> None:
 
         msaa_quality_mismatch = run_case(
             "msaa-quality", "0:0x10:320:240:21:3:1:0:2:1",
-            "0x20:320:240:75:2:0:0:0:2:0",
+            "0x20:320:240:75:2:0:0:2:0",
         )
         assert "multisample_quality_mismatch" in (
             msaa_quality_mismatch["render_target_depth_mismatches"][0]["mismatch_reasons"]
