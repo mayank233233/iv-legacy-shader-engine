@@ -214,8 +214,8 @@ def self_test() -> None:
             "extent_and_multisample_compatible_pairs_observed"
         )
         assert matching["render_target_depth_pair_count"] == 1
-        assert matching["render_target_depth_pairs"][0]["rt_object"] == "0x10"
-        assert matching["render_target_depth_pairs"][0]["depth_object"] == "0x20"
+        assert matching["render_target_depth_pairs"][0]["rt_object"] == "10"
+        assert matching["render_target_depth_pairs"][0]["depth_object"] == "20"
         assert matching["fixed_function_candidates"][0]["eligibility"] == (
             "candidate_only_not_replay_approved"
         )
