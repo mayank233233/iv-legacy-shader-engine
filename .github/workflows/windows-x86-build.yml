@@ -25,8 +25,9 @@ jobs:
 
       - name: Validate paired shader compatibility audits
         run: |
-          python -m py_compile tools/analyze_asi_log.py tools/analyze_binding_cache_benchmark.py tools/audit_sm3_to_sm2.py tools/audit_vs3_to_vs2.py tools/audit_shader_pairs.py tools/lower_shader_pairs.py tools/audit_runtime_capability_gaps.py
+          python -m py_compile tools/analyze_asi_log.py tools/analyze_binding_cache_benchmark.py tools/analyze_shader_constant_cache.py tools/audit_sm3_to_sm2.py tools/audit_vs3_to_vs2.py tools/audit_shader_pairs.py tools/lower_shader_pairs.py tools/audit_runtime_capability_gaps.py
           python tests/check_binding_cache_benchmark.py
+          python tests/check_shader_constant_cache.py
           python tools/audit_sm3_to_sm2.py --self-test
           python tools/audit_vs3_to_vs2.py --self-test
           python tools/audit_shader_pairs.py --self-test
