@@ -521,6 +521,47 @@ namespace
         }
     }
 
+    enum ShaderConstantCacheKind
+    {
+        kShaderConstantFloat = 0,
+        kShaderConstantInteger = 1,
+        kShaderConstantBoolean = 2
+    };
+
+    void InvalidateShaderConstantRange(
+        DWORD stage,
+        ShaderConstantCacheKind kind,
+        UINT startRegister,
+        UINT registerCount,
+        UINT capacity)
+    {
+        if (stage >= 2 || startRegister >= capacity || registerCount == 0)
+            return;
+
+        const UINT boundedCount =
+            registerCount > capacity - startRegister
+                ? capacity - startRegister
+                : registerCount;
+        volatile LONG* known = NULL;
+        switch (kind)
+        {
+        case kShaderConstantFloat:
+            known = g_shaderFloatConstantKnown[stage];
+            break;
+        case kShaderConstantInteger:
+            known = g_shaderIntegerConstantKnown[stage];
+            break;
+        case kShaderConstantBoolean:
+            known = g_shaderBooleanConstantKnown[stage];
+            break;
+        default:
+            return;
+        }
+
+        for (UINT index = 0; index < boundedCount; ++index)
+            InterlockedExchange(&known[startRegister + index], 0);
+    }
+
     HRESULT SetShaderFloatConstantsWithCache(
         IDirect3DDevice9* self,
         BOOL pixelStage,
@@ -533,12 +574,17 @@ namespace
             : g_realDeviceSetVertexShaderConstantF;
         if (!original)
             return D3DERR_INVALIDCALL;
-        if (!g_shaderConstantCacheEnabled || !data || vectorCount == 0 ||
-            startRegister > 255 || vectorCount > 256 - startRegister ||
+        if (!g_shaderConstantCacheEnabled || vectorCount == 0 ||
             !BindingCacheThreadAllowed(self, TRUE))
             return original(self, startRegister, data, vectorCount);
 
         const DWORD stage = pixelStage ? 1 : 0;
+        if (!data || startRegister >= 256 || vectorCount > 256 - startRegister)
+        {
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantFloat, startRegister, vectorCount, 256);
+            return original(self, startRegister, data, vectorCount);
+        }
         BOOL identical = TRUE;
         BOOL readable = TRUE;
         __try
@@ -562,7 +608,11 @@ namespace
         }
 
         if (!readable)
+        {
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantFloat, startRegister, vectorCount, 256);
             return original(self, startRegister, data, vectorCount);
+        }
 
         const LONG counter = pixelStage ? 1 : 0;
         if (identical)
@@ -591,17 +641,15 @@ namespace
             }
             if (!copied)
             {
-                for (UINT index = 0; index < vectorCount; ++index)
-                    InterlockedExchange(
-                        &g_shaderFloatConstantKnown[stage][startRegister + index], 0);
+                InvalidateShaderConstantRange(
+                    stage, kShaderConstantFloat, startRegister, vectorCount, 256);
             }
             InterlockedIncrement(&g_shaderConstantCacheForwarded[counter]);
         }
         else
         {
-            for (UINT index = 0; index < vectorCount; ++index)
-                InterlockedExchange(
-                    &g_shaderFloatConstantKnown[stage][startRegister + index], 0);
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantFloat, startRegister, vectorCount, 256);
         }
         return hr;
     }
@@ -618,12 +666,17 @@ namespace
             : g_realDeviceSetVertexShaderConstantI;
         if (!original)
             return D3DERR_INVALIDCALL;
-        if (!g_shaderConstantCacheEnabled || !data || vectorCount == 0 ||
-            startRegister > 15 || vectorCount > 16 - startRegister ||
+        if (!g_shaderConstantCacheEnabled || vectorCount == 0 ||
             !BindingCacheThreadAllowed(self, TRUE))
             return original(self, startRegister, data, vectorCount);
 
         const DWORD stage = pixelStage ? 1 : 0;
+        if (!data || startRegister >= 16 || vectorCount > 16 - startRegister)
+        {
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantInteger, startRegister, vectorCount, 16);
+            return original(self, startRegister, data, vectorCount);
+        }
         BOOL identical = TRUE;
         BOOL readable = TRUE;
         __try
@@ -647,7 +700,11 @@ namespace
         }
 
         if (!readable)
+        {
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantInteger, startRegister, vectorCount, 16);
             return original(self, startRegister, data, vectorCount);
+        }
 
         const LONG counter = pixelStage ? 3 : 2;
         if (identical)
@@ -676,17 +733,15 @@ namespace
             }
             if (!copied)
             {
-                for (UINT index = 0; index < vectorCount; ++index)
-                    InterlockedExchange(
-                        &g_shaderIntegerConstantKnown[stage][startRegister + index], 0);
+                InvalidateShaderConstantRange(
+                    stage, kShaderConstantInteger, startRegister, vectorCount, 16);
             }
             InterlockedIncrement(&g_shaderConstantCacheForwarded[counter]);
         }
         else
         {
-            for (UINT index = 0; index < vectorCount; ++index)
-                InterlockedExchange(
-                    &g_shaderIntegerConstantKnown[stage][startRegister + index], 0);
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantInteger, startRegister, vectorCount, 16);
         }
         return hr;
     }
@@ -703,12 +758,17 @@ namespace
             : g_realDeviceSetVertexShaderConstantB;
         if (!original)
             return D3DERR_INVALIDCALL;
-        if (!g_shaderConstantCacheEnabled || !data || boolCount == 0 ||
-            startRegister > 15 || boolCount > 16 - startRegister ||
+        if (!g_shaderConstantCacheEnabled || boolCount == 0 ||
             !BindingCacheThreadAllowed(self, TRUE))
             return original(self, startRegister, data, boolCount);
 
         const DWORD stage = pixelStage ? 1 : 0;
+        if (!data || startRegister >= 16 || boolCount > 16 - startRegister)
+        {
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantBoolean, startRegister, boolCount, 16);
+            return original(self, startRegister, data, boolCount);
+        }
         BOOL identical = TRUE;
         BOOL readable = TRUE;
         __try
@@ -732,7 +792,11 @@ namespace
         }
 
         if (!readable)
+        {
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantBoolean, startRegister, boolCount, 16);
             return original(self, startRegister, data, boolCount);
+        }
 
         const LONG counter = pixelStage ? 5 : 4;
         if (identical)
@@ -761,17 +825,15 @@ namespace
             }
             if (!copied)
             {
-                for (UINT index = 0; index < boolCount; ++index)
-                    InterlockedExchange(
-                        &g_shaderBooleanConstantKnown[stage][startRegister + index], 0);
+                InvalidateShaderConstantRange(
+                    stage, kShaderConstantBoolean, startRegister, boolCount, 16);
             }
             InterlockedIncrement(&g_shaderConstantCacheForwarded[counter]);
         }
         else
         {
-            for (UINT index = 0; index < boolCount; ++index)
-                InterlockedExchange(
-                    &g_shaderBooleanConstantKnown[stage][startRegister + index], 0);
+            InvalidateShaderConstantRange(
+                stage, kShaderConstantBoolean, startRegister, boolCount, 16);
         }
         return hr;
     }
