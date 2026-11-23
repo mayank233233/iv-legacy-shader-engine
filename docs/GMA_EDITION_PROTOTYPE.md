@@ -73,11 +73,16 @@ bottlenecks remain possible.
 - UI-sharp upscale: not implemented or claimed.
 - Fixed-function live draw replacement: not implemented.
 - Fixed-function candidate audit: implemented, diagnostic only.
-- SetViewport telemetry: implemented, observational only; hardware/game validation pending.
+- SetViewport telemetry: implemented. An opt-in viewport-state cache is now
+  included in `EnableBindingCache=0`; it compares the complete D3DVIEWPORT9
+  structure and invalidates after successful RT0 changes, Reset and state-block
+  API use. Synthetic test coverage is included; hardware/game validation is
+  pending.
 - D3D9 binding cache: implemented as an independent `EnableBindingCache=0`
   experiment for textures, vertex streams (buffer + offset + stride),
-  stream-frequency divider values, index buffers, vertex/pixel shaders and
-  vertex-declaration/FVF state. It disables
+  stream-frequency divider values, index buffers, vertex/pixel shaders,
+  vertex-declaration/FVF and viewport state. Viewport shadow is invalidated
+  after RT0 changes. It disables
   on state-block APIs, D3DCREATE_MULTITHREADED, non-strict executable mode,
   device/thread changes, Reset and failed Present.
 - Shader constant cache: implemented separately as
