@@ -1487,6 +1487,13 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
         textureCallsBeforeBindingReset != 1)
         return Fail("Reset did not invalidate texture-binding cache state");
+    const LONG frequencyCallsBeforeReset =
+        InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0);
+    device->SetStreamSourceFreq(0, 1);
+    device->SetStreamSourceFreq(0, 1);
+    if (InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0) -
+        frequencyCallsBeforeReset != 1)
+        return Fail("Reset did not invalidate stream-frequency cache state");
     const LONG vsCallsBeforeBindingReset =
         InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0);
     device->SetVertexShader(fallbackVertexShader);
@@ -1527,6 +1534,13 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
         textureCallsBeforeStateBlock != 2)
         return Fail("state-block API use did not disable texture-binding suppression");
+    const LONG frequencyCallsBeforeStateBlock =
+        InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0);
+    device->SetStreamSourceFreq(0, 1);
+    device->SetStreamSourceFreq(0, 1);
+    if (InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0) -
+        frequencyCallsBeforeStateBlock != 2)
+        return Fail("state-block API use did not disable stream-frequency suppression");
     const LONG shaderCallsBeforeStateBlock =
         InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0);
     device->SetVertexShader(fallbackVertexShader);
