@@ -14,16 +14,16 @@ WINDOW_RE = re.compile(
     r"D3D9_BINDING_CACHE_WINDOW\s+frames=(\d+)\s+"
     r"texture_forwarded=(\d+)\s+texture_skipped=(\d+)\s+"
     r"stream_forwarded=(\d+)\s+stream_skipped=(\d+)\s+"
-    r"stream_freq_forwarded=(\d+)\s+stream_freq_skipped=(\d+)\s+"
     r"index_forwarded=(\d+)\s+index_skipped=(\d+)\s+"
     r"vs_forwarded=(\d+)\s+vs_skipped=(\d+)\s+"
     r"ps_forwarded=(\d+)\s+ps_skipped=(\d+)\s+"
-    r"vertex_format_forwarded=(\d+)\s+vertex_format_skipped=(\d+)"
+    r"vertex_format_forwarded=(\d+)\s+vertex_format_skipped=(\d+)\s+"
+    r"stream_freq_forwarded=(\d+)\s+stream_freq_skipped=(\d+)"
 )
 
 
 def summarize(path: Path) -> dict:
-    names = ("texture", "stream", "stream_frequency", "index", "vertex_shader", "pixel_shader", "vertex_format")
+    names = ("texture", "stream", "index", "vertex_shader", "pixel_shader", "vertex_format", "stream_frequency")
     totals = {name: {"forwarded": 0, "skipped": 0} for name in names}
     frames = 0
     windows = 0
@@ -101,11 +101,11 @@ def self_test() -> None:
             "D3D9_BINDING_CACHE_WINDOW frames=120 "
             "texture_forwarded=3 texture_skipped=3 "
             "stream_forwarded=3 stream_skipped=3 "
-            "stream_freq_forwarded=3 stream_freq_skipped=3 "
             "index_forwarded=3 index_skipped=3 "
             "vs_forwarded=3 vs_skipped=3 "
             "ps_forwarded=3 ps_skipped=3 "
-            "vertex_format_forwarded=2 vertex_format_skipped=4\n",
+            "vertex_format_forwarded=2 vertex_format_skipped=4 "
+            "stream_freq_forwarded=3 stream_freq_skipped=3\n",
             encoding="utf-8",
         )
         report = summarize(path)
