@@ -54,11 +54,14 @@ python tools/audit_gma_edition_render_path.py IVLegacy.log --width 320 --height 
 ```
 
 The report exposes viewport-capture completeness, viewport dimensions,
-viewport/RT0 extent differences, RT0/depth dimension pairs and conservative
-fixed-function candidates. A viewport/RT0 extent difference may be deliberate
-cropping; it is not automatically a failure. The audit cannot identify the
-main scene target or the correct UI/post-processing insertion point from
-surface metadata alone.
+viewport/RT0 extent differences, RT0/depth pair descriptors and conservative
+fixed-function candidates. Its pair gate fails closed if RT0 or depth evidence is
+missing. It checks that the depth surface covers RT0 (it may be larger) and that
+multisample type and quality match. A viewport/RT0 extent difference may be
+deliberate cropping; it is not automatically a failure. The audit does not check
+`CheckDepthStencilMatch` format compatibility and cannot identify the main scene
+target or the correct UI/post-processing insertion point from surface metadata
+alone.
 
 **Capture cost:** draw telemetry performs a GetViewport query for each captured
 draw and writes detailed per-draw records. Keep it off during clean timing
