@@ -198,6 +198,7 @@ namespace
     volatile LONG g_renderTargetLogCount = 0;
     volatile LONG g_depthTargetCreateLogCount = 0;
     volatile LONG g_viewportLogCount = 0;
+    volatile LONG g_viewportCaptureFailureCount = 0;
     volatile LONG g_setRenderTargetLogCount = 0;
     volatile LONG g_setDepthTargetLogCount = 0;
     BOOL g_telemetryEnabled = TRUE;
@@ -1446,23 +1447,22 @@ namespace
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log("GET_VIEWPORT_CAPTURE_EXCEPTION code=0x%08lX",
-                static_cast<unsigned long>(GetExceptionCode()));
+            if (InterlockedIncrement(&g_viewportCaptureFailureCount) <= 8)
+            {
+                Log("GET_VIEWPORT_CAPTURE_EXCEPTION code=0x%08lX",
+                    static_cast<unsigned long>(GetExceptionCode()));
+            }
         }
 
         if (queryCompleted && SUCCEEDED(hr))
         {
             UpdateObservedViewportSnapshot(&viewport);
-            Log("GET_VIEWPORT_CAPTURED x=%lu y=%lu width=%lu height=%lu",
-                static_cast<unsigned long>(viewport.X),
-                static_cast<unsigned long>(viewport.Y),
-                static_cast<unsigned long>(viewport.Width),
-                static_cast<unsigned long>(viewport.Height));
             return TRUE;
         }
 
         ClearObservedViewportSnapshot();
-        if (queryCompleted)
+        if (queryCompleted &&
+            InterlockedIncrement(&g_viewportCaptureFailureCount) <= 8)
         {
             Log("GET_VIEWPORT_CAPTURE_FAILED hr=0x%08lX",
                 static_cast<unsigned long>(hr));
@@ -4309,6 +4309,11 @@ namespace
             InterlockedCompareExchangePointer(&g_currentPixelShader, NULL, NULL);
         const LONG frameIndex =
             InterlockedCompareExchange(&g_presentFrameIndex, 0, 0);
+
+        // State-block application and other implicit device-state changes can
+        // restore the viewport without a SetViewport call. Query it at draw
+        // time so this record reflects the actual active viewport.
+        CaptureCurrentViewport(device);
 
         char textureBindings[512] = {};
         size_t textureOffset = 0;
