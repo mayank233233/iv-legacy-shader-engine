@@ -14,12 +14,15 @@ WINDOW_RE = re.compile(
     r"D3D9_BINDING_CACHE_WINDOW\s+frames=(\d+)\s+"
     r"texture_forwarded=(\d+)\s+texture_skipped=(\d+)\s+"
     r"stream_forwarded=(\d+)\s+stream_skipped=(\d+)\s+"
-    r"index_forwarded=(\d+)\s+index_skipped=(\d+)"
+    r"index_forwarded=(\d+)\s+index_skipped=(\d+)\s+"
+    r"vs_forwarded=(\d+)\s+vs_skipped=(\d+)\s+"
+    r"ps_forwarded=(\d+)\s+ps_skipped=(\d+)\s+"
+    r"vertex_format_forwarded=(\d+)\s+vertex_format_skipped=(\d+)"
 )
 
 
 def summarize(path: Path) -> dict:
-    names = ("texture", "stream", "index")
+    names = ("texture", "stream", "index", "vertex_shader", "pixel_shader", "vertex_format")
     totals = {name: {"forwarded": 0, "skipped": 0} for name in names}
     frames = 0
     windows = 0
@@ -97,15 +100,18 @@ def self_test() -> None:
             "D3D9_BINDING_CACHE_WINDOW frames=120 "
             "texture_forwarded=3 texture_skipped=3 "
             "stream_forwarded=3 stream_skipped=3 "
-            "index_forwarded=3 index_skipped=3\n",
+            "index_forwarded=3 index_skipped=3 "
+            "vs_forwarded=3 vs_skipped=3 "
+            "ps_forwarded=3 ps_skipped=3 "
+            "vertex_format_forwarded=2 vertex_format_skipped=4\n",
             encoding="utf-8",
         )
         report = summarize(path)
     assert report["cache_windows"] == 1
     assert report["frames_covered_by_windows"] == 120
-    assert report["total"]["forwarded"] == 9
-    assert report["total"]["skipped"] == 9
-    assert report["total"]["skip_rate_percent"] == 50.0
+    assert report["total"]["forwarded"] == 14
+    assert report["total"]["skipped"] == 16
+    assert report["total"]["skip_rate_percent"] == 53.33
     print("GMA binding-cache benchmark analyzer self-test passed")
 
 
