@@ -76,6 +76,21 @@ Each captured `DRAW_CALL` can therefore include `viewport=x:y:width:height:minZB
 
 Therefore `LowResEnabled` in the example INI is a reserved placeholder, not an implemented runtime feature.
 
+
+## Capture acceptance preflight
+
+After collecting `IVLegacy.log`, `IVLegacyCaptures` and (optionally) `IVLegacyConstants`, run the read-only preflight before interpreting shader-pair reports:
+
+```bat
+py -3 tools\validate_gma_capture.py IVLegacy.log IVLegacyCaptures --constants IVLegacyConstants --json gma_capture_validation.json
+```
+
+The validator requires the original GTA IV 1.0.0.0 executable, the expected Intel PCI identity (8086:29C2), non-synthetic adapter/driver strings, completed ASI/D3D9 hooks, a successful D3D9 device creation, enabled shader/draw capture, successful draws, parseable VS and PS bytecode, and at least one successful draw whose two shader objects resolve to captured bytecode. It also runs the existing read-only paired-shader audit and reports its candidate count.
+
+A `ready_for_pair_review` result means the capture is suitable for manual shader-pair investigation. It does **not** approve bytecode, certify driver acceptance, prove visual equivalence, or write runtime mappings. The validator always reports `runtime_map_approval=not_performed`. A zero candidate count is a legitimate result: the captured pair may use unsupported instructions, layouts, caps or material state.
+
+The preflight is tested with both a synthetic fixture (which must be rejected) and a non-synthetic fixture (which must pass capture-correlation gates). The latter is a unit test, not physical-hardware evidence. CI still cannot substitute for an actual GTA IV/GMA 3100 session.
+
 ## Phase 1: fixed-function evidence
 
 The read-only audit lists a draw as a *candidate* only when both programmable shaders are null, a nonzero FVF is active and no vertex declaration is bound. Candidate status does not approve replay or replacement.
