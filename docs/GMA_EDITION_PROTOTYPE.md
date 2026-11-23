@@ -76,11 +76,15 @@ bottlenecks remain possible.
 - UI-sharp upscale: not implemented or claimed.
 - Fixed-function live draw replacement: not implemented.
 - Fixed-function candidate audit: implemented, diagnostic only.
-- SetViewport telemetry: implemented. An opt-in viewport-state cache is now
-  included in `EnableBindingCache=0`; it compares the complete D3DVIEWPORT9
-  structure and invalidates after successful RT0 changes, Reset and state-block
-  API use. Synthetic test coverage is included; hardware/game validation is
-  pending.
+- Viewport telemetry: successful SetViewport calls update an observed snapshot;
+  GetViewport refreshes it at device creation, Reset and successful RT0
+  changes. Each captured DRAW_CALL now includes
+  `viewport=x:y:width:height:minZBits:maxZBits`. The offline parser and GMA
+  render-path audit report viewport dimensions and viewport/RT0 extent
+  differences. An opt-in viewport-state cache remains included in
+  `EnableBindingCache=0`; it invalidates after RT0 changes, Reset and
+  state-block API use. Synthetic tests cover capture and cache behaviour;
+  physical GTA IV/GMA validation remains pending.
 - D3D9 binding cache: implemented as an independent `EnableBindingCache=0`
   experiment for textures, vertex streams (buffer + offset + stride),
   stream-frequency divider values, index buffers, vertex/pixel shaders,
