@@ -418,7 +418,7 @@ namespace
         ReleaseStateCacheLock();
     }
 
-    void InvalidateBindingCache(PVOID device)
+    void InvalidateBindingCache(PVOID device, BOOL resetThreadOwner = TRUE)
     {
         for (DWORD stage = 0; stage < 16; ++stage)
             InterlockedExchange(&g_textureBindingKnown[stage], 0);
@@ -429,7 +429,8 @@ namespace
         InterlockedExchange(&g_pixelShaderBindingKnown, 0);
         InterlockedExchange(&g_vertexFormatBindingKnown, 0);
         InterlockedExchangePointer(&g_bindingCacheDevice, device);
-        InterlockedExchange(&g_bindingCacheThreadId, 0);
+        if (resetThreadOwner)
+            InterlockedExchange(&g_bindingCacheThreadId, 0);
         InterlockedExchange(&g_bindingCacheWindowFrameCount, 0);
         for (LONG index = 0; index < 6; ++index)
         {
@@ -1673,7 +1674,7 @@ namespace
         // runtime reports failure. Re-sending later state is safer than
         // trusting values across a lost-device transition.
         InvalidateRedundantStateCache(self);
-        InvalidateBindingCache(self);
+        InvalidateBindingCache(self, FALSE);
         return hr;
     }
 
