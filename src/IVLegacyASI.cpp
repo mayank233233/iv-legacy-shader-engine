@@ -4239,6 +4239,13 @@ namespace
         {
             HookD3D9Device(*device);
             CaptureCurrentSurfaceState(*device);
+            // A non-multithreaded D3D9 device belongs to its creation thread.
+            // Seed the binding-cache owner here instead of trusting whichever
+            // thread happens to issue the first setter.
+            if (g_bindingCacheEnabled)
+                InterlockedExchange(
+                    &g_bindingCacheThreadId,
+                    static_cast<LONG>(GetCurrentThreadId()));
         }
 
         return hr;
