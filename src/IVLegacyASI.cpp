@@ -2545,31 +2545,30 @@ namespace
         IDirect3DDevice9* self,
         const D3DVIEWPORT9* viewport)
     {
-        BOOL skipped = FALSE;
-        HRESULT hr = D3DERR_INVALIDCALL;
-        if (viewport && BindingCacheThreadAllowed(self))
+        D3DVIEWPORT9 requestedViewport = {};
+        BOOL readable = FALSE;
+        if (viewport)
         {
-            BOOL readable = TRUE;
-            BOOL identical = FALSE;
             __try
             {
-                identical =
-                    InterlockedCompareExchange(&g_viewportBindingKnown, 0, 0) != 0 &&
-                    memcmp(&g_cachedViewport, viewport, sizeof(D3DVIEWPORT9)) == 0;
+                CopyMemory(&requestedViewport, viewport, sizeof(requestedViewport));
+                readable = TRUE;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 readable = FALSE;
             }
+        }
 
-            if (!readable)
-            {
-                InterlockedExchange(&g_viewportBindingKnown, 0);
-                hr = g_realDeviceSetViewport
-                    ? g_realDeviceSetViewport(self, viewport)
-                    : D3DERR_INVALIDCALL;
-            }
-            else if (identical)
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (g_bindingCacheEnabled && viewport && readable &&
+            BindingCacheThreadAllowed(self))
+        {
+            const BOOL identical =
+                InterlockedCompareExchange(&g_viewportBindingKnown, 0, 0) != 0 &&
+                memcmp(&g_cachedViewport, &requestedViewport, sizeof(D3DVIEWPORT9)) == 0;
+            if (identical)
             {
                 skipped = TRUE;
                 hr = D3D_OK;
@@ -2582,24 +2581,9 @@ namespace
                     : D3DERR_INVALIDCALL;
                 if (SUCCEEDED(hr))
                 {
-                    BOOL copied = TRUE;
-                    __try
-                    {
-                        CopyMemory(&g_cachedViewport, viewport, sizeof(D3DVIEWPORT9));
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        copied = FALSE;
-                    }
-                    if (copied)
-                    {
-                        InterlockedExchange(&g_viewportBindingKnown, 1);
-                        InterlockedIncrement(&g_bindingCacheForwarded[7]);
-                    }
-                    else
-                    {
-                        InterlockedExchange(&g_viewportBindingKnown, 0);
-                    }
+                    CopyMemory(&g_cachedViewport, &requestedViewport, sizeof(D3DVIEWPORT9));
+                    InterlockedExchange(&g_viewportBindingKnown, 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[7]);
                 }
                 else
                 {
@@ -2612,30 +2596,37 @@ namespace
             hr = g_realDeviceSetViewport
                 ? g_realDeviceSetViewport(self, viewport)
                 : D3DERR_INVALIDCALL;
-            if (g_bindingCacheEnabled && !viewport)
+            if (g_bindingCacheEnabled && (!viewport || !readable))
                 InterlockedExchange(&g_viewportBindingKnown, 0);
         }
 
-        if (g_drawTelemetryEnabled &&
-            InterlockedIncrement(&g_viewportLogCount) <= 4096)
+        if (g_drawTelemetryEnabled)
         {
-            if (viewport)
-            {
-                Log(
-                    "SET_VIEWPORT x=%lu y=%lu width=%lu height=%lu min_z=%.6f max_z=%.6f hr=0x%08lX cached=%u",
-                    static_cast<unsigned long>(viewport->X),
-                    static_cast<unsigned long>(viewport->Y),
-                    static_cast<unsigned long>(viewport->Width),
-                    static_cast<unsigned long>(viewport->Height),
-                    static_cast<double>(viewport->MinZ),
-                    static_cast<double>(viewport->MaxZ),
-                    static_cast<unsigned long>(hr),
-                    skipped ? 1 : 0);
-            }
+            if (SUCCEEDED(hr) && readable)
+                UpdateObservedViewportSnapshot(&requestedViewport);
             else
+                ClearObservedViewportSnapshot();
+
+            if (InterlockedIncrement(&g_viewportLogCount) <= 4096)
             {
-                Log("SET_VIEWPORT viewport=NULL hr=0x%08lX cached=0",
-                    static_cast<unsigned long>(hr));
+                if (readable)
+                {
+                    Log(
+                        "SET_VIEWPORT x=%lu y=%lu width=%lu height=%lu min_z=%.6f max_z=%.6f hr=0x%08lX cached=%u",
+                        static_cast<unsigned long>(requestedViewport.X),
+                        static_cast<unsigned long>(requestedViewport.Y),
+                        static_cast<unsigned long>(requestedViewport.Width),
+                        static_cast<unsigned long>(requestedViewport.Height),
+                        static_cast<double>(requestedViewport.MinZ),
+                        static_cast<double>(requestedViewport.MaxZ),
+                        static_cast<unsigned long>(hr),
+                        skipped ? 1 : 0);
+                }
+                else
+                {
+                    Log("SET_VIEWPORT unreadable=1 hr=0x%08lX cached=0",
+                        static_cast<unsigned long>(hr));
+                }
             }
         }
         return hr;
