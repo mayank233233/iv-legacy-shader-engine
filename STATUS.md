@@ -1,5 +1,36 @@
 # IV Legacy Shader Engine — status
 
+## GMA Edition renderer branch snapshot — 2026-11-23
+
+Active work is isolated on `feature/gma-edition-renderer-prototype`; `main` is unchanged.
+
+### Implemented in source
+
+- Read-only per-draw viewport capture: explicit successful SetViewport updates plus GetViewport refresh immediately before each captured draw. Render-target and depth-stencil descriptors are attached to the same draw records.
+- `tools/audit_gma_edition_render_path.py` reports viewport-capture completeness, viewport dimensions, viewport/RT0 extent differences, RT0/depth dimension pairs and conservative fixed-function candidates. It does not identify the main scene target or modify rendering.
+- Three independent default-off D3D9 cache experiments:
+  - `EnableRedundantStateCache=0`: render state, texture-stage state and sampler state.
+  - `EnableBindingCache=0`: texture, vertex stream (buffer/offset/stride), stream frequency, index buffer, vertex/pixel shader, vertex declaration/FVF and viewport bindings.
+  - `EnableShaderConstantCache=0`: VS/PS float, integer and boolean register ranges.
+- State-block API use disables the caches because state-block application can change state outside tracked setter calls. Binding/constant caches also require strict GTA IV 1.0.0.0 mode and a single-threaded, single-device path. Reset attempts and failed Presents invalidate shadow state rather than permanently disabling these caches.
+- Benchmark analyzers report forwarded/skipped D3D9 calls for the scalar-state, binding and shader-constant caches. These counters are not FPS or GPU-time measurements.
+
+### Latest integrated verification
+
+- [Windows x86 CI run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585), code commit `9765a43665565e4c48c2c69f79603c62072a33a6`: both `build` and `vertex-audit` jobs passed.
+- CI covers x86 compilation, static/source checks, fake-D3D9 runtime smoke tests and synthetic parser/audit fixtures. The latest run validates the integrated viewport instrumentation and cache implementation on the synthetic host.
+- This does **not** verify original GTA IV 1.0.0.0 startup, the physical GMA 3100 driver, gameplay correctness, image equivalence, actual frame-time improvement or 30 FPS.
+
+### Not implemented
+
+- Low-resolution scene render-target redirection and UI-aware upscaling.
+- Live fixed-function draw replacement or a full SM2 forward renderer.
+- General SM3-to-SM2 translation.
+- New live geometry batching/culling, AI/population throttling, allocator replacement or streaming-scheduler changes.
+
+Documentation: [GMA Edition prototype](docs/GMA_EDITION_PROTOTYPE.md), [optimization catalogue](docs/GMA_OPTIMIZATION_CATALOG.md), and [GMA 3100 architecture research](docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md). The example INI remains conservative: all cache switches and unfinished renderer placeholders default to OFF.
+
+
 ## Implemented in source
 
 - Preserved all six v0.2 HLSL shader files byte-for-byte; SHA-256 comparisons against the original v0.2 archive passed.
