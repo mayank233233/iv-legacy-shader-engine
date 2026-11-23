@@ -18,7 +18,7 @@ Active work is isolated on `feature/gma-edition-renderer-prototype`; `main` is u
 
 ### Latest integrated verification
 
-- [Windows x86 CI run #45168923702](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45168923702), code commit `a3f780f617f8a977d882bf33e4a067b7c6d145c6`: **both `vertex-audit` and Windows `build` passed**. The Ubuntu job ran the new RT/depth evidence regression suite; the Windows job compiled the x86 ASI, passed the synthetic D3D9 runtime smoke test and staged artifacts. The current branch head adds documentation-only commits after this code-tested commit.
+- [Windows x86 CI run #45171101101](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45171101101), code commit `e39f7f6636b5b526076838471b895a74fed017f6`: **both `vertex-audit` and Windows `build` passed**. The Ubuntu job ran the render-path evidence regressions for failed draws, null pointers and invalid descriptors as well as the existing RT/depth/MSAA cases. The Windows job built the x86 ASI, passed the synthetic D3D9 runtime smoke test and staged artifacts. Later branch commits are documentation-only.
 - Earlier integrated baseline: [Windows x86 CI run #45101202585(https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585), code commit `9765a43665565e4c48c2c69f79603c62072a33a6`; both jobs passed.
 - CI covers x86 compilation, static/source checks, fake-D3D9 runtime smoke tests and synthetic parser/audit fixtures. The latest run validates the integrated viewport instrumentation and cache implementation on the synthetic host.
 - This does **not** verify original GTA IV 1.0.0.0 startup, the physical GMA 3100 driver, gameplay correctness, image equivalence, actual frame-time improvement or 30 FPS.
