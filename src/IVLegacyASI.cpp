@@ -157,6 +157,14 @@ namespace
     SurfaceSnapshot g_renderTargetSnapshots[4] = {};
     SurfaceSnapshot g_depthStencilSnapshot = {};
 
+    struct ViewportSnapshot
+    {
+        D3DVIEWPORT9 value;
+        volatile LONG lock;
+        volatile LONG known;
+    };
+    ViewportSnapshot g_observedViewport = {};
+
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
     volatile LONG g_vertexShaderBindingKnown = 0;
@@ -1386,6 +1394,99 @@ namespace
                 ClearSurfaceSnapshot(&g_depthStencilSnapshot);
             }
         }
+    }
+
+    void AcquireViewportSnapshotLock()
+    {
+        while (InterlockedCompareExchange(&g_observedViewport.lock, 1, 0) != 0)
+            Sleep(0);
+    }
+
+    void ReleaseViewportSnapshotLock()
+    {
+        InterlockedExchange(&g_observedViewport.lock, 0);
+    }
+
+    void ClearObservedViewportSnapshot()
+    {
+        AcquireViewportSnapshotLock();
+        InterlockedExchange(&g_observedViewport.known, 0);
+        ReleaseViewportSnapshotLock();
+    }
+
+    void UpdateObservedViewportSnapshot(const D3DVIEWPORT9* viewport)
+    {
+        if (!viewport)
+        {
+            ClearObservedViewportSnapshot();
+            return;
+        }
+
+        AcquireViewportSnapshotLock();
+        CopyMemory(&g_observedViewport.value, viewport, sizeof(D3DVIEWPORT9));
+        InterlockedExchange(&g_observedViewport.known, 1);
+        ReleaseViewportSnapshotLock();
+    }
+
+    BOOL CaptureCurrentViewport(IDirect3DDevice9* device)
+    {
+        if (!g_drawTelemetryEnabled || !device)
+        {
+            ClearObservedViewportSnapshot();
+            return FALSE;
+        }
+
+        D3DVIEWPORT9 viewport = {};
+        const HRESULT hr = device->GetViewport(&viewport);
+        if (SUCCEEDED(hr))
+        {
+            UpdateObservedViewportSnapshot(&viewport);
+            return TRUE;
+        }
+
+        ClearObservedViewportSnapshot();
+        Log("GET_VIEWPORT_CAPTURE_FAILED hr=0x%08lX",
+            static_cast<unsigned long>(hr));
+        return FALSE;
+    }
+
+    BOOL FormatObservedViewportSnapshot(
+        char* output,
+        size_t outputCount)
+    {
+        if (!output || outputCount == 0)
+            return FALSE;
+
+        D3DVIEWPORT9 viewport = {};
+        AcquireViewportSnapshotLock();
+        const BOOL known =
+            InterlockedCompareExchange(&g_observedViewport.known, 0, 0) != 0;
+        if (known)
+            CopyMemory(&viewport, &g_observedViewport.value, sizeof(viewport));
+        ReleaseViewportSnapshotLock();
+
+        if (!known)
+        {
+            strcpy_s(output, outputCount, "unknown");
+            return FALSE;
+        }
+
+        DWORD minZBits = 0;
+        DWORD maxZBits = 0;
+        CopyMemory(&minZBits, &viewport.MinZ, sizeof(minZBits));
+        CopyMemory(&maxZBits, &viewport.MaxZ, sizeof(maxZBits));
+        _snprintf_s(
+            output,
+            outputCount,
+            _TRUNCATE,
+            "%lu:%lu:%lu:%lu:%08lX:%08lX",
+            static_cast<unsigned long>(viewport.X),
+            static_cast<unsigned long>(viewport.Y),
+            static_cast<unsigned long>(viewport.Width),
+            static_cast<unsigned long>(viewport.Height),
+            static_cast<unsigned long>(minZBits),
+            static_cast<unsigned long>(maxZBits));
+        return TRUE;
     }
 
     BOOL FormatSurfaceSnapshot(
