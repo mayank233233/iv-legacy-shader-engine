@@ -24,10 +24,12 @@ switchable, default OFF, reversible to the original path, and benchmarked.
   savings on a two-core E5200.
 - A separate opt-in D3D9 binding cache has now been implemented for texture,
   vertex-stream (buffer + offset + stride), stream-frequency, index-buffer,
-  vertex-shader, pixel-shader, and vertex-declaration/FVF bindings. It only
-  runs on a single-threaded, single-device path, and disables itself on
-  state-block APIs, multithreaded device creation, non-strict executable mode,
-  thread/device changes, Reset and failed Present.
+  vertex-shader, pixel-shader, vertex-declaration/FVF, and viewport bindings.
+  Viewport state is invalidated after a successful RT0 change because D3D9
+  resets the viewport to the target extent. The cache only runs on a
+  single-threaded, single-device path, and disables itself on state-block APIs,
+  multithreaded device creation, non-strict executable mode, thread/device
+  changes, Reset and failed Present.
 - An independent opt-in shader-constant range cache now covers VS/PS float,
   integer and boolean constants. It uses bitwise equality for exact register
   ranges, forwards changed or untracked ranges, and invalidates on Reset and
@@ -49,9 +51,12 @@ not safe or not justified yet.
 4. **State-cache break-even measurement** — Implemented analyzer in
    `tools/analyze_state_cache_benchmark.py`; counts skipped API calls but does
    not claim FPS improvement.
-5. **Texture binding deduplication** — Implemented as an opt-in experiment;
-   skips identical bound texture pointers. Disabled around state-block APIs,
-   Reset/lost-device boundaries and unsupported threading/device conditions.
+5. **Texture and viewport binding deduplication** — Implemented as an
+   opt-in experiment. Texture bindings use pointer identity; viewports compare
+   the complete D3DVIEWPORT9 structure. A successful RT0 change invalidates the
+   viewport shadow because D3D9 resets the viewport to the new target extent.
+   State-block APIs, unsupported threading/device conditions and Reset disable
+   or invalidate the cache.
 6. **Vertex/index buffer binding deduplication** — Implemented as an opt-in
    experiment for SetStreamSource (buffer + offset + stride), SetStreamSourceFreq
    (exact divider), and SetIndices. State-block and device lifecycle safeguards
@@ -65,8 +70,6 @@ not safe or not justified yet.
    (16-register shadows). It compares the full updated range bitwise, updates
    the shadow only after successful device calls, and invalidates on Reset,
    failed Present and state-block use.
-8. **Constant upload range deduplication** — Measure exact byte-identical
-   constant ranges; NaNs, partial writes and shader changes complicate equality.
 9. **Draw-call batching** — Prototype only for proven compatible static groups;
    preserve ordering, blend/depth state, material, transform and visibility.
 10. **D3D9 state transition sorting** — Reject as a global reorder; GTA IV's
