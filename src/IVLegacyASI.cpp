@@ -1830,6 +1830,29 @@ namespace
             InterlockedIncrement(&g_frameDrawFailures);
     }
 
+    void RecordBindingCacheWindow(IDirect3DDevice9* self)
+    {
+        if (!g_bindingCacheEnabled || g_bindingCacheDevice != self)
+            return;
+
+        const LONG frames = InterlockedIncrement(&g_bindingCacheWindowFrameCount);
+        if (frames < static_cast<LONG>(g_stateCacheReportFrames))
+            return;
+
+        InterlockedExchange(&g_bindingCacheWindowFrameCount, 0);
+        const LONG textureForwarded = InterlockedExchange(&g_bindingCacheForwarded[0], 0);
+        const LONG textureSkipped = InterlockedExchange(&g_bindingCacheSkipped[0], 0);
+        const LONG streamForwarded = InterlockedExchange(&g_bindingCacheForwarded[1], 0);
+        const LONG streamSkipped = InterlockedExchange(&g_bindingCacheSkipped[1], 0);
+        const LONG indexForwarded = InterlockedExchange(&g_bindingCacheForwarded[2], 0);
+        const LONG indexSkipped = InterlockedExchange(&g_bindingCacheSkipped[2], 0);
+        Log(
+            "D3D9_BINDING_CACHE_WINDOW frames=%ld texture_forwarded=%ld texture_skipped=%ld "
+            "stream_forwarded=%ld stream_skipped=%ld index_forwarded=%ld index_skipped=%ld",
+            frames, textureForwarded, textureSkipped,
+            streamForwarded, streamSkipped, indexForwarded, indexSkipped);
+    }
+
     HRESULT WINAPI HookDevicePresent(
         IDirect3DDevice9* self,
         const RECT* source,
@@ -1861,6 +1884,7 @@ namespace
         else
         {
             RecordRedundantStateCacheWindow(self);
+            RecordBindingCacheWindow(self);
             if (g_drawTelemetryEnabled || g_frameProfilerEnabled)
                 InterlockedIncrement(&g_presentFrameIndex);
         }
