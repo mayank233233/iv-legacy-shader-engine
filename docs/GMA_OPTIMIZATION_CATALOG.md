@@ -18,10 +18,16 @@ switchable, default OFF, reversible to the original path, and benchmarked.
   shadows, anti-aliasing). Those are not performance optimisations for GMA 3100.
 - DXVK can reduce D3D9 driver overhead on supported Vulkan GPUs. GMA 3100 does
   not provide the required Vulkan support, so DXVK is not a viable target path.
-- The existing IVLegacy redundant D3D9 state cache already suppresses duplicate
+- The existing IVLegacy redundant D3D9 state cache suppresses duplicate
   render-state, texture-stage-state and sampler-state submissions when enabled.
   It is opt-in and must be measured; its lock/bookkeeping cost may exceed the
   savings on a two-core E5200.
+- A separate opt-in D3D9 binding cache has now been implemented for texture,
+  vertex-stream and index-buffer bindings. It uses exact object/offset/stride
+  identity, only runs on a single-threaded, single-device path, and disables
+  itself on state-block APIs, multithreaded device creation, thread/device
+  changes, Reset and failed Present. Synthetic smoke coverage exists; real
+  GTA IV/GMA performance and behavior are not yet validated.
 
 ## 30 candidate optimisations
 
@@ -37,10 +43,13 @@ not safe or not justified yet.
 4. **State-cache break-even measurement** — Implemented analyzer in
    `tools/analyze_state_cache_benchmark.py`; counts skipped API calls but does
    not claim FPS improvement.
-5. **Texture binding deduplication** — Measure repeated SetTexture calls first;
-   only prototype with full state-block, Reset and multithread invalidation.
-6. **Vertex/index buffer binding deduplication** — Measure; account for stream
-   offsets, strides, stream frequencies, device identity and state blocks.
+5. **Texture binding deduplication** — Implemented as an opt-in experiment;
+   skips identical bound texture pointers. Disabled around state-block APIs,
+   Reset/lost-device boundaries and unsupported threading/device conditions.
+6. **Vertex/index buffer binding deduplication** — Implemented as an opt-in
+   experiment for SetStreamSource (buffer + offset + stride) and SetIndices.
+   Stream-frequency state is still forwarded normally; state-block and device
+   lifecycle safeguards match the texture cache.
 7. **Shader object binding deduplication** — Measure first; shader fallback
    hooks and state-block semantics make blind suppression unsafe.
 8. **Constant upload range deduplication** — Measure exact byte-identical
@@ -105,9 +114,10 @@ not safe or not justified yet.
 
 1. Get a clean baseline with telemetry mostly OFF; instrumentation itself adds
    CPU and disk work.
-2. Run the existing redundant state cache OFF and ON on the same route. Use
-   `tools/analyze_state_cache_benchmark.py` on both logs. If frame time does
-   not improve, leave it OFF.
+2. Run the scalar state cache and binding cache independently OFF and ON on the
+   same route. Compare their suppression counters and frame-time distributions.
+   The new binding-cache counters are emitted as
+   `D3D9_BINDING_CACHE_WINDOW`; skipped-call counts alone do not prove a gain.
 3. Capture a full route and identify CPU draw-call overhead, scene target,
    post-process passes, shadows and texture churn.
 4. Only then choose between low-resolution rendering (GPU-bound evidence),
