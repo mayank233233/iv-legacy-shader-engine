@@ -41,6 +41,12 @@ namespace
     volatile LONG g_fakeEndStateBlockCalls = 0;
     volatile LONG g_fakeGetRenderStateCalls = 0;
     volatile LONG g_fakeSetViewportCalls = 0;
+    volatile LONG g_fakeSetVertexFloatConstantsCalls = 0;
+    volatile LONG g_fakeSetPixelFloatConstantsCalls = 0;
+    volatile LONG g_fakeSetVertexIntegerConstantsCalls = 0;
+    volatile LONG g_fakeSetPixelIntegerConstantsCalls = 0;
+    volatile LONG g_fakeSetVertexBooleanConstantsCalls = 0;
+    volatile LONG g_fakeSetPixelBooleanConstantsCalls = 0;
     volatile LONG g_fakeSetTextureCalls = 0;
     volatile LONG g_fakeSetStreamSourceCalls = 0;
     volatile LONG g_fakeSetIndicesCalls = 0;
@@ -664,36 +670,42 @@ namespace
     HRESULT WINAPI FakeDeviceSetVertexShaderConstantF(
         IDirect3DDevice9*, UINT, const float*, UINT)
     {
+        InterlockedIncrement(&g_fakeSetVertexFloatConstantsCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetPixelShaderConstantF(
         IDirect3DDevice9*, UINT, const float*, UINT)
     {
+        InterlockedIncrement(&g_fakeSetPixelFloatConstantsCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetVertexShaderConstantI(
         IDirect3DDevice9*, UINT, const int*, UINT)
     {
+        InterlockedIncrement(&g_fakeSetVertexIntegerConstantsCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetPixelShaderConstantI(
         IDirect3DDevice9*, UINT, const int*, UINT)
     {
+        InterlockedIncrement(&g_fakeSetPixelIntegerConstantsCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetVertexShaderConstantB(
         IDirect3DDevice9*, UINT, const BOOL*, UINT)
     {
+        InterlockedIncrement(&g_fakeSetVertexBooleanConstantsCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetPixelShaderConstantB(
         IDirect3DDevice9*, UINT, const BOOL*, UINT)
     {
+        InterlockedIncrement(&g_fakeSetPixelBooleanConstantsCalls);
         return D3D_OK;
     }
 
@@ -915,6 +927,8 @@ int main()
         L"General", L"EnableRedundantStateCache", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"EnableBindingCache", L"1", iniPath);
+    WritePrivateProfileStringW(
+        L"General", L"EnableShaderConstantCache", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"StateCacheReportFrames", L"1", iniPath);
     WritePrivateProfileStringW(
@@ -1288,6 +1302,79 @@ int main()
         4, vertexBooleanConstants, 2);
     const HRESULT setPixelBooleanConstantsHr = device->SetPixelShaderConstantB(
         5, pixelBooleanConstants, 2);
+
+    const float changedVertexConstants[4] = { 9.0f, 8.0f, 7.0f, 6.0f };
+    const float changedPixelConstants[4] = { 0.9f, 0.8f, 0.7f, 0.6f };
+    const int changedVertexIntegerConstants[4] = { 9, 8, 7, 6 };
+    const int changedPixelIntegerConstants[4] = { 5, 4, 3, 2 };
+    const BOOL changedVertexBooleanConstants[2] = { TRUE, TRUE };
+    const BOOL changedPixelBooleanConstants[2] = { FALSE, FALSE };
+
+    const LONG vsFloatCallsBeforeCache =
+        InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    device->SetVertexShaderConstantF(4, changedVertexConstants, 1);
+    device->SetVertexShaderConstantF(4, changedVertexConstants, 1);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    if (InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0) -
+        vsFloatCallsBeforeCache != 2)
+        return Fail("vertex float-constant cache did not skip exact ranges and forward changed values");
+
+    const LONG psFloatCallsBeforeCache =
+        InterlockedCompareExchange(&g_fakeSetPixelFloatConstantsCalls, 0, 0);
+    device->SetPixelShaderConstantF(7, pixelConstants, 1);
+    device->SetPixelShaderConstantF(7, pixelConstants, 1);
+    device->SetPixelShaderConstantF(7, changedPixelConstants, 1);
+    device->SetPixelShaderConstantF(7, changedPixelConstants, 1);
+    device->SetPixelShaderConstantF(7, pixelConstants, 1);
+    if (InterlockedCompareExchange(&g_fakeSetPixelFloatConstantsCalls, 0, 0) -
+        psFloatCallsBeforeCache != 2)
+        return Fail("pixel float-constant cache did not skip exact ranges and forward changed values");
+
+    const LONG vsIntegerCallsBeforeCache =
+        InterlockedCompareExchange(&g_fakeSetVertexIntegerConstantsCalls, 0, 0);
+    device->SetVertexShaderConstantI(2, vertexIntegerConstants, 1);
+    device->SetVertexShaderConstantI(2, vertexIntegerConstants, 1);
+    device->SetVertexShaderConstantI(2, changedVertexIntegerConstants, 1);
+    device->SetVertexShaderConstantI(2, changedVertexIntegerConstants, 1);
+    device->SetVertexShaderConstantI(2, vertexIntegerConstants, 1);
+    if (InterlockedCompareExchange(&g_fakeSetVertexIntegerConstantsCalls, 0, 0) -
+        vsIntegerCallsBeforeCache != 2)
+        return Fail("vertex integer-constant cache did not skip exact ranges and forward changed values");
+
+    const LONG psIntegerCallsBeforeCache =
+        InterlockedCompareExchange(&g_fakeSetPixelIntegerConstantsCalls, 0, 0);
+    device->SetPixelShaderConstantI(1, pixelIntegerConstants, 1);
+    device->SetPixelShaderConstantI(1, pixelIntegerConstants, 1);
+    device->SetPixelShaderConstantI(1, changedPixelIntegerConstants, 1);
+    device->SetPixelShaderConstantI(1, changedPixelIntegerConstants, 1);
+    device->SetPixelShaderConstantI(1, pixelIntegerConstants, 1);
+    if (InterlockedCompareExchange(&g_fakeSetPixelIntegerConstantsCalls, 0, 0) -
+        psIntegerCallsBeforeCache != 2)
+        return Fail("pixel integer-constant cache did not skip exact ranges and forward changed values");
+
+    const LONG vsBooleanCallsBeforeCache =
+        InterlockedCompareExchange(&g_fakeSetVertexBooleanConstantsCalls, 0, 0);
+    device->SetVertexShaderConstantB(4, vertexBooleanConstants, 2);
+    device->SetVertexShaderConstantB(4, vertexBooleanConstants, 2);
+    device->SetVertexShaderConstantB(4, changedVertexBooleanConstants, 2);
+    device->SetVertexShaderConstantB(4, changedVertexBooleanConstants, 2);
+    device->SetVertexShaderConstantB(4, vertexBooleanConstants, 2);
+    if (InterlockedCompareExchange(&g_fakeSetVertexBooleanConstantsCalls, 0, 0) -
+        vsBooleanCallsBeforeCache != 2)
+        return Fail("vertex boolean-constant cache did not skip exact ranges and forward changed values");
+
+    const LONG psBooleanCallsBeforeCache =
+        InterlockedCompareExchange(&g_fakeSetPixelBooleanConstantsCalls, 0, 0);
+    device->SetPixelShaderConstantB(5, pixelBooleanConstants, 2);
+    device->SetPixelShaderConstantB(5, pixelBooleanConstants, 2);
+    device->SetPixelShaderConstantB(5, changedPixelBooleanConstants, 2);
+    device->SetPixelShaderConstantB(5, changedPixelBooleanConstants, 2);
+    device->SetPixelShaderConstantB(5, pixelBooleanConstants, 2);
+    if (InterlockedCompareExchange(&g_fakeSetPixelBooleanConstantsCalls, 0, 0) -
+        psBooleanCallsBeforeCache != 2)
+        return Fail("pixel boolean-constant cache did not skip exact ranges and forward changed values");
 
     D3DVERTEXELEMENT9 declarationElements[3] = {};
     declarationElements[0].Stream = 0;
