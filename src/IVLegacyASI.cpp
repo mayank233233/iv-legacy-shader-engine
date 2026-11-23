@@ -1675,6 +1675,8 @@ namespace
             WritePrivateProfileStringW(
                 L"General", L"EnableBindingCache", L"0", g_iniPath);
             WritePrivateProfileStringW(
+                L"General", L"EnableShaderConstantCache", L"0", g_iniPath);
+            WritePrivateProfileStringW(
                 L"General", L"StateCacheReportFrames", L"120", g_iniPath);
         }
     }
@@ -2006,6 +2008,7 @@ namespace
         // trusting values across a lost-device transition.
         InvalidateRedundantStateCache(self);
         InvalidateBindingCache(self, FALSE);
+        InvalidateShaderConstantCache();
         return hr;
     }
 
@@ -2227,13 +2230,15 @@ namespace
         if (FAILED(hr))
         {
             InvalidateRedundantStateCache(self);
-            InvalidateBindingCache(self);
+            InvalidateBindingCache(self, FALSE);
+            InvalidateShaderConstantCache();
             Log("DEVICE_PRESENT_FAILED hr=0x%08lX", static_cast<unsigned long>(hr));
         }
         else
         {
             RecordRedundantStateCacheWindow(self);
             RecordBindingCacheWindow(self);
+            RecordShaderConstantCacheWindow(self);
             if (g_drawTelemetryEnabled || g_frameProfilerEnabled)
                 InterlockedIncrement(&g_presentFrameIndex);
         }
@@ -4294,6 +4299,7 @@ namespace
         // carry the preceding device's state shadow into it.
         InvalidateRedundantStateCache(device);
         InvalidateBindingCache(device);
+        InvalidateShaderConstantCache();
 
         const SIZE_T vtableBytes =
             sizeof(void*) * kD3D9DeviceInterfaceSlots;
@@ -4429,7 +4435,8 @@ namespace
                 reinterpret_cast<void*>(HookDeviceSetTextureStageState);
             hooked[kDeviceSetSamplerStateSlot] = reinterpret_cast<void*>(HookDeviceSetSamplerState);
         }
-        if (g_redundantStateCacheEnabled || g_bindingCacheEnabled)
+        if (g_redundantStateCacheEnabled || g_bindingCacheEnabled ||
+            g_shaderConstantCacheEnabled)
         {
             hooked[kDeviceCreateStateBlockSlot] = reinterpret_cast<void*>(HookDeviceCreateStateBlock);
             hooked[kDeviceBeginStateBlockSlot] = reinterpret_cast<void*>(HookDeviceBeginStateBlock);
@@ -4483,7 +4490,7 @@ namespace
             hooked[kDeviceDrawIndexedPrimitiveUPSlot] =
                 reinterpret_cast<void*>(HookDeviceDrawIndexedPrimitiveUP);
         }
-        if (g_captureShaderConstants)
+        if (g_captureShaderConstants || g_shaderConstantCacheEnabled)
         {
             hooked[kDeviceSetVertexShaderConstantFSlot] =
                 reinterpret_cast<void*>(HookDeviceSetVertexShaderConstantF);
@@ -4528,11 +4535,13 @@ namespace
         D3DPRESENT_PARAMETERS* parameters,
         IDirect3DDevice9** device)
     {
-        if (g_bindingCacheEnabled &&
+        if ((g_bindingCacheEnabled || g_shaderConstantCacheEnabled) &&
             (behaviorFlags & D3DCREATE_MULTITHREADED) != 0)
         {
-            InterlockedExchange(&g_bindingCacheEnabled, FALSE);
-            Log("BINDING_CACHE_DISABLED reason=d3dcreate_multithreaded");
+            if (InterlockedExchange(&g_bindingCacheEnabled, FALSE))
+                Log("BINDING_CACHE_DISABLED reason=d3dcreate_multithreaded");
+            if (InterlockedExchange(&g_shaderConstantCacheEnabled, FALSE))
+                Log("SHADER_CONSTANT_CACHE_DISABLED reason=d3dcreate_multithreaded");
         }
 
         Log(
@@ -4564,7 +4573,7 @@ namespace
             // A non-multithreaded D3D9 device belongs to its creation thread.
             // Seed the binding-cache owner here instead of trusting whichever
             // thread happens to issue the first setter.
-            if (g_bindingCacheEnabled)
+            if (g_bindingCacheEnabled || g_shaderConstantCacheEnabled)
                 InterlockedExchange(
                     &g_bindingCacheThreadId,
                     static_cast<LONG>(GetCurrentThreadId()));
@@ -4781,11 +4790,19 @@ namespace
             L"General", L"EnableRedundantStateCache", 0, g_iniPath) != 0;
         g_bindingCacheEnabled = GetPrivateProfileIntW(
             L"General", L"EnableBindingCache", 0, g_iniPath) != 0;
+        g_shaderConstantCacheEnabled = GetPrivateProfileIntW(
+            L"General", L"EnableShaderConstantCache", 0, g_iniPath) != 0;
         if (g_bindingCacheEnabled)
         {
             InvalidateBindingCache(NULL);
             Log("BINDING_CACHE_ENABLED groups=texture,vertex_stream,index_buffer,vertex_shader,pixel_shader,vertex_format "
                 "thread_policy=single_device_single_thread state_block_policy=disable default=off");
+        }
+        if (g_shaderConstantCacheEnabled)
+        {
+            InvalidateShaderConstantCache();
+            Log("SHADER_CONSTANT_CACHE_ENABLED groups=vs_float,ps_float,vs_int,ps_int,vs_bool,ps_bool "
+                "range_compare=bitwise state_block_policy=disable default=off");
         }
         g_stateCacheReportFrames = GetPrivateProfileIntW(
             L"General", L"StateCacheReportFrames", 120, g_iniPath);
@@ -4919,6 +4936,11 @@ namespace
             {
                 g_bindingCacheEnabled = FALSE;
                 Log("BINDING_CACHE_DISABLED reason=strict_version_gate_disabled");
+            }
+            if (g_shaderConstantCacheEnabled)
+            {
+                g_shaderConstantCacheEnabled = FALSE;
+                Log("SHADER_CONSTANT_CACHE_DISABLED reason=strict_version_gate_disabled");
             }
             if (g_redundantStateCacheEnabled)
             {
