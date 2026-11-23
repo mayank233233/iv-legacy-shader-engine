@@ -3468,16 +3468,50 @@ namespace
         UINT stream,
         UINT divider)
     {
-        const HRESULT hr = g_realDeviceSetStreamSourceFreq
-            ? g_realDeviceSetStreamSourceFreq(self, stream, divider)
-            : D3DERR_INVALIDCALL;
-        if (SUCCEEDED(hr) && stream < 16)
-            InterlockedExchange(&g_streamFrequencies[stream], static_cast<LONG>(divider));
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (stream < 16 && BindingCacheThreadAllowed(self))
+        {
+            const BOOL known = InterlockedCompareExchange(
+                &g_streamFrequencyKnown[stream], 0, 0) != 0;
+            const UINT current = static_cast<UINT>(InterlockedCompareExchange(
+                &g_streamFrequencies[stream], 0, 0));
+            if (known && current == divider)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[6]);
+            }
+            else
+            {
+                hr = g_realDeviceSetStreamSourceFreq
+                    ? g_realDeviceSetStreamSourceFreq(self, stream, divider)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchange(&g_streamFrequencies[stream], static_cast<LONG>(divider));
+                    InterlockedExchange(&g_streamFrequencyKnown[stream], 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[6]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_streamFrequencyKnown[stream], 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetStreamSourceFreq
+                ? g_realDeviceSetStreamSourceFreq(self, stream, divider)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr) && stream < 16)
+                InterlockedExchange(&g_streamFrequencies[stream], static_cast<LONG>(divider));
+        }
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
-            Log("SET_STREAM_SOURCE_FREQ stream=%u divider=%u hr=0x%08lX",
-                stream, divider, static_cast<unsigned long>(hr));
+            Log("SET_STREAM_SOURCE_FREQ stream=%u divider=%u hr=0x%08lX cached=%u",
+                stream, divider, static_cast<unsigned long>(hr), skipped ? 1 : 0);
         }
         return hr;
     }
@@ -4454,6 +4488,8 @@ namespace
         {
             hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
             hooked[kDeviceSetStreamSourceSlot] = reinterpret_cast<void*>(HookDeviceSetStreamSource);
+            hooked[kDeviceSetStreamSourceFreqSlot] =
+                reinterpret_cast<void*>(HookDeviceSetStreamSourceFreq);
             hooked[kDeviceSetIndicesSlot] = reinterpret_cast<void*>(HookDeviceSetIndices);
             hooked[kDeviceSetVertexShaderSlot] = reinterpret_cast<void*>(HookDeviceSetVertexShader);
             hooked[kDeviceSetPixelShaderSlot] = reinterpret_cast<void*>(HookDeviceSetPixelShader);
