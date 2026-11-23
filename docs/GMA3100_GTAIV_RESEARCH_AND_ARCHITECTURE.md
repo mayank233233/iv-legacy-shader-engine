@@ -209,7 +209,8 @@ It reports viewport-capture completeness, dimensions, viewport/RT0 extent differ
 
 ### Verified status
 
-- The latest integrated Windows x86 workflow, [run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585), passed both `build` and `vertex-audit` on code commit `9765a43665565e4c48c2c69f79603c62072a33a6`. Subsequent commits at the current branch head update documentation.
+- Integrated Windows x86 workflow [run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585) passed both `build` and `vertex-audit` on code commit `9765a43665565e4c48c2c69f79603c62072a33a6`.
+- Follow-up workflow [run #45145510926](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45145510926), triggered by the updated example INI template at commit `e3d44902de286f72dc32077fe5f9ae8ecfffa43e`, also passed both jobs. Subsequent commits at the current branch head update documentation only.
 - Synthetic tests cover duplicate and changed bindings, reset/state-block fallbacks, viewport capture and cache counters, plus all six shader-constant register categories.
 - No physical GMA 3100 driver test, original-game play session, visual-equivalence comparison, real frame-time benchmark or 30 FPS result has been recorded.
 
