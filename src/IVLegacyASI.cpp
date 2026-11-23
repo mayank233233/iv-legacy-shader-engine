@@ -108,8 +108,10 @@ namespace
     volatile LONG g_bindingCacheThreadId = 0;
     PVOID volatile g_bindingCacheDevice = NULL;
     volatile LONG g_bindingCacheWindowFrameCount = 0;
-    volatile LONG g_bindingCacheForwarded[7] = {};
-    volatile LONG g_bindingCacheSkipped[7] = {};
+    volatile LONG g_bindingCacheForwarded[8] = {};
+    volatile LONG g_bindingCacheSkipped[8] = {};
+    D3DVIEWPORT9 g_cachedViewport = {};
+    volatile LONG g_viewportBindingKnown = 0;
     float g_cachedShaderFloatConstants[2][256][4] = {};
     volatile LONG g_shaderFloatConstantKnown[2][256] = {};
     int g_cachedShaderIntegerConstants[2][16][4] = {};
@@ -459,6 +461,7 @@ namespace
             InterlockedExchange(&g_streamFrequencyKnown[stream], 0);
         }
         InterlockedExchange(&g_indicesBindingKnown, 0);
+        InterlockedExchange(&g_viewportBindingKnown, 0);
         InterlockedExchange(&g_vertexShaderBindingKnown, 0);
         InterlockedExchange(&g_pixelShaderBindingKnown, 0);
         InterlockedExchange(&g_vertexFormatBindingKnown, 0);
@@ -466,7 +469,7 @@ namespace
         if (resetThreadOwner)
             InterlockedExchange(&g_bindingCacheThreadId, 0);
         InterlockedExchange(&g_bindingCacheWindowFrameCount, 0);
-        for (LONG index = 0; index < 7; ++index)
+        for (LONG index = 0; index < 8; ++index)
         {
             InterlockedExchange(&g_bindingCacheForwarded[index], 0);
             InterlockedExchange(&g_bindingCacheSkipped[index], 0);
@@ -2264,18 +2267,22 @@ namespace
         const LONG vertexFormatSkipped = InterlockedExchange(&g_bindingCacheSkipped[5], 0);
         const LONG streamFrequencyForwarded = InterlockedExchange(&g_bindingCacheForwarded[6], 0);
         const LONG streamFrequencySkipped = InterlockedExchange(&g_bindingCacheSkipped[6], 0);
+        const LONG viewportForwarded = InterlockedExchange(&g_bindingCacheForwarded[7], 0);
+        const LONG viewportSkipped = InterlockedExchange(&g_bindingCacheSkipped[7], 0);
         Log(
             "D3D9_BINDING_CACHE_WINDOW frames=%ld texture_forwarded=%ld texture_skipped=%ld "
             "stream_forwarded=%ld stream_skipped=%ld index_forwarded=%ld index_skipped=%ld "
             "vs_forwarded=%ld vs_skipped=%ld ps_forwarded=%ld ps_skipped=%ld "
             "vertex_format_forwarded=%ld vertex_format_skipped=%ld "
-            "stream_freq_forwarded=%ld stream_freq_skipped=%ld",
+            "stream_freq_forwarded=%ld stream_freq_skipped=%ld "
+            "viewport_forwarded=%ld viewport_skipped=%ld",
             frames, textureForwarded, textureSkipped,
             streamForwarded, streamSkipped, indexForwarded, indexSkipped,
             vertexShaderForwarded, vertexShaderSkipped,
             pixelShaderForwarded, pixelShaderSkipped,
             vertexFormatForwarded, vertexFormatSkipped,
-            streamFrequencyForwarded, streamFrequencySkipped);
+            streamFrequencyForwarded, streamFrequencySkipped,
+            viewportForwarded, viewportSkipped);
     }
 
     HRESULT WINAPI HookDevicePresent(
@@ -2436,27 +2443,96 @@ namespace
         IDirect3DDevice9* self,
         const D3DVIEWPORT9* viewport)
     {
-        const HRESULT hr = g_realDeviceSetViewport
-            ? g_realDeviceSetViewport(self, viewport)
-            : D3DERR_INVALIDCALL;
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (viewport && BindingCacheThreadAllowed(self))
+        {
+            BOOL readable = TRUE;
+            BOOL identical = FALSE;
+            __try
+            {
+                identical =
+                    InterlockedCompareExchange(&g_viewportBindingKnown, 0, 0) != 0 &&
+                    memcmp(&g_cachedViewport, viewport, sizeof(D3DVIEWPORT9)) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                readable = FALSE;
+            }
+
+            if (!readable)
+            {
+                InterlockedExchange(&g_viewportBindingKnown, 0);
+                hr = g_realDeviceSetViewport
+                    ? g_realDeviceSetViewport(self, viewport)
+                    : D3DERR_INVALIDCALL;
+            }
+            else if (identical)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[7]);
+            }
+            else
+            {
+                hr = g_realDeviceSetViewport
+                    ? g_realDeviceSetViewport(self, viewport)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    BOOL copied = TRUE;
+                    __try
+                    {
+                        CopyMemory(&g_cachedViewport, viewport, sizeof(D3DVIEWPORT9));
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        copied = FALSE;
+                    }
+                    if (copied)
+                    {
+                        InterlockedExchange(&g_viewportBindingKnown, 1);
+                        InterlockedIncrement(&g_bindingCacheForwarded[7]);
+                    }
+                    else
+                    {
+                        InterlockedExchange(&g_viewportBindingKnown, 0);
+                    }
+                }
+                else
+                {
+                    InterlockedExchange(&g_viewportBindingKnown, 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetViewport
+                ? g_realDeviceSetViewport(self, viewport)
+                : D3DERR_INVALIDCALL;
+            if (g_bindingCacheEnabled && !viewport)
+                InterlockedExchange(&g_viewportBindingKnown, 0);
+        }
+
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_viewportLogCount) <= 4096)
         {
             if (viewport)
             {
                 Log(
-                    "SET_VIEWPORT x=%lu y=%lu width=%lu height=%lu min_z=%.6f max_z=%.6f hr=0x%08lX",
+                    "SET_VIEWPORT x=%lu y=%lu width=%lu height=%lu min_z=%.6f max_z=%.6f hr=0x%08lX cached=%u",
                     static_cast<unsigned long>(viewport->X),
                     static_cast<unsigned long>(viewport->Y),
                     static_cast<unsigned long>(viewport->Width),
                     static_cast<unsigned long>(viewport->Height),
                     static_cast<double>(viewport->MinZ),
                     static_cast<double>(viewport->MaxZ),
-                    static_cast<unsigned long>(hr));
+                    static_cast<unsigned long>(hr),
+                    skipped ? 1 : 0);
             }
             else
             {
-                Log("SET_VIEWPORT viewport=NULL hr=0x%08lX",
+                Log("SET_VIEWPORT viewport=NULL hr=0x%08lX cached=0",
                     static_cast<unsigned long>(hr));
             }
         }
@@ -2477,6 +2553,9 @@ namespace
         const HRESULT hr = g_realDeviceSetRenderTarget
             ? g_realDeviceSetRenderTarget(self, index, surface)
             : D3DERR_INVALIDCALL;
+
+        if (SUCCEEDED(hr) && index == 0 && g_bindingCacheEnabled)
+            InterlockedExchange(&g_viewportBindingKnown, 0);
 
         if (SUCCEEDED(hr) && g_drawTelemetryEnabled &&
             index < _countof(g_renderTargetSnapshots))
@@ -4551,6 +4630,7 @@ namespace
         }
         if (g_bindingCacheEnabled && !g_drawTelemetryEnabled)
         {
+            hooked[kDeviceSetViewportSlot] = reinterpret_cast<void*>(HookDeviceSetViewport);
             hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
             hooked[kDeviceSetStreamSourceSlot] = reinterpret_cast<void*>(HookDeviceSetStreamSource);
             hooked[kDeviceSetStreamSourceFreqSlot] =
