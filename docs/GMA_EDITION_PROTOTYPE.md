@@ -109,5 +109,6 @@ Use the same executable, save, route, camera, weather, time and game settings. W
 
 - Latest integrated Windows x86 workflow: [run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585), on code commit `9765a43665565e4c48c2c69f79603c62072a33a6`; both `build` and `vertex-audit` jobs passed. The current branch head adds subsequent documentation-only commits.
 - The passing workflow validates the tested x86 build, synthetic D3D9 hook/runtime tests, source checks and offline audit self-tests. It does not run GTA IV or the physical GMA 3100.
+- A later CI run, [#45145510926](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45145510926), was triggered by the example INI template update (`e3d44902de286f72dc32077fe5f9ae8ecfffa43e`). Its `vertex-audit` job passed; the Windows `build` job was still at legacy DirectX SDK installation at the latest status check. It is not counted as a passing full build.
 - No real GTA IV 1.0.0.0 gameplay capture, image-equivalence test, physical driver validation, in-game frame-time benchmark or genuine 30 FPS result has been established.
 - The long-term target remains 30 genuinely rendered FPS, not a promise or result.
