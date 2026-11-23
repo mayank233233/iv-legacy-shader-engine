@@ -22,7 +22,8 @@ Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86
 | `tools/analyze_d3d9_shaders.py` | Offline D3D9 SM2/SM3 token-stream inventory for compiled or captured shaders |
 | `tools/audit_sm3_to_sm2.py` | Conservative offline audit/lowering candidate generator for a restricted `ps_3_0` pixel-shader subset; unsupported shaders are rejected, not guessed |
 | `tools/audit_vs3_to_vs2.py` | Conservative `vs_3_0` to `vs_2_0` auditor and restricted bytecode emitter; rejects unsupported instructions, packed output semantics and unsafe remaps |
-| `tools/audit_shader_pairs.py` | Draw-level VS3/PS3 pairing audit: semantic/component linkage, vertex declaration/FVF layout, captured texture bindings and render-target caps |\n| `tools/lower_shader_pairs.py` | Emits conservative paired VS2/PS2 candidates from audited draw captures; runtime mappings require explicit VS-hash:PS-hash approval |
+| `tools/audit_shader_pairs.py` | Draw-level VS3/PS3 pairing audit: semantic/component linkage, vertex declaration/FVF layout, captured texture bindings and render-target caps |
+| `tools/validate_gma_capture.py` | Read-only preflight: rejects synthetic logs and verifies the expected GTA IV/GMA identity, successful D3D9 setup, draws and captured VS/PS bytecode correlation |\n| `tools/lower_shader_pairs.py` | Emits conservative paired VS2/PS2 candidates from audited draw captures; runtime mappings require explicit VS-hash:PS-hash approval |
 | `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls, render/depth descriptors and per-draw viewport snapshots in `IVLegacy.log` |
 | `tools/audit_gma_edition_render_path.py` | Read-only RT0/depth/viewport audit and conservative fixed-function candidate report |
 | `tools/analyze_state_cache_benchmark.py` | Counts scalar render/texture-stage/sampler state calls forwarded or skipped |
@@ -96,6 +97,22 @@ See [GMA Edition prototype status](docs/GMA_EDITION_PROTOTYPE.md), [optimization
 - Windows x86 CI run #172 checks both buffer descriptors are present and correctly associated with the first draw. It also retains the declaration/FVF, stream, material-state and shader/constant correlation checks.
 
 These descriptors are synthetic test allocations. They do not describe GTA IV's actual vertex/index buffers.
+
+## Real GTA IV capture preflight
+
+After one diagnostic GTA IV run, validate the three output folders before running pair lowering:
+
+```bat
+py -3 tools\validate_gma_capture.py IVLegacy.log IVLegacyCaptures --constants IVLegacyConstants --json gma_capture_validation.json
+```
+
+Only `ready_for_pair_review` means the log is a non-synthetic GTA IV 1.0.0.0 session on the expected Intel PCI ID (8086:29C2), with successful D3D9 setup/draws and captured VS+PS bytecode linked to at least one successful draw. Any other status prints the blockers. This is a capture-quality gate, not a shader approval or runtime compatibility claim; it never writes fallback mappings. A manual pair audit and visual/driver validation are still required.
+
+Run its regression checks with:
+
+```sh
+python tools/validate_gma_capture.py --self-test
+```
 
 ## Draw-level paired shader compatibility audit (development branch)
 
