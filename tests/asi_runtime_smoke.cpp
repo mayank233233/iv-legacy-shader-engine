@@ -49,6 +49,7 @@ namespace
     volatile LONG g_fakeSetPixelBooleanConstantsCalls = 0;
     volatile LONG g_fakeSetTextureCalls = 0;
     volatile LONG g_fakeSetStreamSourceCalls = 0;
+    volatile LONG g_fakeSetStreamSourceFreqCalls = 0;
     volatile LONG g_fakeSetIndicesCalls = 0;
     volatile LONG g_fakeSetVertexShaderCalls = 0;
     volatile LONG g_fakeSetPixelShaderCalls = 0;
@@ -549,6 +550,7 @@ namespace
 
     HRESULT WINAPI FakeDeviceSetStreamSourceFreq(IDirect3DDevice9*, UINT, UINT)
     {
+        InterlockedIncrement(&g_fakeSetStreamSourceFreqCalls);
         return D3D_OK;
     }
 
@@ -1422,6 +1424,16 @@ int main()
         streamCallsBeforeCacheTest != 2)
         return Fail("vertex-stream cache did not compare buffer, offset and stride correctly");
     const HRESULT setStreamSourceFreqHr = device->SetStreamSourceFreq(0, 1);
+    const LONG streamFrequencyCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0);
+    device->SetStreamSourceFreq(0, 1);
+    device->SetStreamSourceFreq(0, 1);
+    device->SetStreamSourceFreq(0, 2);
+    device->SetStreamSourceFreq(0, 2);
+    device->SetStreamSourceFreq(0, 1);
+    if (InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0) -
+        streamFrequencyCallsBeforeCacheTest != 2)
+        return Fail("stream-frequency cache did not suppress identical divider state and forward changes");
     const HRESULT setIndicesHr = device->SetIndices(fakeIndexBuffer);
     const LONG indicesCallsBeforeCacheTest =
         InterlockedCompareExchange(&g_fakeSetIndicesCalls, 0, 0);
@@ -1637,6 +1649,7 @@ int main()
         !HasText("D3D9_BINDING_CACHE_WINDOW") ||
         !HasText("texture_forwarded=3 texture_skipped=3") ||
         !HasText("stream_forwarded=3 stream_skipped=3") ||
+        !HasText("stream_freq_forwarded=3 stream_freq_skipped=3") ||
         !HasText("index_forwarded=3 index_skipped=3") ||
         !HasText("vs_forwarded=3 vs_skipped=3") ||
         !HasText("ps_forwarded=3 ps_skipped=3") ||
