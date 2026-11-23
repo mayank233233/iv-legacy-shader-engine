@@ -401,7 +401,9 @@ namespace
         IDirect3DDevice9*,
         const D3DVIEWPORT9* viewport)
     {
-        if (!viewport || viewport->Width != 64 || viewport->Height != 48)
+        if (!viewport ||
+            (viewport->Width != 64 && viewport->Width != 63) ||
+            viewport->Height != 48)
             return D3DERR_INVALIDCALL;
         InterlockedIncrement(&g_fakeSetViewportCalls);
         return D3D_OK;
@@ -1468,6 +1470,20 @@ int main()
     if (FAILED(profilerPresentHr))
         return Fail("Frame-profiler verification Present call failed");
 
+    // RT0 changes reset the viewport, so the cache must forward the first
+    // explicit viewport after that transition and suppress only its duplicate.
+    D3DVIEWPORT9 changedViewport = viewport;
+    changedViewport.Width = 63;
+    const LONG viewportCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0);
+    device->SetViewport(&viewport);
+    device->SetViewport(&viewport);
+    device->SetViewport(&changedViewport);
+    device->SetViewport(&changedViewport);
+    if (InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0) -
+        viewportCallsBeforeCacheTest != 2)
+        return Fail("viewport cache did not suppress exact duplicates or forward changed dimensions");
+
     // A non-readable constant range must be forwarded and invalidate its
     // previous shadow. The next valid upload of that range must not be skipped.
     const LONG floatCallsBeforeInvalidRange =
@@ -1491,6 +1507,14 @@ int main()
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0) -
             renderCallsBeforeReset != 1)
         return Fail("successful Reset did not invalidate cached render-state values");
+    const LONG viewportCallsBeforeReset =
+        InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0);
+    device->SetViewport(&changedViewport);
+    device->SetViewport(&changedViewport);
+    if (InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0) -
+        viewportCallsBeforeReset != 1)
+        return Fail("Reset did not invalidate viewport cache state");
+
     const LONG textureCallsBeforeBindingReset =
         InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0);
     device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
