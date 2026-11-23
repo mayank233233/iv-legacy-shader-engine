@@ -20,9 +20,9 @@ KINDS = (
     "ps_bool",
 )
 WINDOW_RE = re.compile(
-    r"D3D9_SHADER_CONSTANT_CACHE_WINDOW\\s+frames=(\\d+)\\s+"
-    + r"\\s+".join(
-        rf"{kind}_forwarded=(\\d+)\\s+{kind}_skipped=(\\d+)"
+    r"D3D9_SHADER_CONSTANT_CACHE_WINDOW\s+frames=(\d+)\s+"
+    + r"\s+".join(
+        rf"{kind}_forwarded=(\d+)\s+{kind}_skipped=(\d+)"
         for kind in KINDS
     )
 )
@@ -108,7 +108,7 @@ def self_test() -> None:
             fields.extend((f"{kind}_forwarded=3", f"{kind}_skipped=3"))
         path.write_text(
             "D3D9_SHADER_CONSTANT_CACHE_WINDOW frames=120 "
-            + " ".join(fields) + "\\n",
+            + " ".join(fields) + "\n",
             encoding="utf-8",
         )
         report = summarize(path)
@@ -143,7 +143,7 @@ def main() -> int:
         report["comparison"] = compare(report, summarize(args.compare))
     rendered = json.dumps(report, indent=2)
     if args.json:
-        args.json.write_text(rendered + "\\n", encoding="utf-8")
+        args.json.write_text(rendered + "\n", encoding="utf-8")
     print(rendered)
     return 0
 
