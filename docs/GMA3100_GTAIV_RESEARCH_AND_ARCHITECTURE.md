@@ -3,7 +3,7 @@
 **Target game:** Grand Theft Auto IV PC 1.0.0.0  
 **Target machine:** ASUS P5KPL-AM IN; Intel GMA 3100 (PCI VEN_8086 / DEV_29C2); Pentium Dual-Core E5200 2.50 GHz; 3 GB DDR2; Windows 8.1 32-bit; 1440×900  
 **Objective:** an installable, game-loaded compatibility/optimization mod, with a long-term 30 FPS target.  
-**Current baseline:** Prototype 0.5.8-alpha: a standalone SM2 D3D9 probe, an original-version-gated x86 ASI telemetry module, offline PS3/VS3-to-SM2 downlevelers, explicit hash-mapped PS2/VS2 shader fallback hooks, material/draw telemetry and an experimental scalar state cache. It is still not a verified playable GTA IV mod.
+**Current baseline:** Prototype 0.5.8-alpha codebase plus the GMA Edition development work on `feature/gma-edition-renderer-prototype`: render/depth/viewport capture, per-draw viewport auditing, a read-only render-path report, and three opt-in D3D9 optimisation caches (scalar state, resource/geometry bindings, and shader constants). The offline shader-pair tools and explicit hash-mapped VS2/PS2 fallback hooks remain separate. This is still not a verified playable GTA IV mod.
 
 ## 1. Executive finding
 
@@ -97,18 +97,20 @@ Implemented in the current source:
 
 ZolikaPatch is the strongest old-version compatibility reference found: its author lists support for 1.0.0.0, 1.0.4.0, 1.0.7.0 and 1.0.8.0. Its fixes include loading, VRAM reporting, high-FPS cutscene/bike issues, crash fixes and graphics/gameplay fixes. The independent [Gillian Guide ZolikaPatch reconstruction](https://github.com/gillian-guide/ZolikaPatch) is a useful source-level study of per-build hooks, signatures, exact x86 register/stack contracts and feature toggles; it is not the original author's source and should not be copied blindly.
 
-### Layer B — Direct3D 9 compatibility instrumentation
+### Layer B — Direct3D 9 instrumentation and guarded optimisation hooks
 
-**A first hook layer is now implemented.** It is deliberately observational; it does not spoof SM3 caps or substitute shaders.
+**A substantial x86 hook layer is implemented, but it is not a full D3D9 proxy or a complete renderer replacement.** It does not spoof SM3 caps. Its behavior is split between read-only telemetry, optional hash-mapped shader fallbacks, and independently disabled-by-default cache experiments.
 
-- The current implementation patches the main executable's import-table entry for a direct `d3d9.dll!Direct3DCreate9` import. It logs a clear failure if that import is not present or the original thunk is unavailable. It does not yet cover every GetProcAddress, delay-load, proxy-DLL or secondary-module loading path.
+- The Direct3DCreate9 interception still patches the main executable's import-table entry for a direct `d3d9.dll!Direct3DCreate9` import. It logs a failure if that import is absent or the original thunk is unavailable. It does not cover every GetProcAddress, delay-load, proxy-DLL or secondary-module loading path.
 - After Direct3DCreate9 returns, the plugin clones that object's vtable and observes IDirect3D9 methods: GetAdapterIdentifier, CheckDeviceFormat, CheckDepthStencilMatch, GetDeviceCaps and CreateDevice.
-- After CreateDevice succeeds, it clones the returned device object's vtable and observes GetDeviceCaps, Reset, failed Present calls, CreateRenderTarget, CreateDepthStencilSurface, SetRenderTarget, SetDepthStencilSurface, CreateVertexShader and CreatePixelShader.
-- The hooks call the original COM methods and log their HRESULTs. The adapter logger records PCI VendorId, DeviceId, SubSysId, Revision, driver version and description. Capability logging records VS/PS versions and available SM2 cap fields. Surface logging records size, format, multisample and usage where exposed.
-- Shader creation currently logs only the bytecode version token/profile and HRESULT. It does not yet dump, hash, translate or replace bytecode.
-- Current CI has compiled and linked the Win32/x86 ASI. A synthetic GTAIV.exe host and D3D9 hook smoke test have been added to CI; their latest result is tracked in STATUS.md. This validates a controlled test host, not GTA IV's actual import table or physical graphics hardware.
+- After CreateDevice succeeds, the plugin clones the device vtable. The current hook set includes adapter/device caps, Reset and Present; render-target/depth creation and binding; SetViewport; texture and buffer creation/binding; vertex declarations and FVF; vertex/pixel shader creation and binding; sampler/render/texture-stage state; float/integer/boolean shader constants; and all four D3D9 draw entry points.
+- Adapter records include PCI VendorId, DeviceId, SubSysId, Revision, driver version and description. Capability records include VS/PS model and SM2 limits, render-target and texture limits, HW-T&L advertisement and vertex-processing capabilities. Resource records include dimensions, formats, usage, pool and multisample settings where exposed.
+- With `CaptureDrawTelemetry=1`, each bounded draw record includes active render-target/depth descriptors, shader objects, vertex input/buffer bindings, state fingerprints and a viewport snapshot. The ASI refreshes the viewport with D3D9 GetViewport immediately before each captured draw, in addition to observing successful SetViewport calls. This is specifically intended to catch state-block viewport restores.
+- Shader bytecode capture is separately opt-in and content-hashed. The existing shader fallback path can substitute only explicitly mapped, manually reviewed VS2/PS2 bytecode for matching VS3/PS3 source hashes; if fallback creation fails, the original bytecode is retried. It is not a general runtime SM3 translator.
+- Optional runtime caches are separately configured and default OFF: `EnableRedundantStateCache`, `EnableBindingCache` and `EnableShaderConstantCache`. They suppress only tracked consecutive duplicate setter state; they do not reorder draw calls or replace the renderer. Their lifecycle guards and limitations are detailed in the GMA Edition section below.
+- The Windows x86 workflow builds the ASI and exercises synthetic fake-D3D9 devices. A successful CI run validates the tested hooks and safeguards, not the original game's import path, physical GMA driver behavior, image correctness or performance.
 
-The current hook table is a first instrumentation scaffold, not a full D3D9 proxy. It must be validated against the actual GTA IV 1.0.0.0 binary before we rely on the import-table assumption. The wrapper must continue to preserve COM reference counts, device identity, call ordering, error propagation and lost-device/reset behavior.
+The current interception remains a first-generation hook scaffold, not a complete D3D9 proxy. The main-executable import-table assumption must still be validated against the actual GTA IV 1.0.0.0 binary. The wrapper must continue to preserve COM identity, reference-count behavior, call ordering, HRESULT propagation and lost-device/reset semantics.
 
 ### Layer C — Shader translator and fallback library
 
@@ -169,13 +171,51 @@ Do not bundle other projects' binaries or source files without checking licences
 The isolated branch `feature/redundant-d3d9-state-cache` adds the first runtime optimization experiment. It adapts the state-shadowing lesson from ImmediatelyFast/Sodium to the native D3D9 path without replacing GTA IV's renderer.
 
 - It covers only `SetRenderState`, `SetTextureStageState` and `SetSamplerState`. A repeated call is skipped only when the exact state index and value were previously accepted by the original D3D9 method on the same device.
-- The feature is opt-in and defaults to off: `[General]`, `EnableRedundantStateCache=1`. `StateCacheReportFrames` selects a 1–600 successful-Present reporting interval (default 120).
-- State shadows are invalidated on successful device Reset, failed Present and device creation/hook changes.
-- D3D9 state blocks can apply state without passing through these setters. The plugin therefore hooks `CreateStateBlock` (slot 58), `BeginStateBlock` (59) and `EndStateBlock` (60), and disables the cache permanently for that process as soon as any is used. It does not attempt to intercept every `IDirect3DStateBlock9` method.
+- The feature is opt-in and defaults to off: `[General]`, `EnableRedundantStateCache=0`. `StateCacheReportFrames` selects a 1–600 successful-Present reporting interval (default 120).
+- State shadows are invalidated on every Reset attempt, failed Present and device creation/hook changes.
+- D3D9 state blocks can apply state without passing through these setters. The plugin therefore hooks `CreateStateBlock` (slot 59), `BeginStateBlock` (slot 60) and `EndStateBlock` (slot 61); slot 58 is `GetRenderState`. The scalar cache is disabled permanently for that process as soon as any state-block API is used. It does not attempt to intercept every `IDirect3DStateBlock9` method.
 - The serialized cache lock protects check/call/update ordering. This may itself cost CPU time or contend if callers use the device concurrently; the optimization is not assumed to be faster until measured. The cache also records the first thread that uses a tracked setter or Present and permanently disables itself if another thread is observed, rather than attempting to shadow cross-thread device state.
 - A failed Present invalidates the shadow, but this is not a formal proof for every lost-device or proxy-driver edge case. Keep the option disabled outside controlled tests until the actual game/driver is validated.
 
 Successful Presents emit `D3D9_STATE_CACHE_WINDOW` with forwarded/skipped counts for each setter family. This proves only that the wrapper suppressed calls in the synthetic test. It does not measure GPU time, prove a GTA IV performance gain or establish 30 FPS on GMA 3100. Compare baseline and enabled builds on the same saved route and report average frame time, 1% lows, API-call counts and stability before retaining the optimization.
+
+## GMA Edition branch: render-path capture and cache experiments — 2026-11-23
+
+The isolated development branch `feature/gma-edition-renderer-prototype` extends the original scalar cache with additional D3D9 submission caches and viewport capture. These features are intentionally separate from shader downleveling and do not yet replace any GTA IV rendering pass.
+
+### Current optional caches
+
+| INI option | State covered | Suppression rule | Safety behavior |
+|---|---|---|---|
+| `EnableRedundantStateCache=0` | Render state, texture-stage state and sampler state | Exact state index/value already accepted on the same device | Serialized lock; disables on state-block use or an unexpected second device thread; invalidates after Reset/failed Present |
+| `EnableBindingCache=0` | Texture, stream source (buffer/offset/stride), stream frequency, index buffer, VS, PS, vertex declaration/FVF and viewport | Exact previously accepted object/state tuple | Shared single-device/single-thread owner; disabled on state-block APIs, D3DCREATE_MULTITHREADED, non-strict executable mode or device/thread conflict; Reset/failed Present invalidate shadows |
+| `EnableShaderConstantCache=0` | VS/PS float, integer and boolean constant register ranges | Byte-identical complete register range | 256 float registers and 16 integer/boolean registers per stage; changed/untracked ranges are forwarded; invalid/unreadable ranges invalidate the affected shadow; disabled by the shared state-block/thread/device/version guards |
+
+The binding and shader-constant caches share a device pointer and thread owner. The device must be created without `D3DCREATE_MULTITHREADED`; the runtime caches are also disabled if strict GTA IV 1.0.0.0 mode is turned off. `CreateStateBlock`, `BeginStateBlock` or `EndStateBlock` disable the caches because state-block recording/application can mutate state without passing through the tracked setter calls. Reset attempts and failed Presents clear the shadow knowledge but do not permanently disable the binding or constant caches.
+
+All cache switches are default OFF. They are not approved as faster simply because they skip calls: compare the cache-off and cache-on logs on the same game route and measure frame-time distributions. The log analyzers report avoided API submissions only, not FPS or GPU time. On the E5200, pointer comparisons, register-range comparisons, thread checks and bookkeeping could cost more than the calls they suppress.
+
+### Viewport and render-target capture
+
+When `CaptureDrawTelemetry=1`, the ASI records active render-target slots, the depth-stencil surface and the viewport alongside each captured draw. Successful SetViewport calls update the viewport snapshot; immediately before each captured draw, GetViewport refreshes it so viewport state restored through a state block is represented even if no SetViewport callback occurred.
+
+Run the read-only audit:
+
+```sh
+python tools/audit_gma_edition_render_path.py IVLegacy.log --width 320 --height 240 --json gma_render_path.json
+```
+
+It reports viewport-capture completeness, dimensions, viewport/RT0 extent differences, RT0/depth dimension pairs and fixed-function candidates. Extent differences can be intentional cropping. The audit does not identify which target is the main scene, prove the correct upscale insertion point, or test StretchRect support. Because it queries GetViewport and writes detailed records per captured draw, draw telemetry must remain OFF during clean performance benchmarking.
+
+### Verified status
+
+- The latest integrated Windows x86 workflow, [run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585), passed both `build` and `vertex-audit` on code commit `9765a43665565e4c48c2c69f79603c62072a33a6`. Subsequent commits at the current branch head update documentation.
+- Synthetic tests cover duplicate and changed bindings, reset/state-block fallbacks, viewport capture and cache counters, plus all six shader-constant register categories.
+- No physical GMA 3100 driver test, original-game play session, visual-equivalence comparison, real frame-time benchmark or 30 FPS result has been recorded.
+
+### Still pending
+
+Low-resolution render-target redirection/upscaling, live fixed-function draw replacement, general SM3-to-SM2 translation, GMA-specific mesh batching/culling, AI/population changes, allocator replacement and streaming modifications are not implemented by these cache experiments. They remain separate engineering tasks; no render pass is currently removed or redirected by the GMA Edition prototype.
 
 ## 6. CPU, memory, streaming and renderer optimization plan
 
