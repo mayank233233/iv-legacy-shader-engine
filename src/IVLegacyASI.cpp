@@ -101,11 +101,21 @@ namespace
     volatile LONG g_bufferCreateLogCount = 0;
     volatile LONG g_redundantStateCacheEnabled = FALSE;
     volatile LONG g_bindingCacheEnabled = FALSE;
+    volatile LONG g_shaderConstantCacheEnabled = FALSE;
+    volatile LONG g_shaderConstantCacheWindowFrameCount = 0;
+    volatile LONG g_shaderConstantCacheForwarded[6] = {};
+    volatile LONG g_shaderConstantCacheSkipped[6] = {};
     volatile LONG g_bindingCacheThreadId = 0;
     PVOID volatile g_bindingCacheDevice = NULL;
     volatile LONG g_bindingCacheWindowFrameCount = 0;
     volatile LONG g_bindingCacheForwarded[6] = {};
     volatile LONG g_bindingCacheSkipped[6] = {};
+    float g_cachedShaderFloatConstants[2][256][4] = {};
+    volatile LONG g_shaderFloatConstantKnown[2][256] = {};
+    int g_cachedShaderIntegerConstants[2][16][4] = {};
+    volatile LONG g_shaderIntegerConstantKnown[2][16] = {};
+    BOOL g_cachedShaderBooleanConstants[2][16] = {};
+    volatile LONG g_shaderBooleanConstantKnown[2][16] = {};
     DWORD g_stateCacheReportFrames = 120;
     volatile LONG g_stateCacheWindowFrameCount = 0;
     volatile LONG g_stateCacheLock = 0;
@@ -418,6 +428,26 @@ namespace
         ReleaseStateCacheLock();
     }
 
+    void InvalidateShaderConstantCache()
+    {
+        for (DWORD stage = 0; stage < 2; ++stage)
+        {
+            for (DWORD reg = 0; reg < 256; ++reg)
+                InterlockedExchange(&g_shaderFloatConstantKnown[stage][reg], 0);
+            for (DWORD reg = 0; reg < 16; ++reg)
+            {
+                InterlockedExchange(&g_shaderIntegerConstantKnown[stage][reg], 0);
+                InterlockedExchange(&g_shaderBooleanConstantKnown[stage][reg], 0);
+            }
+        }
+        InterlockedExchange(&g_shaderConstantCacheWindowFrameCount, 0);
+        for (LONG index = 0; index < 6; ++index)
+        {
+            InterlockedExchange(&g_shaderConstantCacheForwarded[index], 0);
+            InterlockedExchange(&g_shaderConstantCacheSkipped[index], 0);
+        }
+    }
+
     void InvalidateBindingCache(PVOID device, BOOL resetThreadOwner = TRUE)
     {
         for (DWORD stage = 0; stage < 16; ++stage)
@@ -441,12 +471,14 @@ namespace
 
     BOOL BindingCacheThreadAllowed(IDirect3DDevice9* self)
     {
-        if (!g_bindingCacheEnabled)
+        if (!g_bindingCacheEnabled && !g_shaderConstantCacheEnabled)
             return FALSE;
         if (g_bindingCacheDevice != self)
         {
-            InterlockedExchange(&g_bindingCacheEnabled, FALSE);
-            Log("BINDING_CACHE_DISABLED reason=multiple_device_objects");
+            if (InterlockedExchange(&g_bindingCacheEnabled, FALSE))
+                Log("BINDING_CACHE_DISABLED reason=multiple_device_objects");
+            if (InterlockedExchange(&g_shaderConstantCacheEnabled, FALSE))
+                Log("SHADER_CONSTANT_CACHE_DISABLED reason=multiple_device_objects");
             return FALSE;
         }
 
@@ -455,19 +487,30 @@ namespace
             &g_bindingCacheThreadId, threadId, 0);
         if (owner != 0 && owner != threadId)
         {
-            InterlockedExchange(&g_bindingCacheEnabled, FALSE);
-            Log("BINDING_CACHE_DISABLED reason=multiple_device_threads");
+            if (InterlockedExchange(&g_bindingCacheEnabled, FALSE))
+                Log("BINDING_CACHE_DISABLED reason=multiple_device_threads");
+            if (InterlockedExchange(&g_shaderConstantCacheEnabled, FALSE))
+                Log("SHADER_CONSTANT_CACHE_DISABLED reason=multiple_device_threads");
             return FALSE;
         }
-        return g_bindingCacheEnabled != FALSE;
+        return g_bindingCacheEnabled != FALSE ||
+            g_shaderConstantCacheEnabled != FALSE;
     }
 
     void DisableBindingCacheForStateBlock()
     {
-        if (InterlockedExchange(&g_bindingCacheEnabled, FALSE))
+        const BOOL bindingDisabled =
+            InterlockedExchange(&g_bindingCacheEnabled, FALSE) != FALSE;
+        const BOOL constantsDisabled =
+            InterlockedExchange(&g_shaderConstantCacheEnabled, FALSE) != FALSE;
+        if (bindingDisabled || constantsDisabled)
         {
             InvalidateBindingCache(NULL);
-            Log("BINDING_CACHE_DISABLED reason=state_block_api_used");
+            InvalidateShaderConstantCache();
+            if (bindingDisabled)
+                Log("BINDING_CACHE_DISABLED reason=state_block_api_used");
+            if (constantsDisabled)
+                Log("SHADER_CONSTANT_CACHE_DISABLED reason=state_block_api_used");
         }
     }
 
