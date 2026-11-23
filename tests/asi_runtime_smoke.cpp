@@ -44,6 +44,10 @@ namespace
     volatile LONG g_fakeSetTextureCalls = 0;
     volatile LONG g_fakeSetStreamSourceCalls = 0;
     volatile LONG g_fakeSetIndicesCalls = 0;
+    volatile LONG g_fakeSetVertexShaderCalls = 0;
+    volatile LONG g_fakeSetPixelShaderCalls = 0;
+    volatile LONG g_fakeSetVertexDeclarationCalls = 0;
+    volatile LONG g_fakeSetFVFCalls = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
     DWORD g_syntheticVs3VertexShader[11] = {};
@@ -494,6 +498,7 @@ namespace
         IDirect3DDevice9*,
         IDirect3DVertexShader9*)
     {
+        InterlockedIncrement(&g_fakeSetVertexShaderCalls);
         return D3D_OK;
     }
 
@@ -501,6 +506,7 @@ namespace
         IDirect3DDevice9*,
         IDirect3DPixelShader9*)
     {
+        InterlockedIncrement(&g_fakeSetPixelShaderCalls);
         return D3D_OK;
     }
 
@@ -518,11 +524,13 @@ namespace
     HRESULT WINAPI FakeDeviceSetVertexDeclaration(
         IDirect3DDevice9*, IDirect3DVertexDeclaration9*)
     {
+        InterlockedIncrement(&g_fakeSetVertexDeclarationCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetFVF(IDirect3DDevice9*, DWORD)
     {
+        InterlockedIncrement(&g_fakeSetFVFCalls);
         return D3D_OK;
     }
 
@@ -1171,8 +1179,28 @@ int main()
             reinterpret_cast<const DWORD*>(pixelBytecode), &pixelShader);
 
     const HRESULT setVertexShaderHr = device->SetVertexShader(fallbackVertexShader);
+    const LONG vsCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0);
+    device->SetVertexShader(fallbackVertexShader);
+    device->SetVertexShader(fallbackVertexShader);
+    device->SetVertexShader(NULL);
+    device->SetVertexShader(NULL);
+    device->SetVertexShader(fallbackVertexShader);
+    if (InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0) -
+        vsCallsBeforeCacheTest != 2)
+        return Fail("vertex-shader binding cache did not suppress duplicates or forward changes");
     // Draw with the actual PS2 replacement object to test end-to-end correlation.
     const HRESULT setPixelShaderHr = device->SetPixelShader(fallbackPixelShader);
+    const LONG psCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetPixelShaderCalls, 0, 0);
+    device->SetPixelShader(fallbackPixelShader);
+    device->SetPixelShader(fallbackPixelShader);
+    device->SetPixelShader(NULL);
+    device->SetPixelShader(NULL);
+    device->SetPixelShader(fallbackPixelShader);
+    if (InterlockedCompareExchange(&g_fakeSetPixelShaderCalls, 0, 0) -
+        psCallsBeforeCacheTest != 2)
+        return Fail("pixel-shader binding cache did not suppress duplicates or forward changes");
 
     const float vertexConstants[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
     const float pixelConstants[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
@@ -1281,6 +1309,13 @@ int main()
     const HRESULT createVertexDeclarationHr = device->CreateVertexDeclaration(
         declarationElements, &vertexDeclaration);
     const HRESULT setVertexDeclarationHr = device->SetVertexDeclaration(vertexDeclaration);
+    const LONG declarationCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetVertexDeclarationCalls, 0, 0);
+    device->SetVertexDeclaration(vertexDeclaration);
+    device->SetVertexDeclaration(vertexDeclaration);
+    if (InterlockedCompareExchange(&g_fakeSetVertexDeclarationCalls, 0, 0) -
+        declarationCallsBeforeCacheTest != 0)
+        return Fail("vertex-declaration cache did not suppress identical layout bindings");
     IDirect3DVertexBuffer9* fakeVertexBuffer = NULL;
     IDirect3DIndexBuffer9* fakeIndexBuffer = NULL;
     const HRESULT createVertexBufferHr = device->CreateVertexBuffer(
@@ -1314,7 +1349,15 @@ int main()
 
     const HRESULT drawPrimitiveHr = device->DrawPrimitive(
         D3DPT_TRIANGLELIST, 0, 1);
-    const HRESULT setFVFHr = device->SetFVF(D3DFVF_XYZ | D3DFVF_TEX1);
+    const DWORD smokeFVF = D3DFVF_XYZ | D3DFVF_TEX1;
+    const HRESULT setFVFHr = device->SetFVF(smokeFVF);
+    const LONG fvfCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetFVFCalls, 0, 0);
+    device->SetFVF(smokeFVF);
+    device->SetFVF(smokeFVF);
+    if (InterlockedCompareExchange(&g_fakeSetFVFCalls, 0, 0) -
+        fvfCallsBeforeCacheTest != 0)
+        return Fail("FVF cache did not suppress identical FVF bindings");
     const HRESULT drawIndexedPrimitiveHr = device->DrawIndexedPrimitive(
         D3DPT_TRIANGLELIST, 0, 0, 3, 0, 1);
     const HRESULT drawPrimitiveUPHr = device->DrawPrimitiveUP(
@@ -1345,6 +1388,13 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
         textureCallsBeforeBindingReset != 1)
         return Fail("Reset did not invalidate texture-binding cache state");
+    const LONG vsCallsBeforeBindingReset =
+        InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0);
+    device->SetVertexShader(fallbackVertexShader);
+    device->SetVertexShader(fallbackVertexShader);
+    if (InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0) -
+        vsCallsBeforeBindingReset != 1)
+        return Fail("Reset did not invalidate vertex-shader binding cache state");
 
     const LONG renderCallsBeforeStateBlock =
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0);
@@ -1371,6 +1421,13 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
         textureCallsBeforeStateBlock != 2)
         return Fail("state-block API use did not disable texture-binding suppression");
+    const LONG shaderCallsBeforeStateBlock =
+        InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0);
+    device->SetVertexShader(fallbackVertexShader);
+    device->SetVertexShader(fallbackVertexShader);
+    if (InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0) -
+        shaderCallsBeforeStateBlock != 2)
+        return Fail("state-block API use did not disable shader-binding suppression");
 
     IDirect3DStateBlock9* createdStateBlock = NULL;
     const HRESULT createStateBlockHr = device->CreateStateBlock(
