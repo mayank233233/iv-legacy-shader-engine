@@ -100,6 +100,12 @@ namespace
     volatile LONG g_textureCreateLogCount = 0;
     volatile LONG g_bufferCreateLogCount = 0;
     volatile LONG g_redundantStateCacheEnabled = FALSE;
+    volatile LONG g_bindingCacheEnabled = FALSE;
+    volatile LONG g_bindingCacheThreadId = 0;
+    PVOID volatile g_bindingCacheDevice = NULL;
+    volatile LONG g_bindingCacheWindowFrameCount = 0;
+    volatile LONG g_bindingCacheForwarded[3] = {};
+    volatile LONG g_bindingCacheSkipped[3] = {};
     DWORD g_stateCacheReportFrames = 120;
     volatile LONG g_stateCacheWindowFrameCount = 0;
     volatile LONG g_stateCacheLock = 0;
@@ -142,6 +148,7 @@ namespace
     PVOID volatile g_currentVertexShader = NULL;
     PVOID volatile g_currentPixelShader = NULL;
     PVOID volatile g_currentTextures[16] = {};
+    volatile LONG g_textureBindingKnown[16] = {};
     volatile LONG g_samplerStates[16][14] = {};
     volatile LONG g_samplerStateKnown[16][14] = {};
     volatile LONG g_renderStates[256] = {};
@@ -150,6 +157,7 @@ namespace
     volatile LONG g_textureStageStateKnown[16][64] = {};
     PVOID volatile g_currentVertexDeclaration = NULL;
     PVOID volatile g_currentIndexBuffer = NULL;
+    volatile LONG g_indicesBindingKnown = 0;
     volatile LONG g_currentFVF = 0;
     PVOID volatile g_streamBuffers[16] = {};
     volatile LONG g_streamOffsets[16] = {};
@@ -405,6 +413,55 @@ namespace
         AcquireStateCacheLock();
         InvalidateStateCacheLocked(device);
         ReleaseStateCacheLock();
+    }
+
+    void InvalidateBindingCache(PVOID device)
+    {
+        for (DWORD stage = 0; stage < 16; ++stage)
+            InterlockedExchange(&g_textureBindingKnown[stage], 0);
+        for (DWORD stream = 0; stream < 16; ++stream)
+            InterlockedExchange(&g_streamKnown[stream], 0);
+        InterlockedExchange(&g_indicesBindingKnown, 0);
+        InterlockedExchangePointer(&g_bindingCacheDevice, device);
+        InterlockedExchange(&g_bindingCacheThreadId, 0);
+        InterlockedExchange(&g_bindingCacheWindowFrameCount, 0);
+        for (LONG index = 0; index < 3; ++index)
+        {
+            InterlockedExchange(&g_bindingCacheForwarded[index], 0);
+            InterlockedExchange(&g_bindingCacheSkipped[index], 0);
+        }
+    }
+
+    BOOL BindingCacheThreadAllowed(IDirect3DDevice9* self)
+    {
+        if (!g_bindingCacheEnabled)
+            return FALSE;
+        if (g_bindingCacheDevice != self)
+        {
+            InterlockedExchange(&g_bindingCacheEnabled, FALSE);
+            Log("BINDING_CACHE_DISABLED reason=multiple_device_objects");
+            return FALSE;
+        }
+
+        const LONG threadId = static_cast<LONG>(GetCurrentThreadId());
+        const LONG owner = InterlockedCompareExchange(
+            &g_bindingCacheThreadId, threadId, 0);
+        if (owner != 0 && owner != threadId)
+        {
+            InterlockedExchange(&g_bindingCacheEnabled, FALSE);
+            Log("BINDING_CACHE_DISABLED reason=multiple_device_threads");
+            return FALSE;
+        }
+        return g_bindingCacheEnabled != FALSE;
+    }
+
+    void DisableBindingCacheForStateBlock()
+    {
+        if (InterlockedExchange(&g_bindingCacheEnabled, FALSE))
+        {
+            InvalidateBindingCache(NULL);
+            Log("BINDING_CACHE_DISABLED reason=state_block_api_used");
+        }
     }
 
     BOOL VerifyStateCacheThreadLocked(BOOL* disabled)
@@ -765,6 +822,7 @@ namespace
             self, reinterpret_cast<PVOID>(g_realDeviceCreateStateBlock),
             static_cast<unsigned long>(type));
         DisableRedundantStateCacheForStateBlock();
+        DisableBindingCacheForStateBlock();
         const HRESULT hr = g_realDeviceCreateStateBlock
             ? g_realDeviceCreateStateBlock(self, type, stateBlock)
             : D3DERR_INVALIDCALL;
@@ -778,6 +836,7 @@ namespace
         Log("STATE_BLOCK_BEGIN_ENTER device=%p original=%p",
             self, reinterpret_cast<PVOID>(g_realDeviceBeginStateBlock));
         DisableRedundantStateCacheForStateBlock();
+        DisableBindingCacheForStateBlock();
         Log("STATE_BLOCK_BEGIN_FORWARD device=%p original=%p",
             self, reinterpret_cast<PVOID>(g_realDeviceBeginStateBlock));
         const HRESULT hr = g_realDeviceBeginStateBlock
@@ -795,6 +854,7 @@ namespace
         Log("STATE_BLOCK_END_ENTER device=%p original=%p",
             self, reinterpret_cast<PVOID>(g_realDeviceEndStateBlock));
         DisableRedundantStateCacheForStateBlock();
+        DisableBindingCacheForStateBlock();
         const HRESULT hr = g_realDeviceEndStateBlock
             ? g_realDeviceEndStateBlock(self, stateBlock)
             : D3DERR_INVALIDCALL;
@@ -1275,6 +1335,8 @@ namespace
             WritePrivateProfileStringW(
                 L"General", L"EnableRedundantStateCache", L"0", g_iniPath);
             WritePrivateProfileStringW(
+                L"General", L"EnableBindingCache", L"0", g_iniPath);
+            WritePrivateProfileStringW(
                 L"General", L"StateCacheReportFrames", L"120", g_iniPath);
         }
     }
@@ -1605,6 +1667,7 @@ namespace
         // runtime reports failure. Re-sending later state is safer than
         // trusting values across a lost-device transition.
         InvalidateRedundantStateCache(self);
+        InvalidateBindingCache(self);
         return hr;
     }
 
@@ -1792,6 +1855,7 @@ namespace
         if (FAILED(hr))
         {
             InvalidateRedundantStateCache(self);
+            InvalidateBindingCache(self);
             Log("DEVICE_PRESENT_FAILED hr=0x%08lX", static_cast<unsigned long>(hr));
         }
         else
@@ -3622,6 +3686,7 @@ namespace
         // A newly-created device may reuse a previous COM address. Never
         // carry the preceding device's state shadow into it.
         InvalidateRedundantStateCache(device);
+        InvalidateBindingCache(device);
 
         const SIZE_T vtableBytes =
             sizeof(void*) * kD3D9DeviceInterfaceSlots;
@@ -3756,9 +3821,18 @@ namespace
             hooked[kDeviceSetTextureStageStateSlot] =
                 reinterpret_cast<void*>(HookDeviceSetTextureStageState);
             hooked[kDeviceSetSamplerStateSlot] = reinterpret_cast<void*>(HookDeviceSetSamplerState);
+        }
+        if (g_redundantStateCacheEnabled || g_bindingCacheEnabled)
+        {
             hooked[kDeviceCreateStateBlockSlot] = reinterpret_cast<void*>(HookDeviceCreateStateBlock);
             hooked[kDeviceBeginStateBlockSlot] = reinterpret_cast<void*>(HookDeviceBeginStateBlock);
             hooked[kDeviceEndStateBlockSlot] = reinterpret_cast<void*>(HookDeviceEndStateBlock);
+        }
+        if (g_bindingCacheEnabled && !g_drawTelemetryEnabled)
+        {
+            hooked[kDeviceSetTextureSlot] = reinterpret_cast<void*>(HookDeviceSetTexture);
+            hooked[kDeviceSetStreamSourceSlot] = reinterpret_cast<void*>(HookDeviceSetStreamSource);
+            hooked[kDeviceSetIndicesSlot] = reinterpret_cast<void*>(HookDeviceSetIndices);
         }
         if (g_drawTelemetryEnabled)
         {
@@ -3842,6 +3916,13 @@ namespace
         D3DPRESENT_PARAMETERS* parameters,
         IDirect3DDevice9** device)
     {
+        if (g_bindingCacheEnabled &&
+            (behaviorFlags & D3DCREATE_MULTITHREADED) != 0)
+        {
+            InterlockedExchange(&g_bindingCacheEnabled, FALSE);
+            Log("BINDING_CACHE_DISABLED reason=d3dcreate_multithreaded");
+        }
+
         Log(
             "D3D9_CREATE_DEVICE_REQUEST adapter=%u type=%u flags=0x%08lX "
             "width=%u height=%u backbuffer_format=%u windowed=%u "
@@ -4079,6 +4160,14 @@ namespace
             L"General", L"CaptureDrawMaxCalls", 4096, g_iniPath);
         g_redundantStateCacheEnabled = GetPrivateProfileIntW(
             L"General", L"EnableRedundantStateCache", 0, g_iniPath) != 0;
+        g_bindingCacheEnabled = GetPrivateProfileIntW(
+            L"General", L"EnableBindingCache", 0, g_iniPath) != 0;
+        if (g_bindingCacheEnabled)
+        {
+            InvalidateBindingCache(NULL);
+            Log("BINDING_CACHE_ENABLED groups=texture,vertex_stream,index_buffer "
+                "thread_policy=single_device_single_thread state_block_policy=disable default=off");
+        }
         g_stateCacheReportFrames = GetPrivateProfileIntW(
             L"General", L"StateCacheReportFrames", 120, g_iniPath);
         if (g_stateCacheReportFrames == 0)
