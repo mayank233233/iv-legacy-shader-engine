@@ -33,7 +33,7 @@ def main() -> None:
 [12:00:00.00197] VERTEX_DECL_ELEMENT object=00006000 index=1 stream=0 offset=12 type=1 method=0 usage=5 usage_index=0
 [12:00:00.00198] BUFFER_OBJECT_CREATED type=VB object=00005000 length=4096 usage=0x00000008 fvf=0x00000000 pool=1 hr=0x00000000
 [12:00:00.00199] BUFFER_OBJECT_CREATED type=IB object=00007000 length=1024 usage=0x00000008 format=101 pool=1 hr=0x00000000
-[12:00:00.002] DRAW_CALL seq=1 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=12 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=36 start_index=0 bound_vs=00001000 bound_ps=00002000 vertex_decl=00006000 fvf=0x00000000 index_buffer=00007000 streams=0:00005000:0:20:1 textures=0:00004000;1:00000000 render_targets=0:00008000:800:600:21:1:1:0:0:0;1:00009000:400:300:75:1:1:0:0:0 depth_target=0000A000:800:600:75:1:2:0:0:0 sampler_hash=abcdef0123456789 sampler_count=1 render_state_hash=12345678 render_state_count=1 texture_stage_hash=87654321 texture_stage_count=1 hr=0x00000000
+[12:00:00.002] DRAW_CALL seq=1 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=12 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=36 start_index=0 bound_vs=00001000 bound_ps=00002000 vertex_decl=00006000 fvf=0x00000000 index_buffer=00007000 streams=0:00005000:0:20:1 textures=0:00004000;1:00000000 render_targets=0:00008000:800:600:21:1:1:0:0:0;1:00009000:400:300:75:1:1:0:0:0 depth_target=0000A000:800:600:75:1:2:0:0:0 viewport=0:0:800:600:00000000:3F800000 sampler_hash=abcdef0123456789 sampler_count=1 render_state_hash=12345678 render_state_count=1 texture_stage_hash=87654321 texture_stage_count=1 hr=0x00000000
 [12:00:00.003] DRAW_CALL seq=2 frame=4 kind=DrawIndexedPrimitive device=00003000 primitive=4 primitives=4 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=12 start_index=36 bound_vs=00001000 bound_ps=00002000 textures=0:00004000;1:00000000 sampler_hash=abcdef0123456789 hr=0x00000000
 [12:00:00.004] DRAW_CALL seq=3 frame=5 kind=DrawPrimitive device=00003000 primitive=4 primitives=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=6 start_index=0 bound_vs=00001000 bound_ps=00009999 hr=0x80004005
 [12:00:00.0045] SHADER_OBJECT_CREATED stage=PS object=00002000 profile=PS_3_0 bytes=72 hash=ddd444 hr=0x00000000
@@ -117,6 +117,16 @@ def main() -> None:
     assert depth_target["object"] == "a000"
     assert depth_target["width"] == 800
     assert depth_target["format"] == 75
+    viewport = report["draw_calls"][0]["viewport"]
+    assert viewport == {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600,
+        "min_z_bits": 0,
+        "max_z_bits": 0x3F800000,
+    }
+    assert report["draw_calls"][1]["viewport"] is None
     assert report["render_target_objects_observed"] == 2
     assert report["depth_stencil_objects_observed"] == 1
     assert len(report["render_target_usage"]) == 2
