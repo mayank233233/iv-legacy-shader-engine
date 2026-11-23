@@ -77,8 +77,9 @@ bottlenecks remain possible.
 - Fixed-function live draw replacement: not implemented.
 - Fixed-function candidate audit: implemented, diagnostic only.
 - Viewport telemetry: successful SetViewport calls update an observed snapshot;
-  GetViewport refreshes it at device creation, Reset and successful RT0
-  changes. Each captured DRAW_CALL now includes
+  GetViewport refreshes it at device creation, Reset, successful RT0 changes
+  and immediately before each captured draw (so state-block viewport restores
+  are reflected). Each captured DRAW_CALL now includes
   `viewport=x:y:width:height:minZBits:maxZBits`. The offline parser and GMA
   render-path audit report viewport dimensions and viewport/RT0 extent
   differences. An opt-in viewport-state cache remains included in
