@@ -74,5 +74,10 @@ bottlenecks remain possible.
 - Fixed-function live draw replacement: not implemented.
 - Fixed-function candidate audit: implemented, diagnostic only.
 - SetViewport telemetry: implemented, observational only; hardware/game validation pending.
+- Texture/vertex-stream/index binding cache: implemented as an independent
+  `EnableBindingCache=0` experiment. It skips only exact repeated bindings,
+  checks buffer offset and stride, and disables on state-block APIs, D3DCREATE_MULTITHREADED,
+  device/thread changes, Reset and failed Present. Synthetic coverage is being
+  added; no real-game performance claim is made.
 - Windows x86 CI: validates Python audit and existing ASI build; not a game/GMA
   hardware acceptance test.
