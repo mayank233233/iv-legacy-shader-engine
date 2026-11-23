@@ -2876,22 +2876,63 @@ namespace
         UINT offset,
         UINT stride)
     {
-        const HRESULT hr = g_realDeviceSetStreamSource
-            ? g_realDeviceSetStreamSource(self, stream, buffer, offset, stride)
-            : D3DERR_INVALIDCALL;
-        if (SUCCEEDED(hr) && stream < 16)
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (stream < 16 && BindingCacheThreadAllowed(self))
         {
-            InterlockedExchangePointer(&g_streamBuffers[stream], buffer);
-            InterlockedExchange(&g_streamOffsets[stream], static_cast<LONG>(offset));
-            InterlockedExchange(&g_streamStrides[stream], static_cast<LONG>(stride));
-            InterlockedExchange(&g_streamKnown[stream], 1);
+            const BOOL known = InterlockedCompareExchange(&g_streamKnown[stream], 0, 0) != 0;
+            const PVOID currentBuffer = InterlockedCompareExchangePointer(
+                &g_streamBuffers[stream], NULL, NULL);
+            const UINT currentOffset = static_cast<UINT>(InterlockedCompareExchange(
+                &g_streamOffsets[stream], 0, 0));
+            const UINT currentStride = static_cast<UINT>(InterlockedCompareExchange(
+                &g_streamStrides[stream], 0, 0));
+            if (known && currentBuffer == buffer &&
+                currentOffset == offset && currentStride == stride)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[1]);
+            }
+            else
+            {
+                hr = g_realDeviceSetStreamSource
+                    ? g_realDeviceSetStreamSource(self, stream, buffer, offset, stride)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchangePointer(&g_streamBuffers[stream], buffer);
+                    InterlockedExchange(&g_streamOffsets[stream], static_cast<LONG>(offset));
+                    InterlockedExchange(&g_streamStrides[stream], static_cast<LONG>(stride));
+                    InterlockedExchange(&g_streamKnown[stream], 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[1]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_streamKnown[stream], 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetStreamSource
+                ? g_realDeviceSetStreamSource(self, stream, buffer, offset, stride)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr) && stream < 16)
+            {
+                InterlockedExchangePointer(&g_streamBuffers[stream], buffer);
+                InterlockedExchange(&g_streamOffsets[stream], static_cast<LONG>(offset));
+                InterlockedExchange(&g_streamStrides[stream], static_cast<LONG>(stride));
+                InterlockedExchange(&g_streamKnown[stream], 1);
+            }
         }
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
             Log(
-                "SET_STREAM_SOURCE stream=%u buffer=%p offset=%u stride=%u hr=0x%08lX",
-                stream, buffer, offset, stride, static_cast<unsigned long>(hr));
+                "SET_STREAM_SOURCE stream=%u buffer=%p offset=%u stride=%u hr=0x%08lX cached=%u",
+                stream, buffer, offset, stride, static_cast<unsigned long>(hr),
+                skipped ? 1 : 0);
         }
         return hr;
     }
@@ -2919,16 +2960,50 @@ namespace
         IDirect3DDevice9* self,
         IDirect3DIndexBuffer9* indices)
     {
-        const HRESULT hr = g_realDeviceSetIndices
-            ? g_realDeviceSetIndices(self, indices)
-            : D3DERR_INVALIDCALL;
-        if (SUCCEEDED(hr))
-            InterlockedExchangePointer(&g_currentIndexBuffer, indices);
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (BindingCacheThreadAllowed(self))
+        {
+            const BOOL known = InterlockedCompareExchange(
+                &g_indicesBindingKnown, 0, 0) != 0;
+            const PVOID current = InterlockedCompareExchangePointer(
+                &g_currentIndexBuffer, NULL, NULL);
+            if (known && current == indices)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[2]);
+            }
+            else
+            {
+                hr = g_realDeviceSetIndices
+                    ? g_realDeviceSetIndices(self, indices)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchangePointer(&g_currentIndexBuffer, indices);
+                    InterlockedExchange(&g_indicesBindingKnown, 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[2]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_indicesBindingKnown, 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetIndices
+                ? g_realDeviceSetIndices(self, indices)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr))
+                InterlockedExchangePointer(&g_currentIndexBuffer, indices);
+        }
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
-            Log("SET_INDICES object=%p hr=0x%08lX",
-                indices, static_cast<unsigned long>(hr));
+            Log("SET_INDICES object=%p hr=0x%08lX cached=%u",
+                indices, static_cast<unsigned long>(hr), skipped ? 1 : 0);
         }
         return hr;
     }
@@ -3097,24 +3172,53 @@ namespace
         DWORD stage,
         IDirect3DBaseTexture9* texture)
     {
-        const HRESULT hr = g_realDeviceSetTexture
-            ? g_realDeviceSetTexture(self, stage, texture)
-            : D3DERR_INVALIDCALL;
-
-        if (SUCCEEDED(hr) && stage < 16)
+        BOOL skipped = FALSE;
+        HRESULT hr = D3DERR_INVALIDCALL;
+        if (stage < 16 && BindingCacheThreadAllowed(self))
         {
-            InterlockedExchangePointer(
-                &g_currentTextures[stage], texture);
+            const BOOL known = InterlockedCompareExchange(
+                &g_textureBindingKnown[stage], 0, 0) != 0;
+            const PVOID current = InterlockedCompareExchangePointer(
+                &g_currentTextures[stage], NULL, NULL);
+            if (known && current == texture)
+            {
+                skipped = TRUE;
+                hr = D3D_OK;
+                InterlockedIncrement(&g_bindingCacheSkipped[0]);
+            }
+            else
+            {
+                hr = g_realDeviceSetTexture
+                    ? g_realDeviceSetTexture(self, stage, texture)
+                    : D3DERR_INVALIDCALL;
+                if (SUCCEEDED(hr))
+                {
+                    InterlockedExchangePointer(&g_currentTextures[stage], texture);
+                    InterlockedExchange(&g_textureBindingKnown[stage], 1);
+                    InterlockedIncrement(&g_bindingCacheForwarded[0]);
+                }
+                else
+                {
+                    InterlockedExchange(&g_textureBindingKnown[stage], 0);
+                }
+            }
+        }
+        else
+        {
+            hr = g_realDeviceSetTexture
+                ? g_realDeviceSetTexture(self, stage, texture)
+                : D3DERR_INVALIDCALL;
+            if (SUCCEEDED(hr) && stage < 16)
+                InterlockedExchangePointer(&g_currentTextures[stage], texture);
         }
 
         if (g_drawTelemetryEnabled &&
             InterlockedIncrement(&g_materialStateLogCount) <= 4096)
         {
             Log(
-                "SET_TEXTURE stage=%lu object=%p hr=0x%08lX",
-                static_cast<unsigned long>(stage),
-                texture,
-                static_cast<unsigned long>(hr));
+                "SET_TEXTURE stage=%lu object=%p hr=0x%08lX cached=%u",
+                static_cast<unsigned long>(stage), texture,
+                static_cast<unsigned long>(hr), skipped ? 1 : 0);
         }
         return hr;
     }
