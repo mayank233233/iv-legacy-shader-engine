@@ -75,8 +75,9 @@ bottlenecks remain possible.
 - Fixed-function candidate audit: implemented, diagnostic only.
 - SetViewport telemetry: implemented, observational only; hardware/game validation pending.
 - D3D9 binding cache: implemented as an independent `EnableBindingCache=0`
-  experiment for textures, vertex streams (buffer + offset + stride), index
-  buffers, vertex/pixel shaders and vertex-declaration/FVF state. It disables
+  experiment for textures, vertex streams (buffer + offset + stride),
+  stream-frequency divider values, index buffers, vertex/pixel shaders and
+  vertex-declaration/FVF state. It disables
   on state-block APIs, D3DCREATE_MULTITHREADED, non-strict executable mode,
   device/thread changes, Reset and failed Present.
 - Shader constant cache: implemented separately as
