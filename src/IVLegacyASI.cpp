@@ -473,9 +473,11 @@ namespace
         }
     }
 
-    BOOL BindingCacheThreadAllowed(IDirect3DDevice9* self)
+    BOOL BindingCacheThreadAllowed(
+        IDirect3DDevice9* self,
+        BOOL shaderConstantCache = FALSE)
     {
-        if (!g_bindingCacheEnabled && !g_shaderConstantCacheEnabled)
+        if (shaderConstantCache ? !g_shaderConstantCacheEnabled : !g_bindingCacheEnabled)
             return FALSE;
         if (g_bindingCacheDevice != self)
         {
@@ -497,8 +499,9 @@ namespace
                 Log("SHADER_CONSTANT_CACHE_DISABLED reason=multiple_device_threads");
             return FALSE;
         }
-        return g_bindingCacheEnabled != FALSE ||
-            g_shaderConstantCacheEnabled != FALSE;
+        return shaderConstantCache
+            ? g_shaderConstantCacheEnabled != FALSE
+            : g_bindingCacheEnabled != FALSE;
     }
 
     void DisableBindingCacheForStateBlock()
@@ -532,7 +535,7 @@ namespace
             return D3DERR_INVALIDCALL;
         if (!g_shaderConstantCacheEnabled || !data || vectorCount == 0 ||
             startRegister > 255 || vectorCount > 256 - startRegister ||
-            !BindingCacheThreadAllowed(self))
+            !BindingCacheThreadAllowed(self, TRUE))
             return original(self, startRegister, data, vectorCount);
 
         const DWORD stage = pixelStage ? 1 : 0;
@@ -617,7 +620,7 @@ namespace
             return D3DERR_INVALIDCALL;
         if (!g_shaderConstantCacheEnabled || !data || vectorCount == 0 ||
             startRegister > 15 || vectorCount > 16 - startRegister ||
-            !BindingCacheThreadAllowed(self))
+            !BindingCacheThreadAllowed(self, TRUE))
             return original(self, startRegister, data, vectorCount);
 
         const DWORD stage = pixelStage ? 1 : 0;
@@ -702,7 +705,7 @@ namespace
             return D3DERR_INVALIDCALL;
         if (!g_shaderConstantCacheEnabled || !data || boolCount == 0 ||
             startRegister > 15 || boolCount > 16 - startRegister ||
-            !BindingCacheThreadAllowed(self))
+            !BindingCacheThreadAllowed(self, TRUE))
             return original(self, startRegister, data, boolCount);
 
         const DWORD stage = pixelStage ? 1 : 0;
