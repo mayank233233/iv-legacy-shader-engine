@@ -3,6 +3,7 @@
 ; on real GTA IV hardware. Keep it off unless testing this branch.
 [General]
 EnableBindingCache=0
+EnableShaderConstantCache=0
 StateCacheReportFrames=120
 
 ; Reserved render-path experiments; not yet runtime implemented.
