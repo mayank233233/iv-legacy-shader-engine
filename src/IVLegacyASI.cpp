@@ -108,8 +108,8 @@ namespace
     volatile LONG g_bindingCacheThreadId = 0;
     PVOID volatile g_bindingCacheDevice = NULL;
     volatile LONG g_bindingCacheWindowFrameCount = 0;
-    volatile LONG g_bindingCacheForwarded[6] = {};
-    volatile LONG g_bindingCacheSkipped[6] = {};
+    volatile LONG g_bindingCacheForwarded[7] = {};
+    volatile LONG g_bindingCacheSkipped[7] = {};
     float g_cachedShaderFloatConstants[2][256][4] = {};
     volatile LONG g_shaderFloatConstantKnown[2][256] = {};
     int g_cachedShaderIntegerConstants[2][16][4] = {};
@@ -177,6 +177,7 @@ namespace
     volatile LONG g_streamStrides[16] = {};
     volatile LONG g_streamFrequencies[16] = {};
     volatile LONG g_streamKnown[16] = {};
+    volatile LONG g_streamFrequencyKnown[16] = {};
     BOOL g_drawTelemetryEnabled = FALSE;
     DWORD g_drawTelemetryMaxCalls = 4096;
     BOOL g_captureShaderConstants = FALSE;
@@ -453,7 +454,10 @@ namespace
         for (DWORD stage = 0; stage < 16; ++stage)
             InterlockedExchange(&g_textureBindingKnown[stage], 0);
         for (DWORD stream = 0; stream < 16; ++stream)
+        {
             InterlockedExchange(&g_streamKnown[stream], 0);
+            InterlockedExchange(&g_streamFrequencyKnown[stream], 0);
+        }
         InterlockedExchange(&g_indicesBindingKnown, 0);
         InterlockedExchange(&g_vertexShaderBindingKnown, 0);
         InterlockedExchange(&g_pixelShaderBindingKnown, 0);
@@ -462,7 +466,7 @@ namespace
         if (resetThreadOwner)
             InterlockedExchange(&g_bindingCacheThreadId, 0);
         InterlockedExchange(&g_bindingCacheWindowFrameCount, 0);
-        for (LONG index = 0; index < 6; ++index)
+        for (LONG index = 0; index < 7; ++index)
         {
             InterlockedExchange(&g_bindingCacheForwarded[index], 0);
             InterlockedExchange(&g_bindingCacheSkipped[index], 0);
@@ -2193,16 +2197,20 @@ namespace
         const LONG pixelShaderSkipped = InterlockedExchange(&g_bindingCacheSkipped[4], 0);
         const LONG vertexFormatForwarded = InterlockedExchange(&g_bindingCacheForwarded[5], 0);
         const LONG vertexFormatSkipped = InterlockedExchange(&g_bindingCacheSkipped[5], 0);
+        const LONG streamFrequencyForwarded = InterlockedExchange(&g_bindingCacheForwarded[6], 0);
+        const LONG streamFrequencySkipped = InterlockedExchange(&g_bindingCacheSkipped[6], 0);
         Log(
             "D3D9_BINDING_CACHE_WINDOW frames=%ld texture_forwarded=%ld texture_skipped=%ld "
             "stream_forwarded=%ld stream_skipped=%ld index_forwarded=%ld index_skipped=%ld "
             "vs_forwarded=%ld vs_skipped=%ld ps_forwarded=%ld ps_skipped=%ld "
-            "vertex_format_forwarded=%ld vertex_format_skipped=%ld",
+            "vertex_format_forwarded=%ld vertex_format_skipped=%ld "
+            "stream_freq_forwarded=%ld stream_freq_skipped=%ld",
             frames, textureForwarded, textureSkipped,
             streamForwarded, streamSkipped, indexForwarded, indexSkipped,
             vertexShaderForwarded, vertexShaderSkipped,
             pixelShaderForwarded, pixelShaderSkipped,
-            vertexFormatForwarded, vertexFormatSkipped);
+            vertexFormatForwarded, vertexFormatSkipped,
+            streamFrequencyForwarded, streamFrequencySkipped);
     }
 
     HRESULT WINAPI HookDevicePresent(
