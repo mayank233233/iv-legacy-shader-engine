@@ -442,6 +442,8 @@ expected_draw_test_markers = (
     "g_fakeSetStreamSourceCalls",
     "g_fakeSetStreamSourceFreqCalls",
     "stream-frequency cache did not suppress identical divider state",
+    "Reset did not invalidate stream-frequency cache state",
+    "state-block API use did not disable stream-frequency suppression",
     "stream_freq_forwarded=3 stream_freq_skipped=3",
     "g_fakeSetIndicesCalls",
     "g_fakeSetVertexShaderCalls",
