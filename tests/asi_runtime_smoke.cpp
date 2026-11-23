@@ -1482,6 +1482,13 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0) -
         vsCallsBeforeBindingReset != 1)
         return Fail("Reset did not invalidate vertex-shader binding cache state");
+    const LONG vsConstantsBeforeResetTest =
+        InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    if (InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0) -
+        vsConstantsBeforeResetTest != 1)
+        return Fail("Reset did not invalidate shader-constant range cache state");
 
     const LONG renderCallsBeforeStateBlock =
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0);
@@ -1515,6 +1522,13 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetVertexShaderCalls, 0, 0) -
         shaderCallsBeforeStateBlock != 2)
         return Fail("state-block API use did not disable shader-binding suppression");
+    const LONG constantsBeforeStateBlock =
+        InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    if (InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0) -
+        constantsBeforeStateBlock != 2)
+        return Fail("state-block API use did not disable shader-constant suppression");
 
     IDirect3DStateBlock9* createdStateBlock = NULL;
     const HRESULT createStateBlockHr = device->CreateStateBlock(
@@ -1628,8 +1642,18 @@ int main()
         !HasText("ps_forwarded=3 ps_skipped=3") ||
         !HasText("vertex_format_forwarded=2 vertex_format_skipped=4"))
         return Fail("Binding-cache counters did not report expected texture/stream/index/shader/format suppression");
+    if (!HasText("SHADER_CONSTANT_CACHE_ENABLED") ||
+        !HasText("D3D9_SHADER_CONSTANT_CACHE_WINDOW") ||
+        !HasText("vs_float_forwarded=3 vs_float_skipped=3") ||
+        !HasText("ps_float_forwarded=3 ps_float_skipped=3") ||
+        !HasText("vs_int_forwarded=3 vs_int_skipped=3") ||
+        !HasText("ps_int_forwarded=3 ps_int_skipped=3") ||
+        !HasText("vs_bool_forwarded=3 vs_bool_skipped=3") ||
+        !HasText("ps_bool_forwarded=3 ps_bool_skipped=3"))
+        return Fail("Shader constant cache did not suppress unchanged float/integer/boolean register ranges");
     if (!HasText("STATE_CACHE_DISABLED reason=state_block_api_used") ||
         !HasText("BINDING_CACHE_DISABLED reason=state_block_api_used") ||
+        !HasText("SHADER_CONSTANT_CACHE_DISABLED reason=state_block_api_used") ||
         !HasText("STATE_BLOCK_BEGIN_FORWARD") ||
         !HasText("STATE_BLOCK_BEGIN_RETURN") ||
         !HasText("STATE_BLOCK_CREATE_RETURN") ||
