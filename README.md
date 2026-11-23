@@ -2,7 +2,7 @@
 
 **Target:** 32-bit Windows, Direct3D 9, Shader Model `vs_2_0` / `ps_2_0`.
 
-Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86 telemetry ASI, restricted offline PS3/VS3-to-SM2 bytecode downlevelers, explicitly approved hash-mapped PS2/VS2 fallback hooks, and an opt-in redundant D3D9 scalar state cache. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This remains an experimental compatibility foundation, not a playable compatibility fix: it does not spoof device capabilities, translate arbitrary SM3 shaders, or establish that GTA IV can launch or render correctly on Intel GMA 3100.
+Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86 telemetry ASI, restricted offline PS3/VS3-to-SM2 bytecode downlevelers, explicitly approved hash-mapped PS2/VS2 fallback hooks, and opt-in D3D9 optimisation experiments. The GMA Edition development branch adds per-draw viewport/render-target auditing plus independently gated scalar-state, resource-binding and shader-constant caches. The intended game target is the **original PC release, GTAIV.exe file version 1.0.0.0**. The ASI validates that exact version by default. This remains an experimental compatibility foundation, not a playable compatibility fix: it does not spoof device capabilities, translate arbitrary SM3 shaders, implement low-resolution rendering, or establish that GTA IV can launch or render correctly on Intel GMA 3100.
 
 ## Project contents
 
@@ -15,7 +15,7 @@ Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86
 | `shaders/flat_lod_vs20.hlsl` | Position/vertex-colour transform for flat distant geometry |
 | `shaders/flat_lod_ps20.hlsl` | Texture-free vertex-colour/fog pass |
 | `src/D3D9ShaderProbe.cpp` | Standalone x86 D3D9 capability, shader-creation, draw/present and readback probe |
-| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; D3D9 telemetry/profiling, opt-in scalar state suppression, and explicit hash-mapped PS2/VS2 shader fallback hooks |
+| `src/IVLegacyASI.cpp` | Experimental GTA IV 1.0.0.0 x86 ASI; D3D9 telemetry/profiling, opt-in scalar-state/binding/constant caches, per-draw viewport capture and explicit hash-mapped PS2/VS2 shader fallback hooks |
 | `build/compile_shaders.bat` | FXC compilation and assembly-listing generation for all six shaders |
 | `build/build_probe.bat` | x86 MSVC standalone-probe build |
 | `build/build_asi.bat` | x86 MSVC ASI/DLL build |
@@ -23,7 +23,14 @@ Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86
 | `tools/audit_sm3_to_sm2.py` | Conservative offline audit/lowering candidate generator for a restricted `ps_3_0` pixel-shader subset; unsupported shaders are rejected, not guessed |
 | `tools/audit_vs3_to_vs2.py` | Conservative `vs_3_0` to `vs_2_0` auditor and restricted bytecode emitter; rejects unsupported instructions, packed output semantics and unsafe remaps |
 | `tools/audit_shader_pairs.py` | Draw-level VS3/PS3 pairing audit: semantic/component linkage, vertex declaration/FVF layout, captured texture bindings and render-target caps |\n| `tools/lower_shader_pairs.py` | Emits conservative paired VS2/PS2 candidates from audited draw captures; runtime mappings require explicit VS-hash:PS-hash approval |
-| `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls in `IVLegacy.log` |
+| `tools/analyze_asi_log.py` | Correlates shader-object hashes with frame-indexed D3D9 draw calls, render/depth descriptors and per-draw viewport snapshots in `IVLegacy.log` |
+| `tools/audit_gma_edition_render_path.py` | Read-only RT0/depth/viewport audit and conservative fixed-function candidate report |
+| `tools/analyze_state_cache_benchmark.py` | Counts scalar render/texture-stage/sampler state calls forwarded or skipped |
+| `tools/analyze_binding_cache_benchmark.py` | Counts texture/stream/index/shader/vertex-format/viewport binding calls forwarded or skipped |
+| `tools/analyze_shader_constant_cache.py` | Counts VS/PS float/integer/boolean register-range calls forwarded or skipped |
+| `IVLegacy.ini.example` | Template for the independent, default-off GMA Edition cache experiments and reserved renderer switches |
+| `docs/GMA_EDITION_PROTOTYPE.md` | Current GMA Edition implementation status, telemetry requirements and pending renderer work |
+| `docs/GMA_OPTIMIZATION_CATALOG.md` | Optimisation catalogue, state/cache scope, risks and benchmark protocol |
 | `tools/audit_runtime_capability_gaps.py` | Read-only correlation of reported D3D9 caps, requested shader profiles, device creation and failed format checks |
 | `tools/inspect_gtaiv_executable.py` | Read-only PE32 import/version inspector for the original `GTAIV.exe`; reports normal and delay imports without modifying the file |
 | `tools/analyze_asi_constants.py` | Validates float, integer and boolean shader-constant sidecars and resolves them to shader hashes from `IVLegacy.log` |
@@ -31,6 +38,26 @@ Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86
 | `.github/workflows/windows-x86-build.yml` | Windows x86 compile/build CI; does not run the GPU probe |
 
 All six v0.2 HLSL sources are retained byte-for-byte. They still target only `vs_2_0` and `ps_2_0`.
+
+## GMA Edition renderer optimisation work
+
+The active development branch is `feature/gma-edition-renderer-prototype`. Its current work is limited to D3D9 state-call suppression and read-only render-path discovery; it does not replace or downscale GTA IV's scene renderer.
+
+Three independent caches are disabled by default:
+
+- `EnableRedundantStateCache=0`: render state, texture-stage state and sampler state.
+- `EnableBindingCache=0`: textures, vertex streams (including offset/stride), stream-frequency dividers, index buffers, VS/PS objects, vertex declaration/FVF and viewport.
+- `EnableShaderConstantCache=0`: VS/PS float, integer and boolean register ranges.
+
+State-block APIs disable the caches because they can mutate tracked state outside the intercepted setter calls. Binding and shader-constant caches also require strict GTA IV 1.0.0.0 mode and a single-threaded, single-device path. Reset attempts and failed Presents invalidate shadow state. All three switches remain OFF unless deliberately benchmarking this branch.
+
+With `CaptureDrawTelemetry=1`, each captured draw includes its render-target/depth and viewport context. `tools/audit_gma_edition_render_path.py` reports viewport coverage and RT0/depth/viewport relationships; it does not classify the main scene target or implement redirection. The draw-time GetViewport query and detailed logging add overhead, so telemetry should be disabled for clean timing runs.
+
+**Latest integrated synthetic verification:** [Windows x86 CI run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585) passed both jobs. This is not a GTA IV gameplay or physical GMA 3100 benchmark. Low-resolution redirection, a UI-aware upscale, live fixed-function draw replacement and a general SM3 translator remain unimplemented. No 30 FPS result is established.
+
+See [GMA Edition prototype status](docs/GMA_EDITION_PROTOTYPE.md), [optimization catalogue](docs/GMA_OPTIMIZATION_CATALOG.md), and [GMA 3100 architecture research](docs/GMA3100_GTAIV_RESEARCH_AND_ARCHITECTURE.md).
+
+
 
 ## v0.5.8-alpha changes
 
