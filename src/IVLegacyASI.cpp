@@ -4422,6 +4422,19 @@ namespace
             g_shaderFallbacksEnabled = FALSE;
             Log("SHADER_FALLBACKS_DISABLED reason=strict_version_gate_disabled");
         }
+        if (!strictVersion)
+        {
+            if (g_bindingCacheEnabled)
+            {
+                g_bindingCacheEnabled = FALSE;
+                Log("BINDING_CACHE_DISABLED reason=strict_version_gate_disabled");
+            }
+            if (g_redundantStateCacheEnabled)
+            {
+                g_redundantStateCacheEnabled = FALSE;
+                Log("STATE_CACHE_DISABLED reason=strict_version_gate_disabled");
+            }
+        }
 
         if (!ValidateTargetExecutable(strictVersion))
         {
