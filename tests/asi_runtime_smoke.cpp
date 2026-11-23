@@ -1569,6 +1569,13 @@ int main()
     if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
         textureCallsBeforeStateBlock != 2)
         return Fail("state-block API use did not disable texture-binding suppression");
+    const LONG viewportCallsBeforeStateBlock =
+        InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0);
+    device->SetViewport(&changedViewport);
+    device->SetViewport(&changedViewport);
+    if (InterlockedCompareExchange(&g_fakeSetViewportCalls, 0, 0) -
+        viewportCallsBeforeStateBlock != 2)
+        return Fail("state-block API use did not disable viewport suppression");
     const LONG frequencyCallsBeforeStateBlock =
         InterlockedCompareExchange(&g_fakeSetStreamSourceFreqCalls, 0, 0);
     device->SetStreamSourceFreq(0, 1);
@@ -1699,6 +1706,7 @@ int main()
         !HasText("texture_forwarded=3 texture_skipped=3") ||
         !HasText("stream_forwarded=3 stream_skipped=3") ||
         !HasText("stream_freq_forwarded=3 stream_freq_skipped=3") ||
+        !HasText("viewport_forwarded=1 viewport_skipped=0") ||
         !HasText("index_forwarded=3 index_skipped=3") ||
         !HasText("vs_forwarded=3 vs_skipped=3") ||
         !HasText("ps_forwarded=3 ps_skipped=3") ||
