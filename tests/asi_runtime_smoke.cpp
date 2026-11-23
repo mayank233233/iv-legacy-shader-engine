@@ -1468,6 +1468,17 @@ int main()
     if (FAILED(profilerPresentHr))
         return Fail("Frame-profiler verification Present call failed");
 
+    // A non-readable constant range must be forwarded and invalidate its
+    // previous shadow. The next valid upload of that range must not be skipped.
+    const LONG floatCallsBeforeInvalidRange =
+        InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0);
+    device->SetVertexShaderConstantF(4, NULL, 1);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    device->SetVertexShaderConstantF(4, vertexConstants, 1);
+    if (InterlockedCompareExchange(&g_fakeSetVertexFloatConstantsCalls, 0, 0) -
+        floatCallsBeforeInvalidRange != 2)
+        return Fail("unreadable shader-constant input did not invalidate the cached range");
+
     // Reset must discard the shadowed values; the same value after Reset must
     // reach the original D3D9 setter again.
     const LONG renderCallsBeforeReset =
