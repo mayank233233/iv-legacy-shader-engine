@@ -21,6 +21,9 @@ Active work is isolated on `feature/gma-edition-renderer-prototype`; `main` is u
 - CI covers x86 compilation, static/source checks, fake-D3D9 runtime smoke tests and synthetic parser/audit fixtures. The latest run validates the integrated viewport instrumentation and cache implementation on the synthetic host.
 - This does **not** verify original GTA IV 1.0.0.0 startup, the physical GMA 3100 driver, gameplay correctness, image equivalence, actual frame-time improvement or 30 FPS.
 
+- Follow-up INI-template workflow [run #45145510926](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45145510926), commit `e3d44902de286f72dc32077fe5f9ae8ecfffa43e`: `vertex-audit` passed; Windows `build` was still at the DirectX SDK installation step at the latest status check. Do not treat this run as a completed full-build pass.
+
+
 ### Not implemented
 
 - Low-resolution scene render-target redirection and UI-aware upscaling.
