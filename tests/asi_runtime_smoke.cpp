@@ -41,6 +41,9 @@ namespace
     volatile LONG g_fakeEndStateBlockCalls = 0;
     volatile LONG g_fakeGetRenderStateCalls = 0;
     volatile LONG g_fakeSetViewportCalls = 0;
+    volatile LONG g_fakeSetTextureCalls = 0;
+    volatile LONG g_fakeSetStreamSourceCalls = 0;
+    volatile LONG g_fakeSetIndicesCalls = 0;
     DWORD g_syntheticPs3PixelShader[18] = {};
     DWORD g_syntheticPs3PixelShaderAlt[18] = {};
     DWORD g_syntheticVs3VertexShader[11] = {};
@@ -526,6 +529,7 @@ namespace
     HRESULT WINAPI FakeDeviceSetStreamSource(
         IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9*, UINT, UINT)
     {
+        InterlockedIncrement(&g_fakeSetStreamSourceCalls);
         return D3D_OK;
     }
 
@@ -536,6 +540,7 @@ namespace
 
     HRESULT WINAPI FakeDeviceSetIndices(IDirect3DDevice9*, IDirect3DIndexBuffer9*)
     {
+        InterlockedIncrement(&g_fakeSetIndicesCalls);
         return D3D_OK;
     }
 
@@ -613,6 +618,7 @@ namespace
     HRESULT WINAPI FakeDeviceSetTexture(
         IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*)
     {
+        InterlockedIncrement(&g_fakeSetTextureCalls);
         return D3D_OK;
     }
 
@@ -900,6 +906,8 @@ int main()
     WritePrivateProfileStringW(
         L"General", L"EnableRedundantStateCache", L"1", iniPath);
     WritePrivateProfileStringW(
+        L"General", L"EnableBindingCache", L"1", iniPath);
+    WritePrivateProfileStringW(
         L"General", L"StateCacheReportFrames", L"1", iniPath);
     WritePrivateProfileStringW(
         L"General", L"CaptureShaderConstants", L"1", iniPath);
@@ -1178,6 +1186,16 @@ int main()
         &fakeTexture, NULL);
     const HRESULT setTextureHr = device->SetTexture(
         0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    const LONG textureCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0);
+    device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    device->SetTexture(0, NULL);
+    device->SetTexture(0, NULL);
+    device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
+        textureCallsBeforeCacheTest != 2)
+        return Fail("texture binding cache did not suppress duplicate bindings and preserve changed bindings");
     const HRESULT setSamplerStateHr = device->SetSamplerState(
         0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
     const HRESULT setRenderStateHr = device->SetRenderState(
@@ -1271,8 +1289,28 @@ int main()
         1024, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, &fakeIndexBuffer, NULL);
     const HRESULT setStreamSourceHr = device->SetStreamSource(
         0, fakeVertexBuffer, 0, 20);
+    const LONG streamCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetStreamSourceCalls, 0, 0);
+    device->SetStreamSource(0, fakeVertexBuffer, 0, 20);
+    device->SetStreamSource(0, fakeVertexBuffer, 0, 20);
+    device->SetStreamSource(0, fakeVertexBuffer, 4, 20);
+    device->SetStreamSource(0, fakeVertexBuffer, 4, 20);
+    device->SetStreamSource(0, fakeVertexBuffer, 0, 20);
+    if (InterlockedCompareExchange(&g_fakeSetStreamSourceCalls, 0, 0) -
+        streamCallsBeforeCacheTest != 2)
+        return Fail("vertex-stream cache did not compare buffer, offset and stride correctly");
     const HRESULT setStreamSourceFreqHr = device->SetStreamSourceFreq(0, 1);
     const HRESULT setIndicesHr = device->SetIndices(fakeIndexBuffer);
+    const LONG indicesCallsBeforeCacheTest =
+        InterlockedCompareExchange(&g_fakeSetIndicesCalls, 0, 0);
+    device->SetIndices(fakeIndexBuffer);
+    device->SetIndices(fakeIndexBuffer);
+    device->SetIndices(NULL);
+    device->SetIndices(NULL);
+    device->SetIndices(fakeIndexBuffer);
+    if (InterlockedCompareExchange(&g_fakeSetIndicesCalls, 0, 0) -
+        indicesCallsBeforeCacheTest != 2)
+        return Fail("index-buffer cache did not suppress duplicate and preserve changed bindings");
 
     const HRESULT drawPrimitiveHr = device->DrawPrimitive(
         D3DPT_TRIANGLELIST, 0, 1);
@@ -1300,6 +1338,13 @@ int main()
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0) -
             renderCallsBeforeReset != 1)
         return Fail("successful Reset did not invalidate cached render-state values");
+    const LONG textureCallsBeforeBindingReset =
+        InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0);
+    device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
+        textureCallsBeforeBindingReset != 1)
+        return Fail("Reset did not invalidate texture-binding cache state");
 
     const LONG renderCallsBeforeStateBlock =
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0);
@@ -1319,6 +1364,13 @@ int main()
         InterlockedCompareExchange(&g_fakeSetRenderStateCalls, 0, 0) -
             renderCallsBeforeStateBlock != 1)
         return Fail("state-block API use did not disable redundant state suppression");
+    const LONG textureCallsBeforeStateBlock =
+        InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0);
+    device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    device->SetTexture(0, reinterpret_cast<IDirect3DBaseTexture9*>(fakeTexture));
+    if (InterlockedCompareExchange(&g_fakeSetTextureCalls, 0, 0) -
+        textureCallsBeforeStateBlock != 2)
+        return Fail("state-block API use did not disable texture-binding suppression");
 
     IDirect3DStateBlock9* createdStateBlock = NULL;
     const HRESULT createStateBlockHr = device->CreateStateBlock(
