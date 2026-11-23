@@ -59,6 +59,8 @@ The ASI records, per draw, the current render-target bindings (up to four slots)
 - A successful `SetViewport` updates the observed viewport snapshot.
 - Immediately before each captured draw, the ASI calls the D3D9 `GetViewport` method to refresh the snapshot. This catches viewport changes made indirectly by state-block application, which do not necessarily pass through the `SetViewport` hook.
 
+This draw-time refresh is intentional: Microsoft's documented `D3DSBT_ALL` state list includes the viewport, so applying a state block can restore it without a `SetViewport` call. That documented list does not include render-target or depth-stencil bindings; those snapshots are refreshed by successful `SetRenderTarget` / `SetDepthStencilSurface` calls and by the initial device/reset queries.
+
 Each captured `DRAW_CALL` can therefore include `viewport=x:y:width:height:minZBits:maxZBits`. The offline parser and audit report viewport dimensions, viewport-capture completeness, viewport/RT0 extent differences, and RT0/depth pair evidence. Missing RT0 or depth snapshots now fail closed as `incomplete_rt_depth_evidence`; the audit no longer treats an absent depth surface as a matching pair. A viewport/RT0 extent difference may be intentional cropping; it is evidence to inspect, not automatically an error.
 
 **Capture overhead warning:** `GetViewport` is queried for every captured draw. Draw telemetry also formats and writes large per-draw records. Do not use a telemetry-heavy capture as the clean FPS baseline. Keep `CaptureDrawTelemetry=0` for normal performance runs.
