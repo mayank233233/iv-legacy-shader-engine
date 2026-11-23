@@ -85,6 +85,26 @@ def parse_render_target_bindings(raw: str) -> list[dict[str, Any]]:
     return targets
 
 
+def parse_viewport_snapshot(raw: str) -> dict[str, Any] | None:
+    """Parse x:y:width:height:minZ-bits:maxZ-bits viewport snapshots."""
+    if not raw or raw.lower() == "unknown":
+        return None
+    parts = raw.split(":")
+    if len(parts) != 6:
+        return None
+    try:
+        return {
+            "x": int(parts[0], 0),
+            "y": int(parts[1], 0),
+            "width": int(parts[2], 0),
+            "height": int(parts[3], 0),
+            "min_z_bits": int(parts[4], 16),
+            "max_z_bits": int(parts[5], 16),
+        }
+    except ValueError:
+        return None
+
+
 def parse_depth_stencil_target(raw: str) -> dict[str, Any] | None:
     """Parse one depth snapshot: pointer:width:height:format:type:usage:pool:ms:quality."""
     parts = raw.split(":")
@@ -501,6 +521,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
             depth_stencil_target = parse_depth_stencil_target(
                 fields.get("depth_target", "")
             )
+            viewport = parse_viewport_snapshot(fields.get("viewport", ""))
             texture_bindings = []
             for binding in fields.get("textures", "").split(";"):
                 if not binding or ":" not in binding:
@@ -555,6 +576,7 @@ def analyze_log(path: Path) -> dict[str, Any]:
                 "texture_bindings": texture_bindings,
                 "render_targets": render_targets,
                 "depth_stencil_target": depth_stencil_target,
+                "viewport": viewport,
                 "sampler_state_hash": fields.get("sampler_hash", "").lower() or None,
                 "sampler_state_count": int_field(fields, "sampler_count"),
                 "render_state_hash": fields.get("render_state_hash", "").lower() or None,
