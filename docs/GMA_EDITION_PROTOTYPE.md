@@ -59,14 +59,15 @@ The ASI records, per draw, the current render-target bindings (up to four slots)
 - A successful `SetViewport` updates the observed viewport snapshot.
 - Immediately before each captured draw, the ASI calls the D3D9 `GetViewport` method to refresh the snapshot. This catches viewport changes made indirectly by state-block application, which do not necessarily pass through the `SetViewport` hook.
 
-Each captured `DRAW_CALL` can therefore include `viewport=x:y:width:height:minZBits:maxZBits`. The offline parser and audit report viewport dimensions, whether viewport capture is complete for the captured draws, viewport/RT0 extent differences, and matching or mismatching RT0/depth dimensions. A viewport/RT0 extent difference may be intentional cropping; it is evidence to inspect, not automatically an error.
+Each captured `DRAW_CALL` can therefore include `viewport=x:y:width:height:minZBits:maxZBits`. The offline parser and audit report viewport dimensions, viewport-capture completeness, viewport/RT0 extent differences, and RT0/depth pair evidence. Missing RT0 or depth snapshots now fail closed as `incomplete_rt_depth_evidence`; the audit no longer treats an absent depth surface as a matching pair. A viewport/RT0 extent difference may be intentional cropping; it is evidence to inspect, not automatically an error.
 
 **Capture overhead warning:** `GetViewport` is queried for every captured draw. Draw telemetry also formats and writes large per-draw records. Do not use a telemetry-heavy capture as the clean FPS baseline. Keep `CaptureDrawTelemetry=0` for normal performance runs.
 
 ### What the render-path audit does not establish
 
 - It does not prove that an observed render target is the main scene target. Surface dimensions and formats alone cannot label a target as a G-buffer, shadow map, reflection, water or post-processing surface.
-- Matching RT0/depth dimensions are necessary evidence for a simple redirect, but not sufficient. Format compatibility, multisample mode, surface lifetime, actual binding sequence and device support must also be established.
+- The pair classifier checks that the depth surface covers the RT0 extent (equal or larger) and that multisample type and quality match. D3D9 permits a larger depth surface; exact width/height equality is not required.
+- Pair classification does not verify render-target/depth-format compatibility through `CheckDepthStencilMatch`, surface lifetime, the main-scene identity, actual pass ordering or target-device support. Numeric formats and object pointers are reported for further analysis; they are not an approval to redirect.
 - A viewport that differs from the RT0 extent may be intentional. The audit exposes the difference but does not infer its purpose.
 - A Present-time upscale may include UI and post-processing already rendered into the source. The correct insertion point and UI ordering remain unknown.
 - `StretchRect` format/filter support must be queried on the target device; any unsupported path must fall back to original presentation.
