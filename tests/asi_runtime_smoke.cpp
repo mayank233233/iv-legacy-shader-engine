@@ -24,6 +24,7 @@ namespace
     FakeComObject g_fakeVertexDeclaration = {};
     FakeComObject g_fakeVertexBuffer = {};
     FakeComObject g_fakeIndexBuffer = {};
+    D3DVIEWPORT9 g_fakeViewport = { 0, 0, 64, 64, 0.0f, 1.0f };
     void* g_fakeShaderVTable[3] = {};
     void* g_fakeTextureVTable[3] = {};
     DWORD g_fakeLastPixelShaderVersion = 0;
@@ -350,8 +351,17 @@ namespace
 
     HRESULT WINAPI FakeDeviceReset(
         IDirect3DDevice9*,
-        D3DPRESENT_PARAMETERS*)
+        D3DPRESENT_PARAMETERS* parameters)
     {
+        if (parameters)
+        {
+            g_fakeViewport.X = 0;
+            g_fakeViewport.Y = 0;
+            g_fakeViewport.Width = parameters->BackBufferWidth;
+            g_fakeViewport.Height = parameters->BackBufferHeight;
+            g_fakeViewport.MinZ = 0.0f;
+            g_fakeViewport.MaxZ = 1.0f;
+        }
         return D3D_OK;
     }
 
@@ -397,6 +407,16 @@ namespace
         return D3D_OK;
     }
 
+    HRESULT WINAPI FakeDeviceGetViewport(
+        IDirect3DDevice9*,
+        D3DVIEWPORT9* viewport)
+    {
+        if (!viewport)
+            return D3DERR_INVALIDCALL;
+        *viewport = g_fakeViewport;
+        return D3D_OK;
+    }
+
     HRESULT WINAPI FakeDeviceSetViewport(
         IDirect3DDevice9*,
         const D3DVIEWPORT9* viewport)
@@ -405,15 +425,25 @@ namespace
             (viewport->Width != 64 && viewport->Width != 63) ||
             viewport->Height != 48)
             return D3DERR_INVALIDCALL;
+        g_fakeViewport = *viewport;
         InterlockedIncrement(&g_fakeSetViewportCalls);
         return D3D_OK;
     }
 
     HRESULT WINAPI FakeDeviceSetRenderTarget(
         IDirect3DDevice9*,
-        DWORD,
+        DWORD index,
         IDirect3DSurface9*)
     {
+        if (index == 0)
+        {
+            g_fakeViewport.X = 0;
+            g_fakeViewport.Y = 0;
+            g_fakeViewport.Width = 64;
+            g_fakeViewport.Height = 64;
+            g_fakeViewport.MinZ = 0.0f;
+            g_fakeViewport.MaxZ = 1.0f;
+        }
         return D3D_OK;
     }
 
@@ -759,6 +789,7 @@ namespace
         g_fakeDeviceVTable[29] = reinterpret_cast<void*>(FakeDeviceCreateDepthStencilSurface);
         g_fakeDeviceVTable[37] = reinterpret_cast<void*>(FakeDeviceSetRenderTarget);
         g_fakeDeviceVTable[47] = reinterpret_cast<void*>(FakeDeviceSetViewport);
+        g_fakeDeviceVTable[48] = reinterpret_cast<void*>(FakeDeviceGetViewport);
         g_fakeDeviceVTable[38] = reinterpret_cast<void*>(FakeDeviceGetRenderTarget);
         g_fakeDeviceVTable[39] = reinterpret_cast<void*>(FakeDeviceSetDepthStencilSurface);
         g_fakeDeviceVTable[40] = reinterpret_cast<void*>(FakeDeviceGetDepthStencilSurface);
@@ -1730,6 +1761,7 @@ int main()
         !HasText("STATE_BLOCK_END_RETURN"))
         return Fail("State-block hooks did not preserve the three original D3D9 API call paths");
     if (!HasText("DRAW_TELEMETRY_ENABLED") ||
+        !HasText("viewport=0:0:64:64:00000000:3F800000") ||
         !HasText("frame=1") ||
         !HasText("kind=DrawPrimitive") ||
         !HasText("kind=DrawIndexedPrimitive") ||
