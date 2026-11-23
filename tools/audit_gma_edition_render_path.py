@@ -22,9 +22,33 @@ def audit(path: Path, width: int = 320, height: int = 240,
     target_pairs = []
     ff_candidates = []
     mismatches = []
+    viewport_size_counts: dict[str, int] = {}
+    viewport_unknown_draws = []
+    viewport_rt0_extent_differences = []
+    viewport_known_count = 0
     for draw in draws:
         targets = draw.get("render_targets", [])
         depth = draw.get("depth_stencil_target")
+        viewport = draw.get("viewport")
+        if viewport:
+            viewport_known_count += 1
+            size_key = f"{viewport.get('width')}x{viewport.get('height')}"
+            viewport_size_counts[size_key] = viewport_size_counts.get(size_key, 0) + 1
+        else:
+            viewport_unknown_draws.append(draw.get("seq"))
+
+        for target in targets:
+            if target.get("index") != 0 or not viewport:
+                continue
+            if (viewport.get("width") != target.get("width") or
+                    viewport.get("height") != target.get("height") or
+                    viewport.get("x") != 0 or viewport.get("y") != 0):
+                viewport_rt0_extent_differences.append({
+                    "draw_seq": draw.get("seq"),
+                    "viewport": viewport,
+                    "rt0_width": target.get("width"),
+                    "rt0_height": target.get("height"),
+                })
         for target in targets:
             if target.get("index") != 0:
                 continue
@@ -34,6 +58,7 @@ def audit(path: Path, width: int = 320, height: int = 240,
                 "rt_height": target.get("height"),
                 "depth_width": depth.get("width") if depth else None,
                 "depth_height": depth.get("height") if depth else None,
+                "viewport": viewport,
             }
             target_pairs.append(pair)
             if depth and (depth.get("width") != target.get("width") or
@@ -55,12 +80,22 @@ def audit(path: Path, width: int = 320, height: int = 240,
                 "num_vertices": draw.get("num_vertices"),
                 "render_targets": targets,
                 "depth_stencil_target": depth,
+                "viewport": viewport,
                 "eligibility": "candidate_only_not_replay_approved",
             })
 
     return {
         "input_log": str(path),
         "draw_calls_observed": len(draws),
+        "viewport_capture_status": (
+            "complete" if draws and viewport_known_count == len(draws)
+            else "partial" if viewport_known_count
+            else "not_observed"
+        ),
+        "viewport_draws_observed": viewport_known_count,
+        "viewport_unknown_draw_sequences": viewport_unknown_draws,
+        "viewport_dimensions": viewport_size_counts,
+        "viewport_rt0_extent_differences": viewport_rt0_extent_differences,
         "requested_internal_size": {"width": width, "height": height},
         "lowres_capture_status": (
             "matching_rt_depth_pairs_observed" if target_pairs and not mismatches
@@ -71,7 +106,7 @@ def audit(path: Path, width: int = 320, height: int = 240,
         "fixed_function_candidates": ff_candidates[:max(0, draw_limit)],
         "fixed_function_candidate_count": len(ff_candidates),
         "limitations": [
-            "The current ASI does not capture SetViewport; viewport compatibility is unknown.",
+            "Viewport dimensions are recorded per draw; a viewport/RT0 size difference may be intentional cropping and is not automatically an error.",
             "This audit does not prove a selected RT is the main scene target.",
             "A Present-time upscale may include UI and post-processing.",
             "FVF presence does not prove vertex data or material semantics are suitable.",
@@ -86,7 +121,7 @@ def self_test() -> None:
     # by validating the report schema through a temporary synthetic log.
     import tempfile
     from pathlib import Path
-    synthetic = """DRAW_CALL seq=1 frame=1 kind=DrawIndexedPrimitive device=0x1 primitive=4 primitives=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=4 start_index=0 bound_vs=0x0 bound_ps=0x0 vertex_decl=0x0 fvf=0x112 render_targets=0:0x10:320:240:21:3:1:0:0:0 depth_target=0x20:320:240:75:2:0:0:0:0 sampler_hash=0 sampler_count=0 render_state_hash=0 render_state_count=0 texture_stage_hash=0 texture_stage_count=0 hr=0x00000000
+    synthetic = """DRAW_CALL seq=1 frame=1 kind=DrawIndexedPrimitive device=0x1 primitive=4 primitives=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=4 start_index=0 bound_vs=0x0 bound_ps=0x0 vertex_decl=0x0 fvf=0x112 render_targets=0:0x10:320:240:21:3:1:0:0:0 depth_target=0x20:320:240:75:2:0:0:0:0 viewport=0:0:320:240:00000000:3F800000 sampler_hash=0 sampler_count=0 render_state_hash=0 render_state_count=0 texture_stage_hash=0 texture_stage_count=0 hr=0x00000000
 """
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "synthetic.log"
@@ -95,6 +130,10 @@ def self_test() -> None:
     assert result["draw_calls_observed"] == 1
     assert result["fixed_function_candidate_count"] == 1
     assert result["lowres_capture_status"] == "matching_rt_depth_pairs_observed"
+    assert result["viewport_capture_status"] == "complete"
+    assert result["viewport_draws_observed"] == 1
+    assert result["viewport_dimensions"] == {"320x240": 1}
+    assert result["fixed_function_candidates"][0]["viewport"]["width"] == 320
     assert result["fixed_function_candidates"][0]["eligibility"] == "candidate_only_not_replay_approved"
     print("GMA edition render-path audit self-test passed")
 
