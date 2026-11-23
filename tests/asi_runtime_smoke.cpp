@@ -1475,7 +1475,14 @@ int main()
         !HasText("texture_stage_forwarded=3 texture_stage_skipped=2") ||
         !HasText("sampler_forwarded=3 sampler_skipped=2"))
         return Fail("State-cache counters did not report the expected forwarded and skipped setter calls");
+    if (!HasText("BINDING_CACHE_ENABLED") ||
+        !HasText("D3D9_BINDING_CACHE_WINDOW") ||
+        !HasText("texture_forwarded=3 texture_skipped=3") ||
+        !HasText("stream_forwarded=3 stream_skipped=3") ||
+        !HasText("index_forwarded=3 index_skipped=3"))
+        return Fail("Binding-cache counters did not report expected texture/stream/index suppression");
     if (!HasText("STATE_CACHE_DISABLED reason=state_block_api_used") ||
+        !HasText("BINDING_CACHE_DISABLED reason=state_block_api_used") ||
         !HasText("STATE_BLOCK_BEGIN_FORWARD") ||
         !HasText("STATE_BLOCK_BEGIN_RETURN") ||
         !HasText("STATE_BLOCK_CREATE_RETURN") ||
