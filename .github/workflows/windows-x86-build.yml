@@ -49,18 +49,33 @@ jobs:
         with:
           arch: x86
 
-      - name: Install legacy DirectX SDK containing FXC
+      - name: Locate Windows SDK FXC
         shell: pwsh
         run: |
-          choco install directx-sdk --version=9.29.1962.02 --yes --no-progress --ignore-dependencies
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Locate FXC
-        shell: pwsh
-        run: |
-          $fxc = Join-Path "${env:ProgramFiles(x86)}" "Microsoft DirectX SDK (June 2010)\Utilities\bin\x86\fxc.exe"
-          if (-not (Test-Path $fxc)) { throw "FXC not found at expected DirectX SDK location: $fxc" }
-          Write-Host "Using FXC: $fxc"
+          $candidates = @()
+          if ($env:WindowsSdkVerBinPath) {
+            $candidates += Join-Path $env:WindowsSdkVerBinPath "x86\fxc.exe"
+          }
+          if ($env:WindowsSdkDir -and $env:WindowsSDKVersion) {
+            $candidates += Join-Path $env:WindowsSdkDir ("bin\" + $env:WindowsSDKVersion + "x86\fxc.exe")
+          }
+          if ($env:ProgramFiles -or ${env:ProgramFiles(x86)}) {
+            $kitsRoot = Join-Path "${env:ProgramFiles(x86)}" "Windows Kits\10\bin"
+            if (Test-Path $kitsRoot) {
+              $candidates += Get-ChildItem $kitsRoot -Directory |
+                Sort-Object Name -Descending |
+                ForEach-Object { Join-Path $_.FullName "x86\fxc.exe" }
+            }
+          }
+          $fxc = $candidates |
+            Where-Object { $_ -and (Test-Path $_) } |
+            Select-Object -First 1
+          if (-not $fxc) {
+            throw "Windows SDK FXC was not found. Install the Windows 10/11 SDK component in the hosted runner image."
+          }
+          $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($fxc).FileVersion
+          Write-Host "Using Windows SDK FXC: $fxc"
+          Write-Host "FXC file version: $version"
           Split-Path $fxc -Parent | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Run source sanity checks
