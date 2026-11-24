@@ -101,6 +101,16 @@ Nulling shaders on an arbitrary live draw is not a fixed-function conversion. Th
 
 The optional QPC frame profiler records Present-return intervals and CPU wall time inside Present and the four D3D9 draw methods. It reports frame-time distributions and call counts, but explicitly emits `gpu_time=not_measured`. API wall time can include driver waits; unattributed interval time is not a direct measurement of world simulation.
 
+Use `tools/analyze_gma_performance.py` to compare captured profiler windows and the three cache-counter families:
+
+```bat
+py -3 tools\analyze_gma_performance.py candidate.log --baseline baseline.log --json comparison.json
+```
+
+The analyzer calculates effective FPS from the weighted average Present-return interval, summarizes the median/range of per-window P50/P95/P99 values (it does not incorrectly combine window percentiles), and reports cache forwarded/skipped counts. It flags low sample counts, different frame coverage and materially different draw-call counts. It deliberately labels a favorable result as descriptive rather than causal. Compare at least 240 frames, use the same save/route/settings, and run A/B/A repetitions. Enable only one cache per candidate run. Keep shader and draw capture disabled; use the same profiler setting for every run.
+
+The FPS derived from average frame time is `1000 / avg_frame_ms`; it is not a direct GPU throughput measurement. The plugin does not expose GPU timestamps, so the tool cannot tell whether the GPU or CPU is the bottleneck.
+
 Use the same executable, save, route, camera, weather, time and game settings. Warm up first and repeat each configuration. Compare median and P95 frame time as well as average FPS, crashes, visual differences, streaming stalls and memory use. Run each cache independently before combining them. Keep telemetry mostly OFF during the actual timing runs.
 
 ## Current acceptance status
@@ -127,7 +137,7 @@ Use the same executable, save, route, camera, weather, time and game settings. W
 
 - Latest integrated Windows x86 workflow: [run #45171101101](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45171101101), code commit `e39f7f6636b5b526076838471b895a74fed017f6`; both `vertex-audit` and Windows `build` jobs passed. The Ubuntu job ran regression cases for failed draws, null surface pointers and invalid descriptors alongside RT/depth/MSAA checks; the Windows job built the x86 ASI and passed the synthetic D3D9 runtime smoke test. Later branch commits are documentation-only.
 - Earlier integrated Windows x86 workflow baseline: [run #45101202585](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45101202585), on code commit `9765a43665565e4c48c2c69f79603c62072a33a6`; both `build` and `vertex-audit` jobs passed.
-- The passing workflow validates the tested x86 build, synthetic D3D9 hook/runtime tests, source checks and offline audit self-tests. It does not run GTA IV or the physical GMA 3100.
+- The passing workflow validates the tested x86 build, synthetic D3D9 hook/runtime tests, source checks and offline audit self-tests. It does not run GTA IV or the physical GMA 3100. The performance analyzer self-test verifies parsing and comparison math only; it does not contain physical-hardware timing data.
 - Follow-up CI run [#45145510926](https://github.com/mayank233233/iv-legacy-shader-engine/actions/runs/45145510926), triggered by the example INI template update (`e3d44902de286f72dc32077fe5f9ae8ecfffa43e`), has now passed both `vertex-audit` and Windows `build`. This verifies the updated template against the full automated workflow; it remains synthetic CI, not a GTA IV/GMA 3100 gameplay test.
 - No real GTA IV 1.0.0.0 gameplay capture, image-equivalence test, physical driver validation, in-game frame-time benchmark or genuine 30 FPS result has been established.
 - The long-term target remains 30 genuinely rendered FPS, not a promise or result.
