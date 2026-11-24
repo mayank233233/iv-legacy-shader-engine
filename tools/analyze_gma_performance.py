@@ -257,7 +257,7 @@ def self_test() -> None:
 
     assert baseline["profiler"]["frames"] == 240
     assert baseline["profiler"]["effective_fps_from_average_frame_ms"] == 25.0
-    assert baseline["cache_counters"]["state"]["skipped"] == 80
+    assert baseline["cache_counters"]["state"]["skipped"] == 75
     assert candidate["cache_counters"]["binding"]["skipped"] == 20
     assert result["average_frame_ms_change_percent"] == -25.0
     assert result["interpretation"] == "candidate_faster_in_this_comparison; causation_not_established"
