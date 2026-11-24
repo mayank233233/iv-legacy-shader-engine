@@ -21,6 +21,16 @@ CACHE_PREFIXES = {
     "binding": "D3D9_BINDING_CACHE_WINDOW",
     "shader_constant": "D3D9_SHADER_CONSTANT_CACHE_WINDOW",
 }
+CACHE_ENABLE_MARKERS = {
+    "state": "REDUNDANT_STATE_CACHE_ENABLED",
+    "binding": "BINDING_CACHE_ENABLED",
+    "shader_constant": "SHADER_CONSTANT_CACHE_ENABLED",
+}
+CACHE_DISABLE_MARKERS = {
+    "state": "STATE_CACHE_DISABLED",
+    "binding": "BINDING_CACHE_DISABLED",
+    "shader_constant": "SHADER_CONSTANT_CACHE_DISABLED",
+}
 AVERAGE_FIELDS = (
     "avg_frame_ms",
     "avg_present_ms",
@@ -57,8 +67,22 @@ def parse_log(path: Path) -> dict[str, Any]:
         for name in CACHE_PREFIXES
     }
     malformed_frames = 0
+    bootstrap_complete = False
+    enabled_markers = {name: False for name in CACHE_PREFIXES}
+    disable_reasons: dict[str, list[str]] = {name: [] for name in CACHE_PREFIXES}
 
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "BOOTSTRAP_COMPLETE" in line:
+            bootstrap_complete = True
+        for name, marker in CACHE_ENABLE_MARKERS.items():
+            if marker in line:
+                enabled_markers[name] = True
+        for name, marker in CACHE_DISABLE_MARKERS.items():
+            if marker in line:
+                reason = parse_fields(line).get("reason", "unspecified")
+                if reason not in disable_reasons[name]:
+                    disable_reasons[name].append(reason)
+
         if FRAME_PREFIX in line:
             fields = parse_fields(line)
             samples = as_float(fields, "samples")
@@ -146,18 +170,52 @@ def parse_log(path: Path) -> dict[str, Any]:
             "skip_rate_percent": round(100.0 * totals["skipped"] / observed, 2) if observed else None,
         }
 
+    cache_states: dict[str, Any] = {}
+    for name, totals in cache_totals.items():
+        configured_enabled = enabled_markers[name] if bootstrap_complete else (
+            True if enabled_markers[name] else None
+        )
+        runtime_enabled = (
+            bool(configured_enabled and not disable_reasons[name])
+            if bootstrap_complete else None
+        )
+        cache_states[name] = {
+            "configured_enabled": configured_enabled,
+            "runtime_enabled_through_log": runtime_enabled,
+            "disabled_reasons": disable_reasons[name],
+            "counter_windows": totals["windows"],
+            "counter_frames": totals["frames"],
+        }
+    cache_configuration = {
+        "known": bootstrap_complete,
+        "bootstrap_complete": bootstrap_complete,
+        "caches": cache_states,
+        "configured_enabled_caches": (
+            [name for name, state in cache_states.items() if state["configured_enabled"] is True]
+            if bootstrap_complete else None
+        ),
+        "runtime_enabled_caches": (
+            [name for name, state in cache_states.items()
+             if state["runtime_enabled_through_log"] is True]
+            if bootstrap_complete else None
+        ),
+    }
+
     warnings = [
         "Skipped D3D9 calls are not evidence of faster frame times.",
         "The profiler does not measure GPU time or prove visual correctness.",
         "Compare identical game version, save, route, camera, weather, time and graphics settings; repeat each run.",
         "Window percentiles are summarized as medians/ranges across windows, not merged into global percentiles.",
     ]
+    if not bootstrap_complete:
+        warnings.append("Cache configuration is unknown because BOOTSTRAP_COMPLETE was not recorded.")
     if not frame_windows:
         warnings.append("No valid frame-profiler windows were found.")
     return {
         "input_log": str(path),
         "profiler": profiler,
         "cache_counters": cache_report,
+        "cache_configuration": cache_configuration,
         "warnings": warnings,
     }
 
@@ -184,6 +242,38 @@ def compare_runs(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[st
         test.get("median_window_p95_frame_ms"),
     )
     warnings = []
+    base_config = baseline.get("cache_configuration", {})
+    test_config = candidate.get("cache_configuration", {})
+    if not base_config.get("known") or not test_config.get("known"):
+        warnings.append("Cache configuration is unverified in at least one run; BOOTSTRAP_COMPLETE is required.")
+    else:
+        base_requested = base_config.get("configured_enabled_caches") or []
+        test_requested = test_config.get("configured_enabled_caches") or []
+        if base_requested:
+            warnings.append(
+                "Baseline is not a clean cache-off run; configured caches: "
+                + ", ".join(base_requested) + "."
+            )
+        if len(test_requested) == 0:
+            warnings.append("Candidate has no cache configured ON; it is not a cache-on test.")
+        elif len(test_requested) > 1:
+            warnings.append(
+                "Candidate enables multiple caches (" + ", ".join(test_requested)
+                + "); this cannot isolate one cache's effect."
+            )
+        else:
+            selected_cache = test_requested[0]
+            selected_state = (test_config.get("caches") or {}).get(selected_cache, {})
+            if selected_state.get("runtime_enabled_through_log") is not True:
+                reasons = selected_state.get("disabled_reasons") or []
+                detail = ", ".join(reasons) if reasons else "runtime state not confirmed"
+                warnings.append(
+                    f"Candidate cache '{selected_cache}' did not remain enabled through the log: {detail}."
+                )
+            if int(selected_state.get("counter_windows") or 0) == 0:
+                warnings.append(
+                    f"Candidate cache '{selected_cache}' emitted no cache-counter windows during measurement."
+                )
     if not base_frames or not test_frames:
         warnings.append("At least one run has no valid frame-profiler samples.")
     if coverage_delta > 10.0:
@@ -239,28 +329,77 @@ def self_test() -> None:
         root = Path(directory)
         baseline_path = root / "baseline.log"
         candidate_path = root / "candidate.log"
+        state_path = root / "state-cache.log"
+        unknown_path = root / "unknown-config.log"
+        disabled_path = root / "disabled-cache.log"
+        mixed_path = root / "mixed-cache.log"
+
         baseline_path.write_text(
             row(40, 39, 48) * 2
-            + "D3D9_STATE_CACHE_WINDOW frames=120 render_forwarded=40 render_skipped=60 "
-            "texture_stage_forwarded=10 texture_stage_skipped=10 sampler_forwarded=5 sampler_skipped=5\n",
+            + "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=1\n",
             encoding="utf-8",
         )
         candidate_path.write_text(
-            row(30, 29, 36) * 2
+            "BINDING_CACHE_ENABLED groups=texture,vertex_stream default=off\n"
+            + "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=1\n"
+            + row(30, 29, 36) * 2
             + "D3D9_BINDING_CACHE_WINDOW frames=120 texture_forwarded=10 texture_skipped=10 "
             "stream_forwarded=10 stream_skipped=10\n",
             encoding="utf-8",
         )
+        state_path.write_text(
+            "REDUNDANT_STATE_CACHE_ENABLED groups=render_state,texture_stage,sampler default=off\n"
+            "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=1\n"
+            "D3D9_STATE_CACHE_WINDOW frames=120 render_forwarded=40 render_skipped=60 "
+            "texture_stage_forwarded=10 texture_stage_skipped=10 sampler_forwarded=5 sampler_skipped=5\n",
+            encoding="utf-8",
+        )
+        unknown_path.write_text(
+            "BINDING_CACHE_ENABLED groups=texture,vertex_stream default=off\n" + row(30, 29, 36),
+            encoding="utf-8",
+        )
+        disabled_path.write_text(
+            "REDUNDANT_STATE_CACHE_ENABLED groups=render_state,texture_stage,sampler default=off\n"
+            "STATE_CACHE_DISABLED reason=multiple_device_threads\n"
+            "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=1\n",
+            encoding="utf-8",
+        )
+        mixed_path.write_text(
+            "BINDING_CACHE_ENABLED groups=texture,vertex_stream default=off\n"
+            "SHADER_CONSTANT_CACHE_ENABLED groups=vs_float,ps_float default=off\n"
+            "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=1\n"
+            + row(30, 29, 36) * 2
+            + "D3D9_BINDING_CACHE_WINDOW frames=120 texture_forwarded=10 texture_skipped=10\n",
+            encoding="utf-8",
+        )
+
         baseline = parse_log(baseline_path)
         candidate = parse_log(candidate_path)
+        state = parse_log(state_path)
+        unknown = parse_log(unknown_path)
+        disabled = parse_log(disabled_path)
+        mixed = parse_log(mixed_path)
         result = compare_runs(baseline, candidate)
+        unknown_result = compare_runs(unknown, candidate)
+        mixed_result = compare_runs(baseline, mixed)
 
     assert baseline["profiler"]["frames"] == 240
     assert baseline["profiler"]["effective_fps_from_average_frame_ms"] == 25.0
-    assert baseline["cache_counters"]["state"]["skipped"] == 75
+    assert baseline["cache_configuration"]["known"] is True
+    assert baseline["cache_configuration"]["configured_enabled_caches"] == []
+    assert candidate["cache_configuration"]["runtime_enabled_caches"] == ["binding"]
+    assert candidate["cache_configuration"]["caches"]["binding"]["counter_windows"] == 1
+    assert state["cache_counters"]["state"]["skipped"] == 75
     assert candidate["cache_counters"]["binding"]["skipped"] == 20
     assert result["average_frame_ms_change_percent"] == -25.0
     assert result["interpretation"] == "candidate_faster_in_this_comparison; causation_not_established"
+    assert unknown["cache_configuration"]["known"] is False
+    assert "Cache configuration is unknown" in " ".join(unknown["warnings"])
+    assert disabled["cache_configuration"]["caches"]["state"]["runtime_enabled_through_log"] is False
+    assert disabled["cache_configuration"]["caches"]["state"]["disabled_reasons"] == ["multiple_device_threads"]
+    assert mixed_result["interpretation"] == "inconclusive_comparison"
+    assert any("multiple caches" in warning for warning in mixed_result["warnings"])
+    assert unknown_result["interpretation"] == "inconclusive_comparison"
     print("GMA performance analyzer self-test passed")
 
 
