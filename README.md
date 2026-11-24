@@ -30,6 +30,7 @@ Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86
 | `tools/analyze_binding_cache_benchmark.py` | Counts texture/stream/index/shader/vertex-format/viewport binding calls forwarded or skipped |
 | `tools/analyze_shader_constant_cache.py` | Counts VS/PS float/integer/boolean register-range calls forwarded or skipped |
 | `tools/analyze_gma_performance.py` | Summarizes QPC frame-time windows and cache suppression counters; compares baseline/candidate logs without treating skipped calls as FPS |
+| `tools/create_gma_benchmark_profiles.py` | Generates preserved-INI baseline and single-cache benchmark profiles with diagnostic capture disabled |
 | `IVLegacy.ini.example` | Template for the independent, default-off GMA Edition cache experiments and reserved renderer switches |
 | `docs/GMA_EDITION_PROTOTYPE.md` | Current GMA Edition implementation status, telemetry requirements and pending renderer work |
 | `docs/GMA_OPTIMIZATION_CATALOG.md` | Optimisation catalogue, state/cache scope, risks and benchmark protocol |
@@ -122,6 +123,14 @@ py -3 tools\analyze_gma_performance.py state-cache.log --baseline baseline.log -
 ```
 
 Repeat separately for the binding and shader-constant caches. Aim for at least 240 measured frames per run and repeat A/B/A runs. The report provides effective FPS derived from average frame time, median window P95 frame time, draw-call workload checks, and cache suppression counts. It does not measure GPU time, prove visual correctness, or establish that a cache caused a change. Do not run bytecode/draw capture during clean timing runs.
+
+Generate clean test profiles from your existing INI without changing the source file:
+
+```bat
+py -3 tools\create_gma_benchmark_profiles.py IVLegacy.ini --out-dir gma-benchmark-profiles
+```
+
+The output contains a baseline, one profile for each cache independently, and an all-caches profile for a later combined test. Each profile preserves other INI sections, enables the frame profiler, disables shader fallback and diagnostic capture, and sets the three cache switches explicitly. Back up your original INI and copy only one profile into place for each fresh run. Test the three individual caches before trying the combined profile.
 
 ## Real GTA IV capture preflight
 

@@ -25,7 +25,7 @@ jobs:
 
       - name: Validate paired shader compatibility audits
         run: |
-          python -m py_compile tools/analyze_asi_log.py tools/audit_gma_edition_render_path.py tools/analyze_binding_cache_benchmark.py tools/analyze_shader_constant_cache.py tools/audit_sm3_to_sm2.py tools/audit_vs3_to_vs2.py tools/audit_shader_pairs.py tools/lower_shader_pairs.py tools/audit_runtime_capability_gaps.py tools/validate_gma_capture.py tools/analyze_gma_performance.py
+          python -m py_compile tools/analyze_asi_log.py tools/audit_gma_edition_render_path.py tools/analyze_binding_cache_benchmark.py tools/analyze_shader_constant_cache.py tools/audit_sm3_to_sm2.py tools/audit_vs3_to_vs2.py tools/audit_shader_pairs.py tools/lower_shader_pairs.py tools/audit_runtime_capability_gaps.py tools/validate_gma_capture.py tools/analyze_gma_performance.py tools/create_gma_benchmark_profiles.py
           python tests/check_binding_cache_benchmark.py
           python tests/check_gma_edition_render_path.py
           python tests/check_shader_constant_cache.py
@@ -36,6 +36,7 @@ jobs:
           python tools/audit_runtime_capability_gaps.py --self-test
           python tools/validate_gma_capture.py --self-test
           python tools/analyze_gma_performance.py --self-test
+          python tools/create_gma_benchmark_profiles.py --self-test
 
   build:
     runs-on: windows-2022
@@ -90,6 +91,7 @@ jobs:
           python tools\validate_gma_capture.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools\analyze_gma_performance.py --self-test
+          python tools\create_gma_benchmark_profiles.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools\inspect_gtaiv_executable.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

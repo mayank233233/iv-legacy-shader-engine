@@ -107,6 +107,14 @@ Use `tools/analyze_gma_performance.py` to compare captured profiler windows and 
 py -3 tools\analyze_gma_performance.py candidate.log --baseline baseline.log --json comparison.json
 ```
 
+Generate repeatable configuration files from the INI already used by the game:
+
+```bat
+py -3 tools\create_gma_benchmark_profiles.py IVLegacy.ini --out-dir gma-benchmark-profiles
+```
+
+This creates five copies: baseline (all caches off), state-cache only, binding-cache only, shader-constant-cache only, and all-caches. It preserves unrelated sections/settings, forces the frame profiler on, and forces draw/shader capture and shader fallback off. It does not modify the input INI or launch the game. Back up the original file, install one generated profile for each fresh run, and test individual caches before the combined profile.
+
 The analyzer calculates effective FPS from the weighted average Present-return interval, summarizes the median/range of per-window P50/P95/P99 values (it does not incorrectly combine window percentiles), and reports cache forwarded/skipped counts. It flags low sample counts, different frame coverage and materially different draw-call counts. It deliberately labels a favorable result as descriptive rather than causal. Compare at least 240 frames, use the same save/route/settings, and run A/B/A repetitions. Enable only one cache per candidate run. Keep shader and draw capture disabled; use the same profiler setting for every run.
 
 The FPS derived from average frame time is `1000 / avg_frame_ms`; it is not a direct GPU throughput measurement. The plugin does not expose GPU timestamps, so the tool cannot tell whether the GPU or CPU is the bottleneck.
