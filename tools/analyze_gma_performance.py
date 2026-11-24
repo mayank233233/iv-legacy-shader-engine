@@ -254,6 +254,15 @@ def compare_runs(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[st
                 "Baseline is not a clean cache-off run; configured caches: "
                 + ", ".join(base_requested) + "."
             )
+        base_counter_windows = [
+            name for name, counters in (baseline.get("cache_counters") or {}).items()
+            if int(counters.get("windows") or 0) > 0
+        ]
+        if base_counter_windows:
+            warnings.append(
+                "Baseline emitted cache-counter windows despite the cache-off configuration: "
+                + ", ".join(base_counter_windows) + "."
+            )
         if len(test_requested) == 0:
             warnings.append("Candidate has no cache configured ON; it is not a cache-on test.")
         elif len(test_requested) > 1:
@@ -270,9 +279,23 @@ def compare_runs(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[st
                 warnings.append(
                     f"Candidate cache '{selected_cache}' did not remain enabled through the log: {detail}."
                 )
+            selected_counters = (candidate.get("cache_counters") or {}).get(selected_cache, {})
             if int(selected_state.get("counter_windows") or 0) == 0:
                 warnings.append(
                     f"Candidate cache '{selected_cache}' emitted no cache-counter windows during measurement."
+                )
+            if int(selected_counters.get("observed_calls") or 0) == 0:
+                warnings.append(
+                    f"Candidate cache '{selected_cache}' emitted windows but no forwarded/skipped cache calls were observed."
+                )
+            other_counter_windows = [
+                name for name, counters in (candidate.get("cache_counters") or {}).items()
+                if name != selected_cache and int(counters.get("windows") or 0) > 0
+            ]
+            if other_counter_windows:
+                warnings.append(
+                    "Candidate emitted cache-counter windows for caches not listed as its only enabled cache: "
+                    + ", ".join(other_counter_windows) + "."
                 )
     if not base_frames or not test_frames:
         warnings.append("At least one run has no valid frame-profiler samples.")
@@ -333,6 +356,7 @@ def self_test() -> None:
         unknown_path = root / "unknown-config.log"
         disabled_path = root / "disabled-cache.log"
         mixed_path = root / "mixed-cache.log"
+        no_activity_path = root / "no-cache-activity.log"
 
         baseline_path.write_text(
             row(40, 39, 48) * 2
@@ -373,15 +397,25 @@ def self_test() -> None:
             encoding="utf-8",
         )
 
+        no_activity_path.write_text(
+            "BINDING_CACHE_ENABLED groups=texture,vertex_stream default=off\n"
+            "BOOTSTRAP_COMPLETE target=GTAIV_1.0.0.0 telemetry=1\n"
+            + row(30, 29, 36) * 2
+            + "D3D9_BINDING_CACHE_WINDOW frames=120\n",
+            encoding="utf-8",
+        )
+
         baseline = parse_log(baseline_path)
         candidate = parse_log(candidate_path)
         state = parse_log(state_path)
         unknown = parse_log(unknown_path)
         disabled = parse_log(disabled_path)
         mixed = parse_log(mixed_path)
+        no_activity = parse_log(no_activity_path)
         result = compare_runs(baseline, candidate)
         unknown_result = compare_runs(unknown, candidate)
         mixed_result = compare_runs(baseline, mixed)
+        no_activity_result = compare_runs(baseline, no_activity)
 
     assert baseline["profiler"]["frames"] == 240
     assert baseline["profiler"]["effective_fps_from_average_frame_ms"] == 25.0
@@ -399,6 +433,8 @@ def self_test() -> None:
     assert disabled["cache_configuration"]["caches"]["state"]["disabled_reasons"] == ["multiple_device_threads"]
     assert mixed_result["interpretation"] == "inconclusive_comparison"
     assert any("multiple caches" in warning for warning in mixed_result["warnings"])
+    assert no_activity_result["interpretation"] == "inconclusive_comparison"
+    assert any("no forwarded/skipped cache calls" in warning for warning in no_activity_result["warnings"])
     assert unknown_result["interpretation"] == "inconclusive_comparison"
     print("GMA performance analyzer self-test passed")
 
