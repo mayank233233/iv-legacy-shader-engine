@@ -14,7 +14,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-KV_RE = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=([^\\s]+)")
+KV_RE = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=([^ ]+)")
 FRAME_PREFIX = "FRAME_PROFILE_WINDOW"
 CACHE_PREFIXES = {
     "state": "D3D9_STATE_CACHE_WINDOW",
