@@ -29,6 +29,7 @@ Prototype 0.5.8-alpha combines the standalone D3D9 probe, experimental Win32/x86
 | `tools/analyze_state_cache_benchmark.py` | Counts scalar render/texture-stage/sampler state calls forwarded or skipped |
 | `tools/analyze_binding_cache_benchmark.py` | Counts texture/stream/index/shader/vertex-format/viewport binding calls forwarded or skipped |
 | `tools/analyze_shader_constant_cache.py` | Counts VS/PS float/integer/boolean register-range calls forwarded or skipped |
+| `tools/analyze_gma_performance.py` | Summarizes QPC frame-time windows and cache suppression counters; compares baseline/candidate logs without treating skipped calls as FPS |
 | `IVLegacy.ini.example` | Template for the independent, default-off GMA Edition cache experiments and reserved renderer switches |
 | `docs/GMA_EDITION_PROTOTYPE.md` | Current GMA Edition implementation status, telemetry requirements and pending renderer work |
 | `docs/GMA_OPTIMIZATION_CATALOG.md` | Optimisation catalogue, state/cache scope, risks and benchmark protocol |
@@ -97,6 +98,30 @@ See [GMA Edition prototype status](docs/GMA_EDITION_PROTOTYPE.md), [optimization
 - Windows x86 CI run #172 checks both buffer descriptors are present and correctly associated with the first draw. It also retains the declaration/FVF, stream, material-state and shader/constant correlation checks.
 
 These descriptors are synthetic test allocations. They do not describe GTA IV's actual vertex/index buffers.
+
+## Frame-time and cache comparison
+
+The optional profiler reports successful-Present frame intervals, CPU wall time inside Present and the four draw methods, and frame-time percentiles. It explicitly reports `gpu_time=not_measured`. Use it to test one cache at a time; cache skip rates alone are not proof of a speedup.
+
+For a baseline run, set:
+
+```ini
+[General]
+EnableFrameProfiler=1
+FrameProfilerWindowFrames=120
+EnableRedundantStateCache=0
+EnableBindingCache=0
+EnableShaderConstantCache=0
+CaptureDrawTelemetry=0
+```
+
+Copy the resulting `IVLegacy.log` to `baseline.log`. Repeat the same save, camera, route, weather, time and graphics settings with exactly one cache enabled, then copy that log (for example, `state-cache.log`). Compare:
+
+```bat
+py -3 tools\analyze_gma_performance.py state-cache.log --baseline baseline.log --json state-cache-comparison.json
+```
+
+Repeat separately for the binding and shader-constant caches. Aim for at least 240 measured frames per run and repeat A/B/A runs. The report provides effective FPS derived from average frame time, median window P95 frame time, draw-call workload checks, and cache suppression counts. It does not measure GPU time, prove visual correctness, or establish that a cache caused a change. Do not run bytecode/draw capture during clean timing runs.
 
 ## Real GTA IV capture preflight
 
