@@ -105,7 +105,12 @@ def validate_capture(
         ps = draw.get("pixel_shader") or {}
         vs_hash = str(vs.get("hash") or "").upper()
         ps_hash = str(ps.get("hash") or "").upper()
-        if not vs_hash or not ps_hash or vs_hash not in capture_index or ps_hash not in capture_index:
+        # Resolve each hash against the expected shader stage and profile.
+        # Hash membership alone is insufficient: it does not prove a VS draw
+        # reference points to vertex bytecode or a PS reference to pixel bytecode.
+        vs_capture = audit_shader_pairs.select_capture(vs, "VS", capture_index)
+        ps_capture = audit_shader_pairs.select_capture(ps, "PS", capture_index)
+        if not vs_hash or not ps_hash or vs_capture is None or ps_capture is None:
             unresolved_pair_draws += 1
             continue
         captured_pair_draws += 1
@@ -267,7 +272,9 @@ def validate_capture(
 def _self_test() -> None:
     import tempfile
 
-    def make_session(root: Path, *, synthetic: bool) -> tuple[Path, Path]:
+    def make_session(
+        root: Path, *, synthetic: bool, swap_shader_stages: bool = False
+    ) -> tuple[Path, Path]:
         capture_dir = root / "IVLegacyCaptures"
         capture_dir.mkdir(parents=True)
         vs_data = (0xFFFE0300).to_bytes(4, "little") + (0x0000FFFF).to_bytes(4, "little")
@@ -278,6 +285,24 @@ def _self_test() -> None:
         (capture_dir / f"PS_3_0_{ps_hash}.bin").write_bytes(ps_data)
         description = "Synthetic GMA 3100 test adapter" if synthetic else "Intel GMA 3100"
         driver = "IVLegacy synthetic test driver" if synthetic else "Intel legacy display driver"
+        if swap_shader_stages:
+            vs_record = (
+                f"SHADER_OBJECT_CREATED stage=VS object=0x100 profile=PS_3_0 "
+                f"bytes=8 hash={ps_hash} hr=0x00000000"
+            )
+            ps_record = (
+                f"SHADER_OBJECT_CREATED stage=PS object=0x200 profile=VS_3_0 "
+                f"bytes=8 hash={vs_hash} hr=0x00000000"
+            )
+        else:
+            vs_record = (
+                f"SHADER_OBJECT_CREATED stage=VS object=0x100 profile=VS_3_0 "
+                f"bytes=8 hash={vs_hash} hr=0x00000000"
+            )
+            ps_record = (
+                f"SHADER_OBJECT_CREATED stage=PS object=0x200 profile=PS_3_0 "
+                f"bytes=8 hash={ps_hash} hr=0x00000000"
+            )
         log_path = root / "IVLegacy.log"
         lines = [
             "IV LEGACY SHADER ENGINE instrumentation build starting",
@@ -294,8 +319,8 @@ def _self_test() -> None:
             "D3D9_DEVICE_HOOK_INSTALLED device=00310000 vtable=00320000 restore_protection=1",
             "SHADER_CAPTURE_ENABLED directory=IVLegacyCaptures max_files=4096",
             "DRAW_TELEMETRY_ENABLED max_calls=16384",
-            f"SHADER_OBJECT_CREATED stage=VS object=0x100 profile=VS_3_0 bytes=8 hash={vs_hash} hr=0x00000000",
-            f"SHADER_OBJECT_CREATED stage=PS object=0x200 profile=PS_3_0 bytes=8 hash={ps_hash} hr=0x00000000",
+            vs_record,
+            ps_record,
             "DRAW_CALL seq=1 frame=1 kind=DrawIndexedPrimitive device=00310000 primitive=4 primitives=2 start_vertex=0 base_vertex=0 min_vertex=0 num_vertices=3 start_index=0 bound_vs=0x100 bound_ps=0x200 vertex_decl=00000000 fvf=0x00000102 index_buffer=00000000 streams= textures=0:00000000 render_targets=0:0x333333:640:480:21:3:1:0:0:0 depth_target=0x444444:640:480:75:2:0:0:0:0 viewport=0:0:640:480:00000000:3F800000 sampler_hash=0000000000000000 sampler_count=0 render_state_hash=0000000000000000 render_state_count=0 texture_stage_hash=0000000000000000 texture_stage_count=0 hr=0x00000000",
         ]
         log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -319,7 +344,21 @@ def _self_test() -> None:
         assert report["shader_captures"]["ps3_files"] == 1
         assert report["runtime_map_approval"] == "not_performed"
 
-    print("PASS: GMA capture target, hook, draw and shader-pair preflight self-tests")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        log_path, capture_dir = make_session(
+            root, synthetic=False, swap_shader_stages=True
+        )
+        report = validate_capture(log_path, capture_dir)
+        assert report["status"] == "incomplete_capture"
+        assert not report["ready_for_pair_review"]
+        assert report["draws"]["successful_draws_with_resolved_vs_ps_captures"] == 0
+        assert any(
+            "No successful draw resolved to both captured VS and PS bytecode" in blocker
+            for blocker in report["blockers"]
+        )
+
+    print("PASS: GMA capture identity, hook, draw, stage-matching and shader-pair preflight self-tests")
 
 
 def main() -> int:
